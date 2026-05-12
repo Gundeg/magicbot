@@ -717,6 +717,24 @@ def index():
         return redirect(url_for('dashboard'))
     return redirect(url_for('login'))
 
+
+@app.route('/privacy')
+def privacy():
+    """Public-facing Mongolian privacy policy. Required by Facebook App Review.
+
+    Submit https://<your-render-url>/privacy as the Privacy Policy URL in the
+    Facebook Developer Console -> App Settings -> Basic.
+    """
+    contact_email = os.environ.get('PRIVACY_CONTACT_EMAIL') \
+        or os.environ.get('ADMIN_EMAIL') \
+        or 'info@magicfinance.mn'
+    return render_template(
+        'privacy.html',
+        contact_email=contact_email,
+        last_updated=datetime.utcnow().strftime('%Y-%m-%d'),
+        year=datetime.utcnow().year,
+    )
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
