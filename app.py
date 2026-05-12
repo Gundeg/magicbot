@@ -88,12 +88,31 @@ if not FACEBOOK_ACCESS_TOKEN:
 FACEBOOK_APP_SECRET = os.environ.get('FACEBOOK_APP_SECRET', '')
 GOOGLE_FORM_URL = os.environ.get('GOOGLE_FORM_URL', '')
 
-# Load training content
+# Training content: env override wins so a single codebase can serve multiple
+# businesses without forking pasted_content.txt. Fallback chain:
+#   1. TRAINING_CONTENT env var (paste a multi-line blob into Render Environment)
+#   2. ./pasted_content.txt next to the script
+#   3. A tiny default string so the prompt never breaks if both are missing.
 TRAINING_PATH = Path(__file__).parent / 'pasted_content.txt'
-try:
-    TRAINING_CONTENT = TRAINING_PATH.read_text(encoding='utf-8')
-except FileNotFoundError:
-    TRAINING_CONTENT = "Манай сургалтын төв нь 2007 оноос хойш үйл ажиллагаа явуулж байгаа."
+_env_training = os.environ.get('TRAINING_CONTENT', '').strip()
+if _env_training:
+    TRAINING_CONTENT = _env_training
+else:
+    try:
+        TRAINING_CONTENT = TRAINING_PATH.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        TRAINING_CONTENT = "Манай сургалтын төв нь 2007 оноос хойш үйл ажиллагаа явуулж байгаа."
+
+# Bot persona: the opening "you are..." line of the system prompt. Override
+# per-deployment so the bot can represent a different business without code
+# changes. Defaults to the Magic Financial Group persona.
+_DEFAULT_PERSONA = (
+    "Та Мэжик Санхүүгийн Группын Facebook чат туслах. Сэтгэл судлалын "
+    "ойлголттой, маркетингийн ур чадвартай, нягтлан бодох сургалтын зөвлөх. "
+    "Үргэлж монгол хэлээр, амьд хүн шиг ойлгомжтой, дотночоор хариулна. "
+    "Англи үг бичихгүй (тусгай нэр, программын нэрийг эс тооцох)."
+)
+BOT_PERSONA = os.environ.get('BOT_PERSONA', '').strip() or _DEFAULT_PERSONA
 
 # ===================== DATABASE MODELS =====================
 
@@ -501,7 +520,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
     session_rule = SESSION_RULES.get(session_state, SESSION_RULES['new'])
     funnel_rule = FUNNEL_RULES.get(funnel_stage, FUNNEL_RULES['curious'])
 
-    system_prompt = f"""Та Мэжик Санхүүгийн Группын Facebook чат туслах. Сэтгэл судлалын ойлголттой, маркетингийн ур чадвартай, нягтлан бодох сургалтын зөвлөх. Үргэлж монгол хэлээр, амьд хүн шиг ойлгомжтой, дотночоор хариулна. Англи үг бичихгүй (тусгай нэр, программын нэрийг эс тооцох).
+    system_prompt = f"""{BOT_PERSONA}
 
 СУРГАЛТЫН ТӨВИЙН МЭДЭЭЛЭЛ:
 {TRAINING_CONTENT}
@@ -1029,7 +1048,14 @@ def seed_courses_and_faqs():
 
     Idempotent: only inserts when the table is empty, so subsequent boots
     won't duplicate or overwrite admin edits.
+
+    Skipped entirely when SEED_DEFAULTS=false — set this on any non-MagicBot
+    deployment so it doesn't inherit Magic Financial Group's catalog.
     """
+    if os.environ.get('SEED_DEFAULTS', 'true').strip().lower() != 'true':
+        print("SEED_DEFAULTS=false — skipping default course/FAQ seed.")
+        return
+
     default_start = datetime.utcnow() + timedelta(days=14)
 
     if Course.query.count() == 0:
