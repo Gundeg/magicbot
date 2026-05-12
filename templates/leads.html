@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}Leads - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Leads Management{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-people"></i> Leads List
+    </div>
+    <div class="card-body">
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <input type="text" class="form-control" id="searchInput" placeholder="Search by name or phone...">
+            </div>
+            <div class="col-md-4">
+                <select class="form-control" id="statusFilter">
+                    <option value="">All Status</option>
+                    <option value="new">New</option>
+                    <option value="contacted">Contacted</option>
+                    <option value="converted">Converted</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <button class="btn btn-primary w-100" id="exportBtn">
+                    <i class="bi bi-download"></i> Export to CSV
+                </button>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Phone</th>
+                        <th>Status</th>
+                        <th>Date Added</th>
+                        <th>Messages</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="leadsList">
+                    {% for lead in leads %}
+                    <tr data-lead-id="{{ lead.id }}">
+                        <td>{{ lead.name or 'Unknown' }}</td>
+                        <td>
+                            {% if lead.phone %}
+                                <a href="tel:{{ lead.phone }}">{{ lead.phone }}</a>
+                            {% else %}
+                                <span class="text-muted">Not provided</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if lead.lead_status == 'new' %}
+                                <span class="badge bg-info">New</span>
+                            {% elif lead.lead_status == 'contacted' %}
+                                <span class="badge bg-warning">Contacted</span>
+                            {% elif lead.lead_status == 'converted' %}
+                                <span class="badge bg-success">Converted</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ lead.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>
+                            <span class="badge bg-secondary">{{ lead.messages|length }}</span>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-info view-lead" data-id="{{ lead.id }}">
+                                <i class="bi bi-eye"></i> View
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted">No leads yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Lead Details Modal -->
+<div class="modal fade" id="leadModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Lead Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Name:</strong>
+                        <p id="leadName"></p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Phone:</strong>
+                        <p id="leadPhone"></p>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Status:</strong>
+                        <p id="leadStatus"></p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Date Added:</strong>
+                        <p id="leadDate"></p>
+                    </div>
+                </div>
+                <hr>
+                <h6>Conversation History</h6>
+                <div id="conversationHistory" style="max-height: 400px; overflow-y: auto;">
+                    <p class="text-muted">Loading...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.querySelectorAll('.view-lead').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const leadId = this.dataset.id;
+        const row = document.querySelector(`tr[data-lead-id="${leadId}"]`);
+        const cells = row.querySelectorAll('td');
+        
+        document.getElementById('leadName').textContent = cells[0].textContent;
+        document.getElementById('leadPhone').textContent = cells[1].textContent;
+        document.getElementById('leadStatus').textContent = cells[2].textContent;
+        document.getElementById('leadDate').textContent = cells[3].textContent;
+        
+        // Load conversation history
+        document.getElementById('conversationHistory').innerHTML = '<p class="text-muted">No messages yet.</p>';
+        
+        new bootstrap.Modal(document.getElementById('leadModal')).show();
+    });
+});
+
+document.getElementById('exportBtn').addEventListener('click', function() {
+    const leads = Array.from(document.querySelectorAll('#leadsList tr')).map(row => {
+        const cells = row.querySelectorAll('td');
+        return {
+            name: cells[0].textContent,
+            phone: cells[1].textContent,
+            status: cells[2].textContent,
+            date: cells[3].textContent
+        };
+    });
+
+    let csv = 'Name,Phone,Status,Date\n';
+    leads.forEach(lead => {
+        csv += `"${lead.name}","${lead.phone}","${lead.status}","${lead.date}"\n`;
+    });
+
+    const blob = new Blob([csv], {type: 'text/csv'});
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'leads.csv';
+    a.click();
+});
+
+// Search and filter
+document.getElementById('searchInput').addEventListener('keyup', function() {
+    const query = this.value.toLowerCase();
+    document.querySelectorAll('#leadsList tr').forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(query) ? '' : 'none';
+    });
+});
+
+document.getElementById('statusFilter').addEventListener('change', function() {
+    const status = this.value;
+    document.querySelectorAll('#leadsList tr').forEach(row => {
+        if (!status) {
+            row.style.display = '';
+        } else {
+            const statusCell = row.querySelector('td:nth-child(3)');
+            row.style.display = statusCell.textContent.toLowerCase().includes(status) ? '' : 'none';
+        }
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Magic Bot Admin{% endblock %}
+
+{% block page_title %}General Settings{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-gear"></i> Training Center Information
+            </div>
+            <div class="card-body">
+                <form id="settingsForm">
+                    <div class="mb-3">
+                        <label for="centerName" class="form-label">Training Center Name</label>
+                        <input type="text" class="form-control" id="centerName" value="{{ settings.get('center_name', 'Magic Finance Training Center') }}">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="centerDescription" class="form-label">Center Description</label>
+                        <textarea class="form-control" id="centerDescription" rows="4">{{ settings.get('center_description', '') }}</textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="centerPhone" class="form-label">Phone Number</label>
+                        <input type="tel" class="form-control" id="centerPhone" value="{{ settings.get('center_phone', '') }}">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="centerEmail" class="form-label">Email Address</label>
+                        <input type="email" class="form-control" id="centerEmail" value="{{ settings.get('center_email', '') }}">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="centerAddress" class="form-label">Office Address</label>
+                        <textarea class="form-control" id="centerAddress" rows="3">{{ settings.get('center_address', '') }}</textarea>
+                    </div>
+
+                    <hr>
+
+                    <h6>Bot Configuration</h6>
+
+                    <div class="mb-3">
+                        <label for="googleFormUrl" class="form-label">Google Form Registration Link</label>
+                        <input type="url" class="form-control" id="googleFormUrl" value="{{ settings.get('google_form_url', '') }}">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="handoffMessage" class="form-label">Handoff Message (when lead is contacted)</label>
+                        <textarea class="form-control" id="handoffMessage" rows="3">{{ settings.get('handoff_message', 'Одоо таныг бүртгэлийн ажилтантай холбож өгье. Түр хүлээнэ үү...') }}</textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="botWelcome" class="form-label">Bot Welcome Message</label>
+                        <textarea class="form-control" id="botWelcome" rows="3">{{ settings.get('bot_welcome', 'Сайн байна уу! Манай сургалтын төвд тавтай морилно уу. Та сургалтын талаар ямар нэгэн асуулт байвал надаас асуугаарай.') }}</textarea>
+                    </div>
+
+                    <hr>
+
+                    <h6>Auto-Comment Settings</h6>
+
+                    <div class="mb-3">
+                        <label for="trainingComment" class="form-label">Comment for Training Posts</label>
+                        <textarea class="form-control" id="trainingComment" rows="2">{{ settings.get('training_comment', 'Сургалтын мэдээллийг танд чатаар илгээсэн шүү, та чатаа шалгаарай') }}</textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="celebrationComment" class="form-label">Comment for Celebration Posts</label>
+                        <textarea class="form-control" id="celebrationComment" rows="2">{{ settings.get('celebration_comment', 'Баярлалаа! Энэ сайхан мэдээний төлөө баяр хүргэе!') }}</textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="defaultComment" class="form-label">Default Comment for Other Posts</label>
+                        <textarea class="form-control" id="defaultComment" rows="2">{{ settings.get('default_comment', 'Сонирхолтой мэдээлэл! Баярлалаа!') }}</textarea>
+                    </div>
+
+                    <hr>
+
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-primary" id="saveSettingsBtn">
+                            <i class="bi bi-check-circle"></i> Save Settings
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="location.reload()">
+                            <i class="bi bi-x-circle"></i> Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-info-circle"></i> System Information
+            </div>
+            <div class="card-body">
+                <p>
+                    <strong>Bot Status:</strong>
+                    <span class="badge bg-success">Running</span>
+                </p>
+                <p>
+                    <strong>Facebook Polling:</strong>
+                    <span class="badge bg-success">Active</span>
+                </p>
+                <p>
+                    <strong>Auto-commenting:</strong>
+                    <span class="badge bg-success">Enabled</span>
+                </p>
+                <p>
+                    <strong>Database:</strong>
+                    <span class="badge bg-success">Connected</span>
+                </p>
+                <hr>
+                <p class="text-muted small">
+                    <strong>Last Updated:</strong>
+                    <br>
+                    Just now
+                </p>
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header">
+                <i class="bi bi-question-circle"></i> Help
+            </div>
+            <div class="card-body small">
+                <p>
+                    <strong>Google Form Link:</strong>
+                    Use the registration form link from your Google Forms account.
+                </p>
+                <p>
+                    <strong>Handoff Message:</strong>
+                    This message is sent when a user provides their phone number.
+                </p>
+                <p>
+                    <strong>Auto-Comments:</strong>
+                    Configure the messages the bot posts on your Facebook Page.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('saveSettingsBtn').addEventListener('click', function() {
+    const data = {
+        center_name: document.getElementById('centerName').value,
+        center_description: document.getElementById('centerDescription').value,
+        center_phone: document.getElementById('centerPhone').value,
+        center_email: document.getElementById('centerEmail').value,
+        center_address: document.getElementById('centerAddress').value,
+        google_form_url: document.getElementById('googleFormUrl').value,
+        handoff_message: document.getElementById('handoffMessage').value,
+        bot_welcome: document.getElementById('botWelcome').value,
+        training_comment: document.getElementById('trainingComment').value,
+        celebration_comment: document.getElementById('celebrationComment').value,
+        default_comment: document.getElementById('defaultComment').value
+    };
+
+    fetch('{{ url_for("settings") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            alert('Settings saved successfully!');
+            location.reload();
+        }
+    })
+    .catch(err => {
+        alert('Error saving settings: ' + err);
+    });
+});
+</script>
+{% endblock %}

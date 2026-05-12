@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Message Logs - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Message Logs{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-chat-left-text"></i> Message History
+    </div>
+    <div class="card-body">
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <input type="text" class="form-control" id="searchInput" placeholder="Search messages...">
+            </div>
+            <div class="col-md-4">
+                <select class="form-control" id="senderFilter">
+                    <option value="">All Messages</option>
+                    <option value="user">User Messages</option>
+                    <option value="bot">Bot Responses</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <button class="btn btn-primary w-100" id="exportBtn">
+                    <i class="bi bi-download"></i> Export Logs
+                </button>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover table-sm">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>User</th>
+                        <th>Sender</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody id="logsList">
+                    {% for message in messages %}
+                    <tr data-sender="{{ message.sender }}">
+                        <td>
+                            <small>{{ message.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</small>
+                        </td>
+                        <td>
+                            <small>{{ message.facebook_user.name or 'Unknown' }}</small>
+                        </td>
+                        <td>
+                            {% if message.sender == 'user' %}
+                                <span class="badge bg-info">User</span>
+                            {% else %}
+                                <span class="badge bg-success">Bot</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <small>{{ message.content[:80] }}{% if message.content|length > 80 %}...{% endif %}</small>
+                            <br>
+                            <small class="text-muted" style="cursor: pointer;" onclick="showFullMessage('{{ message.content|replace(\"'\", \"\\\'\") }}')">
+                                <i class="bi bi-eye"></i> View full
+                            </small>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="text-center text-muted">No messages yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Full Message Modal -->
+<div class="modal fade" id="messageModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Full Message</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="fullMessageContent" style="white-space: pre-wrap; word-break: break-word;"></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showFullMessage(content) {
+    document.getElementById('fullMessageContent').textContent = content;
+    new bootstrap.Modal(document.getElementById('messageModal')).show();
+}
+
+document.getElementById('searchInput').addEventListener('keyup', function() {
+    const query = this.value.toLowerCase();
+    document.querySelectorAll('#logsList tr').forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(query) ? '' : 'none';
+    });
+});
+
+document.getElementById('senderFilter').addEventListener('change', function() {
+    const sender = this.value;
+    document.querySelectorAll('#logsList tr').forEach(row => {
+        if (!sender) {
+            row.style.display = '';
+        } else {
+            row.style.display = row.dataset.sender === sender ? '' : 'none';
+        }
+    });
+});
+
+document.getElementById('exportBtn').addEventListener('click', function() {
+    const logs = Array.from(document.querySelectorAll('#logsList tr')).map(row => {
+        const cells = row.querySelectorAll('td');
+        return {
+            time: cells[0].textContent.trim(),
+            user: cells[1].textContent.trim(),
+            sender: cells[2].textContent.trim(),
+            message: cells[3].textContent.trim()
+        };
+    });
+
+    let csv = 'Time,User,Sender,Message\n';
+    logs.forEach(log => {
+        csv += `"${log.time}","${log.user}","${log.sender}","${log.message.replace(/"/g, '""')}"\n`;
+    });
+
+    const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'message_logs.csv';
+    a.click();
+});
+</script>
+{% endblock %}

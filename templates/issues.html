@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block title %}Issues - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Admin-Assigned Issues{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-exclamation-circle"></i> Issues Assigned to Admin
+    </div>
+    <div class="card-body">
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <select class="form-control" id="typeFilter">
+                    <option value="">All Types</option>
+                    <option value="unresolved_query">Unresolved Query</option>
+                    <option value="complaint">Complaint</option>
+                    <option value="suggestion">Suggestion</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <select class="form-control" id="statusFilter">
+                    <option value="">All Status</option>
+                    <option value="open">Open</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="resolved">Resolved</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>User</th>
+                        <th>Issue</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="issuesList">
+                    {% for issue in issues %}
+                    <tr data-issue-id="{{ issue.id }}">
+                        <td>
+                            {% if issue.issue_type == 'unresolved_query' %}
+                                <span class="badge bg-info">Unresolved Query</span>
+                            {% elif issue.issue_type == 'complaint' %}
+                                <span class="badge bg-danger">Complaint</span>
+                            {% elif issue.issue_type == 'suggestion' %}
+                                <span class="badge bg-warning">Suggestion</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ issue.facebook_user.name or 'Unknown' }}</td>
+                        <td>
+                            <strong>{{ issue.content[:50] }}...</strong>
+                            <br>
+                            <small class="text-muted">{{ issue.facebook_user.phone or 'No phone' }}</small>
+                        </td>
+                        <td>
+                            <select class="form-select form-select-sm status-select" data-id="{{ issue.id }}">
+                                <option value="open" {% if issue.status == 'open' %}selected{% endif %}>Open</option>
+                                <option value="in_progress" {% if issue.status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                                <option value="resolved" {% if issue.status == 'resolved' %}selected{% endif %}>Resolved</option>
+                            </select>
+                        </td>
+                        <td>{{ issue.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>
+                            <button class="btn btn-sm btn-info view-issue" data-id="{{ issue.id }}" data-bs-toggle="modal" data-bs-target="#issueModal">
+                                <i class="bi bi-eye"></i> View
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted">No open issues.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Issue Details Modal -->
+<div class="modal fade" id="issueModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Issue Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>User:</strong>
+                        <p id="issueUser"></p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Phone:</strong>
+                        <p id="issuePhone"></p>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Type:</strong>
+                        <p id="issueType"></p>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Status:</strong>
+                        <p id="issueStatus"></p>
+                    </div>
+                </div>
+                <hr>
+                <h6>Issue Content</h6>
+                <p id="issueContent" style="background: #f5f5f5; padding: 15px; border-radius: 5px;"></p>
+                <hr>
+                <h6>Related Messages</h6>
+                <div id="relatedMessages" style="max-height: 300px; overflow-y: auto;">
+                    <p class="text-muted">Loading...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.querySelectorAll('.status-select').forEach(select => {
+    select.addEventListener('change', function() {
+        const issueId = this.dataset.id;
+        const newStatus = this.value;
+        
+        fetch('{{ url_for("issues") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                action: 'update_status',
+                id: issueId,
+                status: newStatus
+            })
+        })
+        .then(r => r.json())
+        .then(result => {
+            if (result.success) {
+                const row = document.querySelector(`tr[data-issue-id="${issueId}"]`);
+                const statusCell = row.querySelector('td:nth-child(4)');
+                
+                if (newStatus === 'open') {
+                    statusCell.innerHTML = '<span class="badge bg-danger">Open</span>';
+                } else if (newStatus === 'in_progress') {
+                    statusCell.innerHTML = '<span class="badge bg-warning">In Progress</span>';
+                } else if (newStatus === 'resolved') {
+                    statusCell.innerHTML = '<span class="badge bg-success">Resolved</span>';
+                }
+            }
+        });
+    });
+});
+
+document.querySelectorAll('.view-issue').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const issueId = this.dataset.id;
+        const row = document.querySelector(`tr[data-issue-id="${issueId}"]`);
+        const cells = row.querySelectorAll('td');
+        
+        document.getElementById('issueUser').textContent = cells[1].textContent;
+        document.getElementById('issuePhone').textContent = cells[1].querySelector('small').textContent;
+        document.getElementById('issueType').textContent = cells[0].textContent;
+        document.getElementById('issueStatus').textContent = cells[3].textContent;
+        document.getElementById('issueContent').textContent = cells[2].querySelector('strong').textContent;
+        document.getElementById('relatedMessages').innerHTML = '<p class="text-muted">No related messages.</p>';
+    });
+});
+
+// Filter by type
+document.getElementById('typeFilter').addEventListener('change', function() {
+    const type = this.value;
+    document.querySelectorAll('#issuesList tr').forEach(row => {
+        if (!type) {
+            row.style.display = '';
+        } else {
+            const typeCell = row.querySelector('td:first-child');
+            row.style.display = typeCell.textContent.toLowerCase().includes(type) ? '' : 'none';
+        }
+    });
+});
+
+// Filter by status
+document.getElementById('statusFilter').addEventListener('change', function() {
+    const status = this.value;
+    document.querySelectorAll('#issuesList tr').forEach(row => {
+        if (!status) {
+            row.style.display = '';
+        } else {
+            const statusSelect = row.querySelector('.status-select');
+            row.style.display = statusSelect.value === status ? '' : 'none';
+        }
+    });
+});
+</script>
+{% endblock %}

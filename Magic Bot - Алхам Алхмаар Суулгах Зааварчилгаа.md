@@ -1,0 +1,322 @@
+# Magic Bot - Алхам Алхмаар Суулгах Зааварчилгаа
+
+Энэхүү зааварчилгаа нь **Magic Financial Group**-ийн Facebook Page-д зориулсан автомат мессеж хариулах болон авто коммент бичих системийг хэрхэн суулгаж, тохируулж, ажиллуулахыг алхам алхмаар тайлбарлана.
+
+---
+
+## Алхам 1: Компьютерт Python суулгах
+
+Хэрвээ таны компьютерт Python суулгаагүй бол эхлээд суулгах хэрэгтэй.
+
+### Windows дээр:
+1. **https://www.python.org/downloads/** хаягаар орно
+2. **"Download Python 3.12"** (эсвэл хамгийн сүүлийн хувилбар) товчийг дарна
+3. Татаж авсан файлыг нээнэ
+4. **"Add Python to PATH"** гэсэн нүдийг заавал чагтална (маш чухал!)
+5. **"Install Now"** товчийг дарна
+6. Суулгалт дуусахыг хүлээнэ
+
+### Шалгах:
+1. **Command Prompt** (CMD) нээнэ (Start цэснээс "cmd" гэж хайна)
+2. Дараах командыг бичнэ:
+```
+python --version
+```
+3. `Python 3.12.x` гэж гарч ирвэл зөв суулгагдсан
+
+---
+
+## Алхам 2: Файлуудыг бэлдэх
+
+1. Би танд өгсөн **magic_bot.zip** файлыг татаж авна
+2. Компьютер дээрээ шинэ хавтас үүсгэнэ, жишээ нь: `C:\magic_bot`
+3. ZIP файлыг задлаад бүх файлуудыг тэр хавтас руу хуулна
+
+Хавтасны бүтэц ийм байх ёстой:
+```
+magic_bot/
+├── app.py                  (Үндсэн програм)
+├── requirements.txt        (Шаардлагатай сангууд)
+├── README.md               (Англи зааварчилгаа)
+├── .env                    (Та үүсгэх - доор заавар байгаа)
+└── templates/
+    ├── base.html           (Үндсэн загвар)
+    ├── login.html          (Нэвтрэх хуудас)
+    ├── dashboard.html      (Хяналтын самбар)
+    ├── courses.html        (Ангийн удирдлага)
+    ├── faq.html            (Асуулт хариулт)
+    ├── leads.html          (Бүртгүүлсэн хэрэглэгчид)
+    ├── issues.html         (Админд шилжүүлсэн асуудлууд)
+    ├── logs.html           (Мессежийн лог)
+    └── settings.html       (Тохиргоо)
+```
+
+---
+
+## Алхам 3: Facebook Page ID олох
+
+Таны Page Access Token-ийг аль хэдийн авсан. Одоо **Page ID** олох хэрэгтэй.
+
+### Арга 1: Graph API Explorer ашиглах
+1. **https://developers.facebook.com/tools/explorer/** хаягаар орно
+2. Баруун дээд буланд **Access Token** талбарт таны token-ийг оруулна:
+```
+EAAcwjxqcKBcBRaqUpbmCvqHeqoMZBXvEA6CrUOzLKZAAWhGDF3GqJuyyn5gxXAloji2UeYvM1ZAUa1vEJ71qF0FBowEYq8PhjeZBFX8LBm7BMay7uGZAZAuJlS7zjRhxPmSBimAVq98FJLk5W9IHEXesQf3ZBn4fZAZCakqiCO8UQaoqHVtOvZAg7yZABDEnmn5d8KwbYMFHK8hoKix5kG09Bbh2odqOWAMlOuC
+```
+3. URL талбарт `/me` гэж бичнэ
+4. **Submit** товчийг дарна
+5. Хариуд ирсэн JSON дотор `"id": "123456789"` гэсэн тоо байна - энэ бол таны **Page ID**
+
+### Арга 2: Page-ийн About хэсгээс
+1. Facebook Page-ээ нээнэ: https://www.facebook.com/MagicFinancialGroup
+2. **About** (Тухай) хэсэг рүү орно
+3. Доод талд **Page ID** гэж бичсэн тоо байна
+
+---
+
+## Алхам 4: .env тохиргооны файл үүсгэх
+
+1. `magic_bot` хавтас дотор `.env` нэртэй шинэ файл үүсгэнэ
+2. Notepad нээгээд дараах мэдээллийг бичнэ (өөрийн мэдээллээр солино):
+
+```
+OPENAI_API_KEY=таны_openai_api_key_энд_бичнэ
+FACEBOOK_PAGE_ID=таны_page_id_энд_бичнэ
+FACEBOOK_ACCESS_TOKEN=EAAcwjxqcKBcBRaqUpbmCvqHeqoMZBXvEA6CrUOzLKZAAWhGDF3GqJuyyn5gxXAloji2UeYvM1ZAUa1vEJ71qF0FBowEYq8PhjeZBFX8LBm7BMay7uGZAZAuJlS7zjRhxPmSBimAVq98FJLk5W9IHEXesQf3ZBn4fZAZCakqiCO8UQaoqHVtOvZAg7yZABDEnmn5d8KwbYMFHK8hoKix5kG09Bbh2odqOWAMlOuC
+GOOGLE_FORM_URL=https://docs.google.com/forms/d/e/1FAIpQLSerwmfsvdYbcgZBUTySCrx6ueA2thp_7-7n-uUDoRF4lvAXKw/viewform
+SECRET_KEY=magic_bot_secret_key_2024
+VERIFY_TOKEN=magic_bot_verify_token
+```
+
+3. **"Save As"** дарж, файлын нэрийг `.env` гэж бичнэ (цэг орсон!)
+4. **"Save as type"** хэсэгт "All Files" сонгоно
+
+### OpenAI API Key авах (хэрвээ байхгүй бол):
+1. **https://platform.openai.com/** хаягаар орно
+2. Бүртгүүлж нэвтэрнэ
+3. **API Keys** хэсэг рүү орно
+4. **"Create new secret key"** товчийг дарна
+5. Гарч ирсэн key-г хуулж `.env` файлд оруулна
+
+---
+
+## Алхам 5: Шаардлагатай сангуудыг суулгах
+
+1. **Command Prompt** (CMD) нээнэ
+2. magic_bot хавтас руу очно:
+```
+cd C:\magic_bot
+```
+3. Шаардлагатай сангуудыг суулгана:
+```
+pip install -r requirements.txt
+```
+4. Суулгалт дуусахыг хүлээнэ (1-2 минут)
+
+Хэрвээ алдаа гарвал:
+```
+pip install Flask Flask-SQLAlchemy Flask-Login requests python-dotenv openai gunicorn
+```
+
+---
+
+## Алхам 6: Програмыг анх удаа ажиллуулах
+
+1. Command Prompt дээр magic_bot хавтаст байгаа эсэхээ шалгана
+2. Дараах командыг бичнэ:
+```
+python app.py
+```
+3. Ийм мэдээлэл гарч ирнэ:
+```
+Default admin user created: admin / admin123
+ * Running on http://0.0.0.0:5000
+```
+4. Энэ нь програм амжилттай ажиллаж байна гэсэн үг!
+
+---
+
+## Алхам 7: Admin Dashboard-д нэвтрэх
+
+1. Вэб хөтөч (Chrome, Firefox гэх мэт) нээнэ
+2. Хаягийн мөрөнд бичнэ: **http://localhost:5000**
+3. Нэвтрэх хуудас нээгдэнэ
+4. Дараах мэдээллийг оруулна:
+   - **Хэрэглэгчийн нэр:** `admin`
+   - **Нууц үг:** `admin123`
+5. **"Нэвтрэх"** товчийг дарна
+
+Та одоо Admin Dashboard-д нэвтэрлээ!
+
+---
+
+## Алхам 8: Ангийн мэдээлэл оруулах
+
+1. Зүүн талын цэснээс **"Ангиуд"** (Courses) дарна
+2. **"Шинэ анги нэмэх"** товчийг дарна
+3. Дараах мэдээллийг бөглөнө:
+   - **Ангийн нэр:** жишээ нь "6-р сарын өглөөний анги"
+   - **Төрөл:** "Танхим", "Онлайн", "Хосолсон", эсвэл "Багштай онлайн"
+   - **Эхлэх огноо:** жишээ нь 2024-06-01
+   - **Цаг:** жишээ нь "10:00-13:00" (өглөө) эсвэл "18:00-21:00" (орой)
+   - **Үнэ:** жишээ нь 880000
+   - **Тайлбар:** нэмэлт мэдээлэл
+4. **"Хадгалах"** товчийг дарна
+
+Сар бүр шинэ ангиуд нээгдэхэд энэ хэсгээс шинэчилнэ.
+
+---
+
+## Алхам 9: FAQ (Асуулт хариулт) оруулах
+
+1. Зүүн талын цэснээс **"Асуулт хариулт"** (FAQ) дарна
+2. **"Шинэ асуулт нэмэх"** товчийг дарна
+3. Жишээ асуултууд:
+
+| Асуулт | Хариулт |
+|--------|---------|
+| Сургалт хэдэн долоо хоног вэ? | Манай сургалт нийт 4 долоо хоног үргэлжилнэ. |
+| Үнэ хэд вэ? | 100% Онлайн: 360,000₮, Хосолсон: 440,000₮, Багштай онлайн: 660,000₮, Танхим: 880,000₮ |
+| Хаана байрладаг вэ? | БЗД 13-р хороолол Натурын зам, UB Tower Plus оффис 5 давхар 509 тоот |
+| Хуваан төлж болох уу? | Тийм, PocketZero апп ашиглаад 4-6 хуваан төлөх боломжтой |
+| Сертификат олгодог уу? | Тийм, сургалтаа дуусгаад шалгалтаа өгсний дараа сертификат олгоно |
+| Ямар ч мэргэжилтэй хүн сурч болох уу? | Тийм, та ямар ч мэргэжилтэй байсан манай сургалтад хамрагдах боломжтой |
+
+4. Хэрэглэгчдээс ирдэг шинэ асуултуудыг тогтмол нэмж байна
+
+---
+
+## Алхам 10: Facebook Webhook тохируулах (Messenger-тэй холбох)
+
+Messenger-ээс ирсэн мессежийг бодит цагт хүлээн авахын тулд **Webhook** тохируулах хэрэгтэй.
+
+### 10.1: Серверийг интернэтэд нээх
+Таны компьютер дээр ажиллаж байгаа програмыг интернэтээс хандах боломжтой болгох хэрэгтэй. Үүний тулд **ngrok** ашиглана:
+
+1. **https://ngrok.com/** хаягаар орж бүртгүүлнэ (үнэгүй)
+2. ngrok татаж суулгана
+3. Шинэ Command Prompt нээгээд:
+```
+ngrok http 5000
+```
+4. Ийм хаяг гарч ирнэ: `https://abc123.ngrok-free.app` - үүнийг хуулна
+
+### 10.2: Facebook Developer App-д Webhook тохируулах
+1. **https://developers.facebook.com/** хаягаар орно
+2. Таны App руу орно
+3. Зүүн цэснээс **"Messenger" → "Settings"** дарна
+4. **"Webhooks"** хэсэгт:
+   - **Callback URL:** `https://abc123.ngrok-free.app/webhook` (ngrok-оос авсан хаяг + /webhook)
+   - **Verify Token:** `magic_bot_verify_token` (.env файлд бичсэнтэй ижил)
+5. **"Verify and Save"** товчийг дарна
+6. **Subscriptions** хэсэгт дараах зүйлсийг чагтална:
+   - `messages`
+   - `messaging_postbacks`
+   - `feed`
+
+---
+
+## Алхам 11: Системийг шалгах
+
+### Messenger шалгах:
+1. Өөр Facebook аккаунтаас (эсвэл найзаасаа гуйж) таны Page-д мессеж бичүүлнэ
+2. Жишээ нь: "Сайн байна уу, сургалтын талаар мэдээлэл авмаар байна"
+3. Бот автоматаар хариулах ёстой
+4. Admin Dashboard-ийн **"Мессежийн лог"** хэсэгт мессеж бүртгэгдсэн эсэхийг шалгана
+
+### Авто коммент шалгах:
+1. Page дээрээ шинэ пост нийтэлнэ
+2. 1 минутын дотор бот автоматаар коммент бичих ёстой
+
+### Lead шалгах:
+1. Messenger-ээр утасны дугаар илгээнэ, жишээ нь: "99112233"
+2. Бот "бүртгэлийн ажилтантай холбож өгье" гэж хариулах ёстой
+3. Admin Dashboard-ийн **"Бүртгүүлсэн хэрэглэгчид"** хэсэгт тэр хэрэглэгч орсон эсэхийг шалгана
+
+---
+
+## Алхам 12: Байнга ажиллуулах (Сервер дээр)
+
+Компьютерээ унтраавал бот зогсоно. Тиймээс байнга ажиллуулахын тулд сервер (VPS) ашиглахыг зөвлөж байна.
+
+### Хямд VPS сонголтууд:
+- **DigitalOcean** - сарын $5-аас эхэлнэ
+- **Vultr** - сарын $5-аас эхэлнэ
+- **AWS Lightsail** - сарын $3.50-аас эхэлнэ
+
+### VPS дээр суулгах:
+1. VPS-ээ үүсгэж SSH-ээр холбогдоно
+2. Python суулгана:
+```bash
+sudo apt update
+sudo apt install python3 python3-pip python3-venv -y
+```
+3. Файлуудаа сервер рүү хуулна (FileZilla эсвэл scp ашиглана)
+4. Virtual environment үүсгэнэ:
+```bash
+cd /home/ubuntu/magic_bot
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+5. .env файлыг үүсгэнэ (Алхам 4-тэй ижил)
+6. Systemd service үүсгэнэ:
+```bash
+sudo nano /etc/systemd/system/magicbot.service
+```
+Дараах агуулгыг бичнэ:
+```
+[Unit]
+Description=Magic Bot Facebook Automation
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/magic_bot
+Environment="PATH=/home/ubuntu/magic_bot/venv/bin"
+EnvironmentFile=/home/ubuntu/magic_bot/.env
+ExecStart=/home/ubuntu/magic_bot/venv/bin/gunicorn --bind 0.0.0.0:5000 --workers 2 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+7. Service-ийг эхлүүлнэ:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable magicbot
+sudo systemctl start magicbot
+```
+
+---
+
+## Чухал тэмдэглэлүүд
+
+### Аюулгүй байдал:
+- Admin нууц үгийг **admin123**-аас заавал солино!
+- `.env` файлыг хэнд ч бүү харуулаарай
+- SECRET_KEY-г урт, санамсаргүй тэмдэгт мөрөөр солино
+
+### Facebook Token шинэчлэх:
+- Facebook Page Access Token нь хугацаатай байдаг (ихэвчлэн 60 хоног)
+- Хугацаа дуусахаас өмнө шинэ token авч `.env` файлд шинэчилнэ
+- Урт хугацааны token авахын тулд Facebook Developer App-аас "Long-Lived Token" хүсэлт гаргана
+
+### Сар бүр хийх зүйлс:
+1. Admin Dashboard-аас хуучин ангиудыг идэвхгүй болгох
+2. Шинэ ангиудын мэдээлэл оруулах
+3. FAQ хэсэгт шинэ асуулт хариулт нэмэх
+4. Бүртгүүлсэн хэрэглэгчдийн жагсаалтыг шалгах
+5. Бот шийдэж чадаагүй асуудлуудыг шалгаж хариулах
+
+### Асуудал гарвал:
+- Command Prompt дээр алдааны мэдээллийг шалгана
+- `.env` файл дахь мэдээлэл зөв эсэхийг шалгана
+- Интернэт холболтоо шалгана
+- Facebook Token хүчинтэй эсэхийг шалгана
+
+---
+
+## Тусламж хэрэгтэй бол
+
+Хэрвээ ямар нэг алхамд гацвал надад дахин мессеж бичээрэй. Би танд тусалж өгнө!

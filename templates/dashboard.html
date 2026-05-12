@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-3">
+        <div class="stat-card">
+            <i class="bi bi-people" style="font-size: 2rem; color: #667eea;"></i>
+            <h3>{{ leads_count }}</h3>
+            <p>Leads</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <i class="bi bi-exclamation-circle" style="font-size: 2rem; color: #dc3545;"></i>
+            <h3>{{ open_issues }}</h3>
+            <p>Open Issues</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <i class="bi bi-chat-left-text" style="font-size: 2rem; color: #28a745;"></i>
+            <h3>{{ total_messages }}</h3>
+            <p>Total Messages</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <i class="bi bi-book" style="font-size: 2rem; color: #764ba2;"></i>
+            <h3>4</h3>
+            <p>Active Courses</p>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-exclamation-circle"></i> Recent Issues
+            </div>
+            <div class="card-body">
+                <p class="text-muted">No open issues at the moment.</p>
+                <a href="{{ url_for('issues') }}" class="btn btn-sm btn-primary">View All Issues</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-people"></i> Recent Leads
+            </div>
+            <div class="card-body">
+                <p class="text-muted">No new leads yet.</p>
+                <a href="{{ url_for('leads') }}" class="btn btn-sm btn-primary">View All Leads</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-info-circle"></i> System Status
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <strong>Facebook Polling:</strong>
+                        <span class="badge bg-success">Active</span>
+                    </div>
+                    <div class="col-md-4">
+                        <strong>AI Bot:</strong>
+                        <span class="badge bg-success">Running</span>
+                    </div>
+                    <div class="col-md-4">
+                        <strong>Auto-commenting:</strong>
+                        <span class="badge bg-success">Enabled</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
