@@ -221,20 +221,40 @@ def post_comment_on_page(post_id, comment_text):
 
 # ===================== LLM HELPERS =====================
 
-def build_system_prompt():
-    """Build system prompt with training and FAQ knowledge"""
+def build_system_prompt(is_new_session=True):
+    """Build system prompt with training and FAQ knowledge.
+
+    is_new_session=True when there are no prior messages or the last interaction
+    was >24h ago. Controls whether the bot is allowed to greet the user.
+    """
     faqs = FAQ.query.all()
     faq_text = "\n".join([f"Q: {faq.question}\nA: {faq.answer}" for faq in faqs])
-    
+
     courses = Course.query.filter_by(is_active=True).all()
     courses_text = "\n".join([
         f"- {c.name} ({c.course_type}): {c.price}₮, эхлэх: {c.start_date.strftime('%Y-%m-%d')}, цаг: {c.time}"
         for c in courses
     ])
-    
+
     registration_block = (
         f"БҮРТГЭЛИЙН ЛИНК:\n{GOOGLE_FORM_URL}\n" if GOOGLE_FORM_URL else ""
     )
+
+    if is_new_session:
+        greeting_rule = (
+            "0. Энэ нь шинэ яриа эсвэл хэрэглэгчтэй удаан хугацаанд (24+ цаг) "
+            "холбоо тасарсан байсан үед эхэлж байна. Та товч, дулаахан "
+            "мэндчилгээгээр (жишээ нь \"Сайн байна уу!\") эхэлж болно — "
+            "дараа нь шууд асуулт руу ор."
+        )
+    else:
+        greeting_rule = (
+            "0. ЭНЭ НЬ ҮРГЭЛЖИЛСЭН ЯРИА. Хэрэглэгчтэй сая ярилцаж байсан тул "
+            "\"Сайн байна уу\", \"Тавтай морил\", \"Баярлалаа холбогдсонд\" "
+            "гэх мэт мэндчилгээгээр БҮҮ эхэл. Шууд асуултын хариулт руу ор, "
+            "ах дүү шиг найрсагаар үргэлжлүүл. Хэрэв хэрэглэгч өөрөө мэндлэвэл "
+            "богино хариу өгч болно."
+        )
 
     system_prompt = f"""Та мэргэжлийн сэтгэл судлаач болон маркетер юм. Монгол хэлээр амьд хүн шиг, ойлгомжтой, халуун, туслахын сэтгэлтэй хариулт өгнө.
 
@@ -249,6 +269,7 @@ def build_system_prompt():
 
 {registration_block}
 ЧУХАЛ ДҮРМҮҮД:
+{greeting_rule}
 1. Монгол хэлээр л хариулна. Англи хэл хэрэглэхгүй.
 2. Сургалтын давуу талуудыг сайн ойлгож, зөвлөгөө өгнө.
 3. Хэрэглэгч бүртгүүлэхийг хүсвэл "БҮРТГЭЛИЙН ЛИНК" хэсэгт өгөгдсөн URL-г хариултдаа оруулж илгээнэ. Үнэхээр хүсэлт байхгүй бол линк бүү шахна. Мөн утасны дугаараа үлдээх хүсэлт гарга.
@@ -258,10 +279,10 @@ def build_system_prompt():
     
     return system_prompt
 
-def generate_bot_response(user_message, conversation_history):
+def generate_bot_response(user_message, conversation_history, is_new_session=True):
     """Generate bot response using OpenAI"""
     try:
-        messages = [{"role": "system", "content": build_system_prompt()}]
+        messages = [{"role": "system", "content": build_system_prompt(is_new_session=is_new_session)}]
         messages.extend(conversation_history)
         messages.append({"role": "user", "content": user_message})
         
@@ -542,6 +563,18 @@ def webhook():
                             db.session.rollback()
                             fb_user = FacebookUser.query.filter_by(facebook_id=sender_id).first()
                     
+                    # Determine if this is a brand-new conversation (no prior messages, or
+                    # last activity was more than 24h ago). Done BEFORE we save the new
+                    # message so the lookup reflects the prior state.
+                    last_msg = (Message.query
+                                .filter_by(facebook_user_id=fb_user.id)
+                                .order_by(Message.created_at.desc())
+                                .first())
+                    is_new_session = (
+                        last_msg is None
+                        or (datetime.utcnow() - last_msg.created_at) > timedelta(hours=24)
+                    )
+
                     # Save user message
                     user_msg = Message(
                         facebook_user_id=fb_user.id,
@@ -550,16 +583,16 @@ def webhook():
                     )
                     db.session.add(user_msg)
                     db.session.commit()
-                    
+
                     # Get conversation history
                     history = Message.query.filter_by(facebook_user_id=fb_user.id).order_by(Message.created_at).all()
                     conversation = [
                         {"role": "user" if m.sender == 'user' else "assistant", "content": m.content}
                         for m in history[-10:]  # Last 10 messages
                     ]
-                    
+
                     # Generate bot response
-                    bot_response = generate_bot_response(message_text, conversation)
+                    bot_response = generate_bot_response(message_text, conversation, is_new_session=is_new_session)
                     
                     # Save bot message
                     bot_msg = Message(
