@@ -8,7 +8,14 @@ from collections import defaultdict, deque
 from pathlib import Path
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from sqlalchemy.exc import IntegrityError
@@ -205,11 +212,26 @@ class GeneralSetting(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+ADMIN_ROLES = ('admin', 'super_admin')
+
+
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated or current_user.role != 'admin':
+        if not current_user.is_authenticated or current_user.role not in ADMIN_ROLES:
             return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def super_admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated or current_user.role not in ADMIN_ROLES:
+            return redirect(url_for('login'))
+        if current_user.role != 'super_admin':
+            flash('Энэ үйлдэлд супер админ эрх шаардлагатай.', 'error')
+            return redirect(url_for('admins'))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -937,6 +959,187 @@ def settings():
     settings = {s.key: s.value for s in GeneralSetting.query.all()}
     return render_template('settings.html', settings=settings)
 
+
+# ===================== ADMIN USER MANAGEMENT =====================
+
+MIN_ADMIN_PASSWORD_LENGTH = 12
+
+
+@app.route('/admins', methods=['GET'])
+@login_required
+@admin_required
+def admins():
+    all_admins = User.query.order_by(User.created_at.asc()).all()
+    return render_template(
+        'admins.html',
+        admins=all_admins,
+        min_password_length=MIN_ADMIN_PASSWORD_LENGTH,
+    )
+
+
+@app.route('/admins/create', methods=['POST'])
+@login_required
+@super_admin_required
+def create_admin():
+    username = (request.form.get('username') or '').strip()
+    email = (request.form.get('email') or '').strip()
+    password = request.form.get('password') or ''
+    make_super = request.form.get('make_super') == 'on'
+
+    if not username or not email or not password:
+        flash('Бүх талбарыг бөглөнө үү.', 'error')
+        return redirect(url_for('admins'))
+
+    if len(password) < MIN_ADMIN_PASSWORD_LENGTH:
+        flash(
+            f'Нууц үг хамгийн багадаа {MIN_ADMIN_PASSWORD_LENGTH} тэмдэгт байх ёстой.',
+            'error',
+        )
+        return redirect(url_for('admins'))
+
+    if User.query.filter_by(username=username).first():
+        flash(f'"{username}" нэртэй админ аль хэдийн бүртгэлтэй байна.', 'error')
+        return redirect(url_for('admins'))
+
+    if User.query.filter_by(email=email).first():
+        flash(f'"{email}" имэйл хаяг аль хэдийн бүртгэлтэй байна.', 'error')
+        return redirect(url_for('admins'))
+
+    new_admin = User(
+        username=username,
+        email=email,
+        password=generate_password_hash(password),
+        role='super_admin' if make_super else 'admin',
+    )
+    db.session.add(new_admin)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash('Админ нэмэхэд алдаа гарлаа. Дахин оролдоно уу.', 'error')
+        return redirect(url_for('admins'))
+
+    role_label = 'супер админ' if make_super else 'админ'
+    flash(f'"{username}" {role_label}-ыг амжилттай нэмлээ.', 'success')
+    return redirect(url_for('admins'))
+
+
+@app.route('/admins/<int:admin_id>/delete', methods=['POST'])
+@login_required
+@super_admin_required
+def delete_admin(admin_id):
+    target = User.query.get(admin_id)
+    if not target:
+        flash('Тухайн админ олдсонгүй.', 'error')
+        return redirect(url_for('admins'))
+
+    if target.id == current_user.id:
+        flash('Та өөрийнхөө бүртгэлийг устгаж болохгүй.', 'error')
+        return redirect(url_for('admins'))
+
+    if User.query.count() <= 1:
+        flash('Сүүлийн админыг устгах боломжгүй.', 'error')
+        return redirect(url_for('admins'))
+
+    if target.role == 'super_admin' and User.query.filter_by(role='super_admin').count() <= 1:
+        flash('Сүүлийн супер админыг устгах боломжгүй.', 'error')
+        return redirect(url_for('admins'))
+
+    username = target.username
+    db.session.delete(target)
+    db.session.commit()
+    flash(f'"{username}" админыг устгалаа.', 'success')
+    return redirect(url_for('admins'))
+
+
+@app.route('/admins/change-password', methods=['POST'])
+@login_required
+@admin_required
+def change_my_password():
+    current_password = request.form.get('current_password') or ''
+    new_password = request.form.get('new_password') or ''
+    confirm_password = request.form.get('confirm_password') or ''
+
+    if not check_password_hash(current_user.password, current_password):
+        flash('Одоогийн нууц үг буруу байна.', 'error')
+        return redirect(url_for('admins'))
+
+    if len(new_password) < MIN_ADMIN_PASSWORD_LENGTH:
+        flash(
+            f'Шинэ нууц үг хамгийн багадаа {MIN_ADMIN_PASSWORD_LENGTH} тэмдэгт байх ёстой.',
+            'error',
+        )
+        return redirect(url_for('admins'))
+
+    if new_password != confirm_password:
+        flash('Шинэ нууц үг таарахгүй байна.', 'error')
+        return redirect(url_for('admins'))
+
+    if check_password_hash(current_user.password, new_password):
+        flash('Шинэ нууц үг хуучин нууц үгтэй ижил байж болохгүй.', 'error')
+        return redirect(url_for('admins'))
+
+    current_user.password = generate_password_hash(new_password)
+    db.session.commit()
+    logout_user()
+    flash('Нууц үг амжилттай солигдлоо. Шинэ нууц үгээрээ нэвтэрнэ үү.', 'success')
+    return redirect(url_for('login'))
+
+
+@app.route('/admins/<int:admin_id>/reset-password', methods=['POST'])
+@login_required
+@super_admin_required
+def reset_admin_password(admin_id):
+    target = User.query.get(admin_id)
+    if not target:
+        flash('Тухайн админ олдсонгүй.', 'error')
+        return redirect(url_for('admins'))
+
+    new_password = request.form.get('new_password') or ''
+    if len(new_password) < MIN_ADMIN_PASSWORD_LENGTH:
+        flash(
+            f'Шинэ нууц үг хамгийн багадаа {MIN_ADMIN_PASSWORD_LENGTH} тэмдэгт байх ёстой.',
+            'error',
+        )
+        return redirect(url_for('admins'))
+
+    target.password = generate_password_hash(new_password)
+    db.session.commit()
+    flash(
+        f'"{target.username}"-ийн нууц үгийг шинэчиллээ. Шинэ нууц үгийг тухайн хэрэглэгчид өгнө үү.',
+        'success',
+    )
+    return redirect(url_for('admins'))
+
+
+@app.route('/admins/<int:admin_id>/toggle-role', methods=['POST'])
+@login_required
+@super_admin_required
+def toggle_admin_role(admin_id):
+    target = User.query.get(admin_id)
+    if not target:
+        flash('Тухайн админ олдсонгүй.', 'error')
+        return redirect(url_for('admins'))
+
+    if target.id == current_user.id:
+        flash('Та өөрийнхөө эрхийг өөрчилж болохгүй. Өөр супер админаар өөрчлүүл.', 'error')
+        return redirect(url_for('admins'))
+
+    if target.role == 'super_admin':
+        if User.query.filter_by(role='super_admin').count() <= 1:
+            flash('Сүүлийн супер админыг буулгах боломжгүй.', 'error')
+            return redirect(url_for('admins'))
+        target.role = 'admin'
+        msg = f'"{target.username}"-ыг энгийн админ болголоо.'
+    else:
+        target.role = 'super_admin'
+        msg = f'"{target.username}"-ыг супер админ болголоо.'
+
+    db.session.commit()
+    flash(msg, 'success')
+    return redirect(url_for('admins'))
+
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Facebook Messenger webhook"""
@@ -1203,30 +1406,63 @@ def seed_courses_and_faqs():
 
 
 def init_db():
-    """Initialize database tables, seed admin user + default Courses/FAQs."""
+    """Initialize database tables, seed admin user + default Courses/FAQs.
+
+    Also self-heals existing deployments: if there are admin users but none
+    are super_admin (e.g. DB was created before the role tier landed), promote
+    the oldest one so management routes remain usable.
+    """
     with app.app_context():
         db.create_all()
         ensure_schema()
         seed_courses_and_faqs()
 
-        if User.query.filter_by(username='admin').first():
-            return
+        if not User.query.filter_by(username='admin').first():
+            initial_password = os.environ.get('INITIAL_ADMIN_PASSWORD')
+            if initial_password:
+                admin = User(
+                    username='admin',
+                    password=generate_password_hash(initial_password),
+                    email=os.environ.get('ADMIN_EMAIL', 'admin@magicfinance.mn'),
+                    role='super_admin',
+                )
+                db.session.add(admin)
+                db.session.commit()
+                print("Default admin user created with username 'admin' (super_admin).")
+            else:
+                print("INITIAL_ADMIN_PASSWORD not set — skipping default admin creation. "
+                      "Set it and redeploy to create the admin user.")
 
-        initial_password = os.environ.get('INITIAL_ADMIN_PASSWORD')
-        if not initial_password:
-            print("INITIAL_ADMIN_PASSWORD not set — skipping default admin creation. "
-                  "Set it and redeploy to create the admin user.")
-            return
+        if User.query.count() > 0 and not User.query.filter_by(role='super_admin').first():
+            oldest = User.query.order_by(User.created_at.asc()).first()
+            oldest.role = 'super_admin'
+            db.session.commit()
+            print(f"No super_admin found — promoted '{oldest.username}' to super_admin.")
 
-        admin = User(
-            username='admin',
-            password=generate_password_hash(initial_password),
-            email=os.environ.get('ADMIN_EMAIL', 'admin@magicfinance.mn'),
-            role='admin',
-        )
-        db.session.add(admin)
-        db.session.commit()
-        print("Default admin user created with username 'admin'.")
+        # Emergency forgot-password recovery via env vars. Set both
+        # RESET_ADMIN_USERNAME and RESET_ADMIN_PASSWORD on Render, redeploy,
+        # log in with the new password, then REMOVE both vars and redeploy
+        # again. Leaving them set means every restart resets the password.
+        reset_user = os.environ.get('RESET_ADMIN_USERNAME')
+        reset_pw = os.environ.get('RESET_ADMIN_PASSWORD')
+        if reset_user and reset_pw:
+            if len(reset_pw) < MIN_ADMIN_PASSWORD_LENGTH:
+                print(
+                    f"!!! RESET_ADMIN_PASSWORD too short (need >= "
+                    f"{MIN_ADMIN_PASSWORD_LENGTH} chars). Skipping reset."
+                )
+            else:
+                target = User.query.filter_by(username=reset_user).first()
+                if target:
+                    target.password = generate_password_hash(reset_pw)
+                    db.session.commit()
+                    print(
+                        f"!!! WARNING: password reset for '{reset_user}' via env var. "
+                        f"REMOVE RESET_ADMIN_USERNAME and RESET_ADMIN_PASSWORD now "
+                        f"and redeploy, or the password resets on every boot."
+                    )
+                else:
+                    print(f"!!! RESET_ADMIN_USERNAME='{reset_user}' not found.")
 
 
 # Run at import so gunicorn workers initialize the DB on boot.

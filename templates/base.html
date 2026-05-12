@@ -142,6 +142,9 @@
             <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="{{ url_for('settings') }}">
                 <i class="bi bi-gear"></i> Settings
             </a>
+            <a class="nav-link {% if request.endpoint == 'admins' %}active{% endif %}" href="{{ url_for('admins') }}">
+                <i class="bi bi-shield-lock"></i> Admins
+            </a>
             <hr style="border-color: rgba(255,255,255,0.2); margin: 20px 0;">
             <a class="nav-link" href="{{ url_for('logout') }}">
                 <i class="bi bi-box-arrow-right"></i> Logout

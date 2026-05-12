@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block title %}Admins - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Админ удирдлага{% endblock %}
+
+{% set is_super = current_user.role == 'super_admin' %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-people-fill"></i> Бүх админ
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Нэр</th>
+                            <th>Имэйл</th>
+                            <th>Эрх</th>
+                            <th>Үүсгэсэн</th>
+                            <th class="text-end pe-3">Үйлдэл</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for admin in admins %}
+                        <tr>
+                            <td>
+                                <strong>{{ admin.username }}</strong>
+                                {% if admin.id == current_user.id %}
+                                    <span class="badge bg-secondary ms-1">Та</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ admin.email }}</td>
+                            <td>
+                                {% if admin.role == 'super_admin' %}
+                                    <span class="badge bg-primary"><i class="bi bi-star-fill"></i> Супер админ</span>
+                                {% else %}
+                                    <span class="badge bg-light text-dark">Админ</span>
+                                {% endif %}
+                            </td>
+                            <td><small class="text-muted">{{ admin.created_at.strftime('%Y-%m-%d') }}</small></td>
+                            <td class="text-end pe-3">
+                                {% if is_super and admin.id != current_user.id %}
+                                    <form method="POST" action="{{ url_for('toggle_admin_role', admin_id=admin.id) }}" class="d-inline">
+                                        <button type="submit" class="btn btn-sm btn-outline-primary"
+                                                title="{% if admin.role == 'super_admin' %}Энгийн админ болгох{% else %}Супер админ болгох{% endif %}">
+                                            {% if admin.role == 'super_admin' %}
+                                                <i class="bi bi-arrow-down"></i>
+                                            {% else %}
+                                                <i class="bi bi-arrow-up"></i>
+                                            {% endif %}
+                                        </button>
+                                    </form>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-secondary"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#resetPwModal-{{ admin.id }}">
+                                        <i class="bi bi-key"></i>
+                                    </button>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#deleteModal-{{ admin.id }}">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                {% else %}
+                                    <span class="text-muted small">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% if is_super %}
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-person-plus"></i> Шинэ админ нэмэх
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('create_admin') }}">
+                    <div class="mb-3">
+                        <label class="form-label">Нэвтрэх нэр</label>
+                        <input type="text" name="username" class="form-control" required autocomplete="off">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Имэйл</label>
+                        <input type="email" name="email" class="form-control" required autocomplete="off">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Түр нууц үг</label>
+                        <input type="text" name="password" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
+                        <div class="form-text">
+                            Хамгийн багадаа {{ min_password_length }} тэмдэгт. Шинэ админд энэ нууц үгээ өгч, нэвтэрсний дараа өөрчлүүлнэ үү.
+                        </div>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input type="checkbox" name="make_super" id="makeSuper" class="form-check-input">
+                        <label class="form-check-label" for="makeSuper">
+                            Супер админ эрхтэй (бусад админуудыг удирдах боломжтой)
+                        </label>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle"></i> Админ нэмэх
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-shield-lock"></i> Миний нууц үг солих
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('change_my_password') }}">
+                    <div class="mb-3">
+                        <label class="form-label">Одоогийн нууц үг</label>
+                        <input type="password" name="current_password" class="form-control" required autocomplete="current-password">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Шинэ нууц үг</label>
+                        <input type="password" name="new_password" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
+                        <div class="form-text">Хамгийн багадаа {{ min_password_length }} тэмдэгт.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Шинэ нууц үг (давтан)</label>
+                        <input type="password" name="confirm_password" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle"></i> Нууц үг солих
+                    </button>
+                    <div class="form-text mt-2">
+                        Нууц үг солисны дараа дахин нэвтрэх шаардлагатай.
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-info-circle"></i> Заавар
+            </div>
+            <div class="card-body small text-muted">
+                <p class="mb-2"><strong>Супер админ</strong> бусдыг нэмэх, устгах, нууц үг сэргээх, эрх өөрчлөх боломжтой.</p>
+                <p class="mb-2"><strong>Энгийн админ</strong> dashboard ашиглах, өөрийн нууц үгээ солих боломжтой ч багийн жагсаалтыг удирдахгүй.</p>
+                <p class="mb-0"><strong>Аюулгүй байдал:</strong> өөрийнхөө бүртгэлийг устгах, өөрийнхөө эрхийг буулгах, сүүлчийн админ/супер админыг устгах боломжгүй.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if is_super %}
+    {% for admin in admins %}
+        {% if admin.id != current_user.id %}
+        <div class="modal fade" id="deleteModal-{{ admin.id }}" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <form method="POST" action="{{ url_for('delete_admin', admin_id=admin.id) }}">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Админыг устгах уу?</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p><strong>{{ admin.username }}</strong> ({{ admin.email }}) хэрэглэгчийг бүрмөсөн устгах гэж байна.</p>
+                            <p class="text-muted mb-0">Энэ үйлдлийг буцаах боломжгүй.</p>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Цуцлах</button>
+                            <button type="submit" class="btn btn-danger">
+                                <i class="bi bi-trash"></i> Тийм, устга
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="resetPwModal-{{ admin.id }}" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <form method="POST" action="{{ url_for('reset_admin_password', admin_id=admin.id) }}">
+                        <div class="modal-header">
+                            <h5 class="modal-title">{{ admin.username }} - нууц үг сэргээх</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label">Шинэ нууц үг</label>
+                                <input type="text" name="new_password" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
+                                <div class="form-text">
+                                    Хамгийн багадаа {{ min_password_length }} тэмдэгт. Шинэ нууц үгийг хуулж аваад тухайн хэрэглэгчид дамжуулна уу.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Цуцлах</button>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-key"></i> Нууц үг шинэчлэх
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    {% endfor %}
+{% endif %}
+{% endblock %}
