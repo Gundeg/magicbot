@@ -139,6 +139,9 @@
             <a class="nav-link {% if request.endpoint == 'faq' %}active{% endif %}" href="{{ url_for('faq') }}">
                 <i class="bi bi-question-circle"></i> FAQ
             </a>
+            <a class="nav-link {% if request.endpoint == 'training' %}active{% endif %}" href="{{ url_for('training') }}">
+                <i class="bi bi-mortarboard"></i> Training
+            </a>
             <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="{{ url_for('settings') }}">
                 <i class="bi bi-gear"></i> Settings
             </a>

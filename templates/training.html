@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Training - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Ботын сургалт{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-9">
+        <form method="POST" action="{{ url_for('training') }}">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-mortarboard"></i> Ботын дүр (Persona)
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">
+                        Ботын танилцуулга, дуу хоолой, ярианы хэв маяг. Энэ бол системийн зааварчилгааны эхний өгүүлбэр —
+                        "Та ... туслах. ... хариулна." гэх мэт.
+                    </p>
+                    <textarea name="bot_persona" class="form-control font-monospace" rows="6"
+                              placeholder="Хоосон үлдээвэл анхдагч утга ашиглагдана.">{{ persona_value }}</textarea>
+                    {% if not persona_value %}
+                    <details class="mt-2">
+                        <summary class="text-muted small" style="cursor: pointer;">
+                            Хэрэглэгдэх анхдагч утга харах
+                        </summary>
+                        <pre class="small text-muted bg-light p-2 mt-2 rounded">{{ persona_fallback }}</pre>
+                    </details>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-book-half"></i> Сургалтын агуулга (Training corpus)
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">
+                        Бизнесийн талаарх бүх мэдээлэл — үйлчилгээ, үнэ, давуу тал, түгээмэл асуултын хариулт.
+                        Бот энэ агуулгаас суралцаж хариулна. Урт байж болно (хэдэн мянган үг).
+                    </p>
+                    <textarea name="training_content" class="form-control font-monospace" rows="20"
+                              placeholder="Хоосон үлдээвэл анхдагч утга ашиглагдана.">{{ training_value }}</textarea>
+                    {% if not training_value %}
+                    <details class="mt-2">
+                        <summary class="text-muted small" style="cursor: pointer;">
+                            Хэрэглэгдэх анхдагч утга харах ({{ training_fallback|length }} тэмдэгт)
+                        </summary>
+                        <pre class="small text-muted bg-light p-2 mt-2 rounded" style="max-height: 300px; overflow-y: auto;">{{ training_fallback }}</pre>
+                    </details>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-check-circle"></i> Хадгалах
+                </button>
+                <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
+                    Цуцлах
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <div class="col-lg-3">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-info-circle"></i> Заавар
+            </div>
+            <div class="card-body small text-muted">
+                <p>
+                    <strong>Хадгалсны дараа</strong> ботын дараагийн хариулт шинэ агуулгаар үүснэ. Дахин deploy хийх шаардлагагүй.
+                </p>
+                <p>
+                    <strong>Хоосон үлдээвэл</strong> Render-ийн TRAINING_CONTENT эсвэл BOT_PERSONA орчны хувьсагч, эсвэл pasted_content.txt файл ашиглагдана.
+                </p>
+                <p class="mb-0">
+                    <strong>Зөвлөгөө:</strong> агуулгыг богино, ойлгомжтой хэсгүүдэд хувааж, давуу талыг тодорхой бич. Бот энэ бичвэрийг хариултдаа суурь болгож хэрэглэнэ.
+                </p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-lightning-charge"></i> Туршихад
+            </div>
+            <div class="card-body small text-muted">
+                <p class="mb-0">
+                    Өөрчлөлт хийсний дараа Facebook Page руу өөрөө мессеж бичиж хариултыг шалгана уу. Эсвэл "Message Logs" хуудаснаас бусдын яриаг харж шалга.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -514,8 +514,28 @@ FUNNEL_RULES = {
 
 # ===================== LLM HELPERS =====================
 
+def get_setting(key, default=''):
+    """Read a value from GeneralSetting. Returns default if missing or blank."""
+    row = GeneralSetting.query.filter_by(key=key).first()
+    if row and row.value and row.value.strip():
+        return row.value
+    return default
+
+
+def get_training_content():
+    """Bot's training corpus. Priority: DB row -> env var -> file -> tiny default."""
+    return get_setting('training_content', TRAINING_CONTENT)
+
+
+def get_bot_persona():
+    """Bot's persona line. Priority: DB row -> env var -> default."""
+    return get_setting('bot_persona', BOT_PERSONA)
+
+
 def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name=''):
     """Build system prompt with training, FAQ, session-state and funnel context."""
+    training = get_training_content()
+    persona = get_bot_persona()
     faqs = FAQ.query.all()
     faq_text = "\n".join([f"Q: {faq.question}\nA: {faq.answer}" for faq in faqs])
 
@@ -542,10 +562,10 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
     session_rule = SESSION_RULES.get(session_state, SESSION_RULES['new'])
     funnel_rule = FUNNEL_RULES.get(funnel_stage, FUNNEL_RULES['curious'])
 
-    system_prompt = f"""{BOT_PERSONA}
+    system_prompt = f"""{persona}
 
 СУРГАЛТЫН ТӨВИЙН МЭДЭЭЛЭЛ:
-{TRAINING_CONTENT}
+{training}
 
 ИДЭВХТЭЙ АНГИУД:
 {courses_text}
@@ -792,7 +812,7 @@ def privacy():
         product_name=os.environ.get('PRODUCT_NAME', 'Магик Финанс'),
     )
 
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/admin/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         username = request.form.get('username')
@@ -807,13 +827,13 @@ def login():
     
     return render_template('login.html')
 
-@app.route('/logout')
+@app.route('/admin/logout')
 @login_required
 def logout():
     logout_user()
     return redirect(url_for('login'))
 
-@app.route('/dashboard')
+@app.route('/admin/dashboard')
 @login_required
 @admin_required
 def dashboard():
@@ -826,7 +846,7 @@ def dashboard():
                          open_issues=open_issues,
                          total_messages=total_messages)
 
-@app.route('/courses', methods=['GET', 'POST'])
+@app.route('/admin/courses', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def courses():
@@ -869,7 +889,7 @@ def courses():
     courses = Course.query.all()
     return render_template('courses.html', courses=courses)
 
-@app.route('/faq', methods=['GET', 'POST'])
+@app.route('/admin/faq', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def faq():
@@ -906,14 +926,14 @@ def faq():
     faqs = FAQ.query.all()
     return render_template('faq.html', faqs=faqs)
 
-@app.route('/leads')
+@app.route('/admin/leads')
 @login_required
 @admin_required
 def leads():
     leads = FacebookUser.query.filter_by(is_lead=True).all()
     return render_template('leads.html', leads=leads)
 
-@app.route('/issues', methods=['GET', 'POST'])
+@app.route('/admin/issues', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def issues():
@@ -933,14 +953,14 @@ def issues():
     issues = AdminIssue.query.filter_by(status='open').all()
     return render_template('issues.html', issues=issues)
 
-@app.route('/logs')
+@app.route('/admin/logs')
 @login_required
 @admin_required
 def logs():
     messages = Message.query.order_by(Message.created_at.desc()).limit(100).all()
     return render_template('logs.html', messages=messages)
 
-@app.route('/settings', methods=['GET', 'POST'])
+@app.route('/admin/settings', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def settings():
@@ -960,12 +980,50 @@ def settings():
     return render_template('settings.html', settings=settings)
 
 
+# ===================== BOT TRAINING =====================
+
+@app.route('/admin/training', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def training():
+    """Edit the bot's training corpus and persona directly from the dashboard.
+
+    Saving a blank value clears the DB row so the env-var / file fallback
+    takes over again — that's the "reset to default" path.
+    """
+    if request.method == 'POST':
+        new_training = request.form.get('training_content', '').strip()
+        new_persona = request.form.get('bot_persona', '').strip()
+
+        for key, value in [('training_content', new_training), ('bot_persona', new_persona)]:
+            row = GeneralSetting.query.filter_by(key=key).first()
+            if row:
+                row.value = value
+            else:
+                row = GeneralSetting(key=key, value=value)
+                db.session.add(row)
+        db.session.commit()
+        flash(
+            'Хадгаллаа. Дараагийн мессежээс эхлэн бот шинэ агуулгаар хариулна.',
+            'success',
+        )
+        return redirect(url_for('training'))
+
+    return render_template(
+        'training.html',
+        training_value=get_setting('training_content', ''),
+        training_fallback=TRAINING_CONTENT,
+        persona_value=get_setting('bot_persona', ''),
+        persona_fallback=BOT_PERSONA,
+    )
+
+
 # ===================== ADMIN USER MANAGEMENT =====================
 
 MIN_ADMIN_PASSWORD_LENGTH = 12
 
 
-@app.route('/admins', methods=['GET'])
+@app.route('/admin/admins', methods=['GET'])
 @login_required
 @admin_required
 def admins():
@@ -977,7 +1035,7 @@ def admins():
     )
 
 
-@app.route('/admins/create', methods=['POST'])
+@app.route('/admin/admins/create', methods=['POST'])
 @login_required
 @super_admin_required
 def create_admin():
@@ -1024,7 +1082,7 @@ def create_admin():
     return redirect(url_for('admins'))
 
 
-@app.route('/admins/<int:admin_id>/delete', methods=['POST'])
+@app.route('/admin/admins/<int:admin_id>/delete', methods=['POST'])
 @login_required
 @super_admin_required
 def delete_admin(admin_id):
@@ -1052,7 +1110,7 @@ def delete_admin(admin_id):
     return redirect(url_for('admins'))
 
 
-@app.route('/admins/change-password', methods=['POST'])
+@app.route('/admin/admins/change-password', methods=['POST'])
 @login_required
 @admin_required
 def change_my_password():
@@ -1086,7 +1144,7 @@ def change_my_password():
     return redirect(url_for('login'))
 
 
-@app.route('/admins/<int:admin_id>/reset-password', methods=['POST'])
+@app.route('/admin/admins/<int:admin_id>/reset-password', methods=['POST'])
 @login_required
 @super_admin_required
 def reset_admin_password(admin_id):
@@ -1112,7 +1170,7 @@ def reset_admin_password(admin_id):
     return redirect(url_for('admins'))
 
 
-@app.route('/admins/<int:admin_id>/toggle-role', methods=['POST'])
+@app.route('/admin/admins/<int:admin_id>/toggle-role', methods=['POST'])
 @login_required
 @super_admin_required
 def toggle_admin_role(admin_id):
