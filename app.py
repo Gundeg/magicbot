@@ -8,6 +8,7 @@ from functools import wraps
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 from openai import OpenAI
 from threading import Thread
@@ -521,7 +522,7 @@ def webhook():
                 if messaging_event.get('message'):
                     message_text = messaging_event['message'].get('text')
                     
-                    # Get or create Facebook user
+                    # Get or create Facebook user (handle webhook retries racing on the same sender)
                     fb_user = FacebookUser.query.filter_by(facebook_id=sender_id).first()
                     if not fb_user:
                         user_info = get_facebook_user_info(sender_id)
@@ -530,7 +531,11 @@ def webhook():
                             name=user_info.get('name', 'Unknown')
                         )
                         db.session.add(fb_user)
-                        db.session.commit()
+                        try:
+                            db.session.commit()
+                        except IntegrityError:
+                            db.session.rollback()
+                            fb_user = FacebookUser.query.filter_by(facebook_id=sender_id).first()
                     
                     # Save user message
                     user_msg = Message(
@@ -590,10 +595,93 @@ def webhook_verify():
 
 # ===================== INITIALIZATION =====================
 
+def seed_courses_and_faqs():
+    """Populate Courses and FAQs with Magic Financial Group defaults if empty.
+
+    Idempotent: only inserts when the table is empty, so subsequent boots
+    won't duplicate or overwrite admin edits.
+    """
+    default_start = datetime.utcnow() + timedelta(days=14)
+
+    if Course.query.count() == 0:
+        courses = [
+            Course(
+                name='Нягтлан-Нярвын сургалт (100% Онлайн)',
+                course_type='100% Online',
+                start_date=default_start,
+                time='Бие даан судлах',
+                price=360000,
+                description='Бие даан судлах онлайн сургалт. Видео хичээл, дасгал болон Magic Finance программын 6 сарын үнэгүй эрх багтсан.',
+                is_active=True,
+            ),
+            Course(
+                name='Нягтлан-Нярвын сургалт (Хосолсон)',
+                course_type='Hybrid',
+                start_date=default_start,
+                time='1, 3, 5-д танхимаар',
+                price=440000,
+                description='Долоо хоногийн 3 өдөр танхимаар, бусад өдөр онлайнаар хичээллэх хосолсон хөтөлбөр.',
+                is_active=True,
+            ),
+            Course(
+                name='Нягтлан-Нярвын сургалт (Багштай онлайн)',
+                course_type='Online with Teacher',
+                start_date=default_start,
+                time='1-5 дахь өдөр онлайнаар',
+                price=660000,
+                description='Долоо хоногийн 1-5 дахь өдөр багштай шууд онлайн хичээл, асуулт хариулт.',
+                is_active=True,
+            ),
+            Course(
+                name='Нягтлан-Нярвын сургалт (Танхим)',
+                course_type='Classroom',
+                start_date=default_start,
+                time='1-5 дахь өдөр танхимаар',
+                price=880000,
+                description='UB Tower Plus 509 тоотод 1-5 дахь өдөр танхимаар хичээллэх бүрэн сургалт. Өглөө 10:00-13:00 эсвэл орой 18:00-21:00.',
+                is_active=True,
+            ),
+        ]
+        for c in courses:
+            db.session.add(c)
+        print(f'Seeded {len(courses)} default courses.')
+
+    if FAQ.query.count() == 0:
+        faqs = [
+            FAQ(question='Сургалт хэдэн долоо хоног үргэлжлэх вэ?',
+                answer='Манай сургалт нийт 4 долоо хоног үргэлжилнэ. 1-р долоо хоног: нярвын тайлан, 2-р: санхүүгийн тайлан, 3-р: татвар, 4-р: Magic Finance программ дээр тайлан гаргалт.',
+                category='Хөтөлбөр'),
+            FAQ(question='Сургалтын үнэ хэд вэ?',
+                answer='100% Онлайн — 360,000₮, Хосолсон — 440,000₮, Багштай онлайн — 660,000₮, Танхим — 880,000₮. PocketZero-оор 4-6 хуваан, хүүгүй төлөх боломжтой.',
+                category='Төлбөр'),
+            FAQ(question='Хичээл хэдэн цагт ордог вэ?',
+                answer='Өглөөний анги 10:00–13:00, оройн анги 18:00–21:00. Та өөрт тохирох цагаа сонгож болно.',
+                category='Цаг'),
+            FAQ(question='Сургалтын төв хаана байрладаг вэ?',
+                answer='БЗД 13-р хороолол, Натурын зам, UB Tower Plus, 5-р давхар, 509 тоот.',
+                category='Хаяг'),
+            FAQ(question='Сургалтын дараа сертификат олгодог уу?',
+                answer='Тийм. 4 долоо хоногийн хичээл дуусаад шалгалт өгсний дараа Мэжик Финансийн албан ёсны сертификат олгоно. Мөн Magic Finance программын 6 сарын үнэгүй эрх бэлэглэнэ.',
+                category='Сертификат'),
+            FAQ(question='Хэн ч сурч болох уу?',
+                answer='Тийм, та ямар ч мэргэжилтэй, ямар ч түвшний мэдлэгтэй байсан суралцах боломжтой. Бид эхнээс нь ойлгомжтой заадаг.',
+                category='Бүртгэл'),
+            FAQ(question='Төлбөрөө хуваан төлж болох уу?',
+                answer='Болно. PocketZero апп ашиглаад 4-6 хуваан, хүүгүй шимтгэлгүй төлөх боломжтой. Эсвэл сургалт эхлэхдээ хагасыг нь, дараа нь үлдсэнийг төлөх ч болно.',
+                category='Төлбөр'),
+        ]
+        for f in faqs:
+            db.session.add(f)
+        print(f'Seeded {len(faqs)} default FAQs.')
+
+    db.session.commit()
+
+
 def init_db():
-    """Initialize database tables and seed the admin user from env."""
+    """Initialize database tables, seed admin user + default Courses/FAQs."""
     with app.app_context():
         db.create_all()
+        seed_courses_and_faqs()
 
         if User.query.filter_by(username='admin').first():
             return
