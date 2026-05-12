@@ -67,6 +67,10 @@ class FacebookUser(db.Model):
     phone = db.Column(db.String(20))
     is_lead = db.Column(db.Boolean, default=False)
     lead_status = db.Column(db.String(50), default='new')  # new, contacted, converted
+    # Funnel state: 'curious' -> 'exploring_courses' -> 'pricing' -> 'ready'
+    funnel_stage = db.Column(db.String(30), default='curious')
+    # Last time we sent a proactive nudge (kept null until first nudge fires)
+    last_nudge_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -219,20 +223,161 @@ def post_comment_on_page(post_id, comment_text):
         print(f"Error posting comment: {e}")
         return False
 
+# ===================== SCHEMA MIGRATION =====================
+
+def ensure_schema():
+    """Idempotent schema migration for columns added after the first deploy.
+
+    SQLite-style ALTER TABLE ADD COLUMN works on Postgres too, so this stays
+    portable if the user later switches the SQLALCHEMY_DATABASE_URI.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(db.engine)
+    if 'facebook_user' not in inspector.get_table_names():
+        return  # create_all() will handle a brand-new DB
+
+    existing = {col['name'] for col in inspector.get_columns('facebook_user')}
+    additions = []
+    if 'funnel_stage' not in existing:
+        additions.append("ADD COLUMN funnel_stage VARCHAR(30) DEFAULT 'curious'")
+    if 'last_nudge_at' not in existing:
+        additions.append("ADD COLUMN last_nudge_at DATETIME")
+
+    if not additions:
+        return
+
+    with db.engine.begin() as conn:
+        for clause in additions:
+            try:
+                conn.exec_driver_sql(f"ALTER TABLE facebook_user {clause}")
+                print(f"Schema migration: facebook_user {clause}")
+            except Exception as e:
+                print(f"Schema migration skipped ({clause}): {e}")
+
+
+# ===================== SESSION + FUNNEL CLASSIFIERS =====================
+
+# Time thresholds for the four session states. Tunable per business need.
+SESSION_ACTIVE_WINDOW = timedelta(hours=2)   # within -> 'active'
+SESSION_GAP_WINDOW = timedelta(hours=24)     # active..this -> 'gap'; beyond -> 'returning'
+
+
+def classify_session(last_msg_at):
+    """Return 'new' | 'active' | 'gap' | 'returning' based on time since last_msg_at."""
+    if last_msg_at is None:
+        return 'new'
+    delta = datetime.utcnow() - last_msg_at
+    if delta < SESSION_ACTIVE_WINDOW:
+        return 'active'
+    if delta < SESSION_GAP_WINDOW:
+        return 'gap'
+    return 'returning'
+
+
+# Mongolian-keyword funnel detection. Matching is case-insensitive substring,
+# so stems catch inflected forms (e.g. 'бүртгүүл' matches 'бүртгүүлмээр').
+FUNNEL_KEYWORDS = {
+    'ready': [
+        'бүртгүүл', 'бүртгэх', 'бүртгээч', 'бүртгүүлье', 'элсэх', 'элсье',
+        'утасны дугаар', 'дугаараа', 'холбогд', 'эхэлмээр', 'оролцмоор',
+        'сонгомоор', 'хэзээ эхэлдэг', 'хэзээ эхэлж байгаа',
+    ],
+    'pricing': [
+        'үнэ', 'төлбөр', 'хэд', 'хэдэн төгрөг', 'хямдрал', 'хямд',
+        'хуваан төлөх', 'хуваан', 'pocketzero', 'хямдра', 'төлөх',
+        'хөнгөлөлт', 'дискаунт', 'хямдар',
+    ],
+    'exploring_courses': [
+        'хичээл', 'анги', 'хөтөлбөр', 'сургалт', 'долоо хоног',
+        'агуулга', 'юу заадаг', 'юу үздэг', 'танхим', 'онлайн',
+        'хосолсон', 'хэлбэр', 'цаг', 'хэдэн цагт', 'хуваарь',
+    ],
+}
+
+STAGE_RANK = {'curious': 0, 'exploring_courses': 1, 'pricing': 2, 'ready': 3}
+
+
+def detect_funnel_stage(message_text, current_stage='curious'):
+    """Classify the user's intent. Never regresses: only moves forward in the funnel."""
+    current = current_stage or 'curious'
+    if not message_text:
+        return current
+    text = message_text.lower()
+    for stage in ('ready', 'pricing', 'exploring_courses'):
+        if any(kw in text for kw in FUNNEL_KEYWORDS[stage]):
+            return stage if STAGE_RANK[stage] > STAGE_RANK.get(current, 0) else current
+    return current
+
+
+def first_name_of(full_name):
+    """Pull a clean first name from a Facebook display name, or '' if unknown."""
+    if not full_name or full_name.strip().lower() == 'unknown':
+        return ''
+    return full_name.strip().split()[0]
+
+
+SESSION_RULES = {
+    'new': (
+        '0. Энэ бол хэрэглэгчтэй анх удаа ярилцаж байгаа явдал. Богино, '
+        'дулаахан мэндчилгээгээр эхлээд (жишээ нь "Сайн байна уу!") шууд '
+        'тэдний асуултанд ороорой.'
+    ),
+    'active': (
+        '0. ЭНЭ БОЛ ҮРГЭЛЖИЛСЭН ЯРИА. Хэрэглэгчтэй сүүлийн хэдэн минутын дотор '
+        'ярилцаж байсан тул "Сайн байна уу", "Тавтай морил", өөрийгөө дахин '
+        'танилцуулах гэх мэтийг БҮҮ оруул. Өмнөх контекстийг санаж буй мэт '
+        'товч, ноорог байдлаар шууд асуултын хариулт руу ор.'
+    ),
+    'gap': (
+        '0. Хэрэглэгчтэй өнөөдөр аль хэдийн ярилцаад, цөөн цагийн дараа эргэж '
+        'ирлээ. Дахин мэндлэхгүйгээр шууд асуултанд найрсагаар хариул. Хэрэгтэй '
+        'үед "Үргэлжлүүлээд тусалъя" гэх мэт богино гүүр хэллэг л ашигла.'
+    ),
+    'returning': (
+        '0. Хэрэглэгч 1+ хоногийн дараа эргэн ирлээ. Богино, дулаахан '
+        'мэндчилгээгээр (жишээ нь "Сайн байна уу, эргэж ирсэнд таатай байна!") '
+        'эхэлж, өмнө ярьсан зүйлээ зөөлөн санагдуулаад, "Юу тодруулах хэрэгтэй '
+        'байна?" гэж асуу.'
+    ),
+}
+
+FUNNEL_RULES = {
+    'curious': (
+        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Сонирхож буй. Сургалтын үндсэн давуу талыг товч '
+        'танилцуулаад "Ямар чиглэлийн хичээл сонирхож байна?" гэх мэт нээлттэй '
+        'асуулт асуу. Үнэ, бүртгэлийн талаар хэт эрт бүү ярь.'
+    ),
+    'exploring_courses': (
+        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Сургалт сонгож буй. Тодорхой ангийн агуулга, '
+        '4 долоо хоногийн хөтөлбөр, цаг хуваарь, танхим/онлайн хэлбэрийг '
+        'тодруулж тайлбарла. Аль анги нь тэдэнд тохиромжтой байж болохыг нь '
+        'эелдгээр асуу.'
+    ),
+    'pricing': (
+        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Үнэ судалж буй. Дөрвөн ангийн үнэ, PocketZero-оор '
+        '4-6 хуваан хүүгүй төлөх боломж, Magic Finance программын 6 сарын '
+        'үнэгүй ашиглах эрхийг онцолж тайлбарла. Төсөвт нь тохирох '
+        'хувилбарыг санал болго.'
+    ),
+    'ready': (
+        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Бүртгүүлэхэд бэлэн. Богино урамшуулал ("Маш сайн '
+        'сонголт!") хийж, БҮРТГЭЛИЙН ЛИНК-ийг хариултдаа оруул. Утасны '
+        'дугаараа үлдээх хүсэлтийг найрсагаар нэмж асуу.'
+    ),
+}
+
+
 # ===================== LLM HELPERS =====================
 
-def build_system_prompt(is_new_session=True):
-    """Build system prompt with training and FAQ knowledge.
-
-    is_new_session=True when there are no prior messages or the last interaction
-    was >24h ago. Controls whether the bot is allowed to greet the user.
-    """
+def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name=''):
+    """Build system prompt with training, FAQ, session-state and funnel context."""
     faqs = FAQ.query.all()
     faq_text = "\n".join([f"Q: {faq.question}\nA: {faq.answer}" for faq in faqs])
 
     courses = Course.query.filter_by(is_active=True).all()
     courses_text = "\n".join([
-        f"- {c.name} ({c.course_type}): {c.price}₮, эхлэх: {c.start_date.strftime('%Y-%m-%d')}, цаг: {c.time}"
+        f"- {c.name} ({c.course_type}): {int(c.price):,}₮, эхлэх: {c.start_date.strftime('%Y-%m-%d')}, цаг: {c.time}"
         for c in courses
     ])
 
@@ -240,23 +385,20 @@ def build_system_prompt(is_new_session=True):
         f"БҮРТГЭЛИЙН ЛИНК:\n{GOOGLE_FORM_URL}\n" if GOOGLE_FORM_URL else ""
     )
 
-    if is_new_session:
-        greeting_rule = (
-            "0. Энэ нь шинэ яриа эсвэл хэрэглэгчтэй удаан хугацаанд (24+ цаг) "
-            "холбоо тасарсан байсан үед эхэлж байна. Та товч, дулаахан "
-            "мэндчилгээгээр (жишээ нь \"Сайн байна уу!\") эхэлж болно — "
-            "дараа нь шууд асуулт руу ор."
+    if user_first_name:
+        name_block = (
+            f"ХЭРЭГЛЭГЧИЙН НЭР: {user_first_name}\n"
+            f"Хариултдаа тохиромжтой үед нэрээр нь хандаж болно (жишээ нь "
+            f'"{user_first_name} аа,"). Гэхдээ нэрийг хэт олон бүү давт, '
+            "байгалийн ярианд тохируулж хэрэглэ.\n"
         )
     else:
-        greeting_rule = (
-            "0. ЭНЭ НЬ ҮРГЭЛЖИЛСЭН ЯРИА. Хэрэглэгчтэй сая ярилцаж байсан тул "
-            "\"Сайн байна уу\", \"Тавтай морил\", \"Баярлалаа холбогдсонд\" "
-            "гэх мэт мэндчилгээгээр БҮҮ эхэл. Шууд асуултын хариулт руу ор, "
-            "ах дүү шиг найрсагаар үргэлжлүүл. Хэрэв хэрэглэгч өөрөө мэндлэвэл "
-            "богино хариу өгч болно."
-        )
+        name_block = ""
 
-    system_prompt = f"""Та мэргэжлийн сэтгэл судлаач болон маркетер юм. Монгол хэлээр амьд хүн шиг, ойлгомжтой, халуун, туслахын сэтгэлтэй хариулт өгнө.
+    session_rule = SESSION_RULES.get(session_state, SESSION_RULES['new'])
+    funnel_rule = FUNNEL_RULES.get(funnel_stage, FUNNEL_RULES['curious'])
+
+    system_prompt = f"""Та Мэжик Санхүүгийн Группын Facebook чат туслах. Сэтгэл судлалын ойлголттой, маркетингийн ур чадвартай, нягтлан бодох сургалтын зөвлөх. Үргэлж монгол хэлээр, амьд хүн шиг ойлгомжтой, дотночоор хариулна. Англи үг бичихгүй (тусгай нэр, программын нэрийг эс тооцох).
 
 СУРГАЛТЫН ТӨВИЙН МЭДЭЭЛЭЛ:
 {TRAINING_CONTENT}
@@ -267,22 +409,33 @@ def build_system_prompt(is_new_session=True):
 ТҮГЭЭМЭЛ АСУУЛТУУД:
 {faq_text}
 
-{registration_block}
+{registration_block}{name_block}{funnel_rule}
+
 ЧУХАЛ ДҮРМҮҮД:
-{greeting_rule}
-1. Монгол хэлээр л хариулна. Англи хэл хэрэглэхгүй.
-2. Сургалтын давуу талуудыг сайн ойлгож, зөвлөгөө өгнө.
-3. Хэрэглэгч бүртгүүлэхийг хүсвэл "БҮРТГЭЛИЙН ЛИНК" хэсэгт өгөгдсөн URL-г хариултдаа оруулж илгээнэ. Үнэхээр хүсэлт байхгүй бол линк бүү шахна. Мөн утасны дугаараа үлдээх хүсэлт гарга.
-4. Утасны дугаараа үлдээсэн хэрэглэгчид: "Одоо таныг бүртгэлийн ажилтантай холбож өгье" гэж мэссеж илгээнө.
-5. Шийдэж чадахгүй асуудал ирвэл админд шилжүүлнө.
-6. Амьд хүн шиг, байгалийн хэлээр ярилцана."""
-    
+{session_rule}
+1. Хариултыг товч (3 өгүүлбэрээс ихгүй) бөгөөд тодорхой бичнэ. Урт жагсаалт оруулахаас зайлсхий.
+2. Сургалтын давуу талыг хэт зар сурталчилгаа маягтай бус, итгэлтэй найз шиг зөвлөнө.
+3. Хэрэглэгч бүртгүүлэх хүсэлтэй болсон тохиолдолд л БҮРТГЭЛИЙН ЛИНК-ийг хариултдаа бичнэ. Үе шат хүрээгүй үед линкийг бүү тулга. Утасны дугаараа үлдээх хүсэлтийг ч найрсагаар нэмж асуу.
+4. Хэрэглэгч утасны дугаар бичсэн бол баярлал илэрхийлж, "Манай ажилтан удахгүй тантай холбогдоно" гэж мэдэгд.
+5. Шийдэх боломжгүй буюу мэдэхгүй асуудал тулгарвал "Энэ асуудлыг манай ажилтан тантай эргэж холбогдож тодруулна" гэж хэлэх.
+6. Эмодзи цөөн (1-2) хэрэглэж, илүү гар бичмэл маяг бүү аватарла.
+7. Өгүүлбэрүүдийн эхлэлийг сольж бай, "Сургалт..." гэх мэт ижил үгээр дандаа бүү эхэл."""
     return system_prompt
 
-def generate_bot_response(user_message, conversation_history, is_new_session=True):
+
+def generate_bot_response(user_message, conversation_history,
+                          session_state='new', funnel_stage='curious',
+                          user_first_name=''):
     """Generate bot response using OpenAI"""
     try:
-        messages = [{"role": "system", "content": build_system_prompt(is_new_session=is_new_session)}]
+        messages = [{
+            "role": "system",
+            "content": build_system_prompt(
+                session_state=session_state,
+                funnel_stage=funnel_stage,
+                user_first_name=user_first_name,
+            ),
+        }]
         messages.extend(conversation_history)
         messages.append({"role": "user", "content": user_message})
         
@@ -295,7 +448,7 @@ def generate_bot_response(user_message, conversation_history, is_new_session=Tru
         return response.choices[0].message.content
     except Exception as e:
         print(f"Error generating response: {e}")
-        return "Уучлаарай, одоо хариулт өгөх боломжгүй байна. Дараа нь дахин оролдоно уу."
+        return "Уучлаарай, түр зуурын саатал гарсан байна. Хэдхэн минутын дараа дахин бичээрэй."
 
 def analyze_and_comment_on_post(post_content):
     """Analyze post and generate appropriate comment"""
@@ -358,6 +511,100 @@ def polling_task():
         except Exception as e:
             print(f"Polling error: {e}")
             time.sleep(60)
+
+
+# ===================== NUDGE BACKGROUND TASK =====================
+
+# Funnel-aware follow-up nudges sent when a user goes silent for several hours.
+# Polished Mongolian phrasings, one per stage. Each one is conversational, not
+# salesy, and avoids re-greeting since the user already engaged earlier today.
+def _nudge_message_for(user):
+    stage = (user.funnel_stage or 'curious').lower()
+    name_prefix = ''
+    fname = first_name_of(user.name)
+    if fname:
+        name_prefix = f"{fname} аа, "
+
+    if stage == 'ready':
+        link = GOOGLE_FORM_URL or ''
+        link_line = f"\n\nБүртгэлийн линк: {link}" if link else ""
+        return (
+            f"{name_prefix}та бүртгүүлэх талаар бодож үзсэн байх. "
+            "Утасны дугаараа үлдээвэл бид өөрсдөө эргэж холбогдоно. "
+            "Эсвэл доорх линкээр шууд бүртгүүлж болно." + link_line
+        )
+    if stage == 'pricing':
+        return (
+            f"{name_prefix}өмнө нь сургалтын үнийн талаар асууж байсан шүү. "
+            "PocketZero-оор 4-6 хуваан, хүүгүй төлөх боломж байгаа. "
+            "Тодруулах зүйл байвал чөлөөтэй бичээрэй."
+        )
+    if stage == 'exploring_courses':
+        return (
+            f"{name_prefix}таны сонирхож байсан ангийн талаар нэмж тодруулах "
+            "зүйл байвал бичээрэй. Өөрт тань тохирох хэлбэрийг олоход баяртайгаар "
+            "туслана."
+        )
+    # curious / fallback
+    return (
+        f"{name_prefix}танд сургалттай холбоотой ямар нэг асуулт үлдсэн "
+        "бол хариулахад баяртай байх болно 😊"
+    )
+
+
+def nudge_pending_leads():
+    """Send one follow-up to each user whose last message is 4-12h old.
+
+    Designed to be safe to call from a thread loop or from a request handler.
+    A user is only nudged once every 7 days to avoid spam.
+    """
+    now = datetime.utcnow()
+    window_min = now - timedelta(hours=12)
+    window_max = now - timedelta(hours=4)
+    nudge_throttle = now - timedelta(days=7)
+
+    last_msg_subq = (db.session.query(
+        Message.facebook_user_id.label('uid'),
+        db.func.max(Message.created_at).label('last_at'),
+    ).group_by(Message.facebook_user_id).subquery())
+
+    candidates = (db.session.query(FacebookUser, last_msg_subq.c.last_at)
+                  .join(last_msg_subq, FacebookUser.id == last_msg_subq.c.uid)
+                  .filter(last_msg_subq.c.last_at >= window_min)
+                  .filter(last_msg_subq.c.last_at <= window_max)
+                  .filter(db.or_(
+                      FacebookUser.last_nudge_at == None,  # noqa: E711
+                      FacebookUser.last_nudge_at < nudge_throttle,
+                  ))
+                  .all())
+
+    sent = 0
+    for user, last_at in candidates:
+        msg = _nudge_message_for(user)
+        if not send_facebook_message(user.facebook_id, msg):
+            continue
+        db.session.add(Message(
+            facebook_user_id=user.id,
+            sender='bot',
+            content=msg,
+        ))
+        user.last_nudge_at = now
+        db.session.commit()
+        sent += 1
+    if sent:
+        print(f"Nudge: sent {sent} follow-up(s).")
+    return sent
+
+
+def nudge_task():
+    """Background loop running nudge_pending_leads() every 30 minutes."""
+    while True:
+        try:
+            with app.app_context():
+                nudge_pending_leads()
+        except Exception as e:
+            print(f"Nudge error: {e}")
+        time.sleep(30 * 60)
 
 # ===================== ROUTES =====================
 
@@ -563,17 +810,19 @@ def webhook():
                             db.session.rollback()
                             fb_user = FacebookUser.query.filter_by(facebook_id=sender_id).first()
                     
-                    # Determine if this is a brand-new conversation (no prior messages, or
-                    # last activity was more than 24h ago). Done BEFORE we save the new
-                    # message so the lookup reflects the prior state.
+                    # Classify session state from the PRIOR conversation (before we save
+                    # the new inbound message). Drives the greeting behaviour.
                     last_msg = (Message.query
                                 .filter_by(facebook_user_id=fb_user.id)
                                 .order_by(Message.created_at.desc())
                                 .first())
-                    is_new_session = (
-                        last_msg is None
-                        or (datetime.utcnow() - last_msg.created_at) > timedelta(hours=24)
-                    )
+                    session_state = classify_session(last_msg.created_at if last_msg else None)
+
+                    # Advance funnel stage from the current message (no regression).
+                    new_stage = detect_funnel_stage(message_text, fb_user.funnel_stage or 'curious')
+                    if new_stage != fb_user.funnel_stage:
+                        fb_user.funnel_stage = new_stage
+                        db.session.commit()
 
                     # Save user message
                     user_msg = Message(
@@ -592,7 +841,13 @@ def webhook():
                     ]
 
                     # Generate bot response
-                    bot_response = generate_bot_response(message_text, conversation, is_new_session=is_new_session)
+                    bot_response = generate_bot_response(
+                        message_text,
+                        conversation,
+                        session_state=session_state,
+                        funnel_stage=fb_user.funnel_stage or 'curious',
+                        user_first_name=first_name_of(fb_user.name),
+                    )
                     
                     # Save bot message
                     bot_msg = Message(
@@ -615,7 +870,10 @@ def webhook():
                         db.session.commit()
 
                         # Send handoff message
-                        handoff_msg = "Одоо таныг бүртгэлийн ажилтантай холбож өгье. Түр хүлээнэ үү..."
+                        handoff_msg = (
+                            "Баярлалаа, дугаараа үлдээснийг тань хүлээж авлаа. "
+                            "Манай бүртгэлийн ажилтан удахгүй тантай эргэж холбогдох болно."
+                        )
                         send_facebook_message(sender_id, handoff_msg)
     
     return jsonify({'status': 'ok'}), 200
@@ -644,39 +902,51 @@ def seed_courses_and_faqs():
     if Course.query.count() == 0:
         courses = [
             Course(
-                name='Нягтлан-Нярвын сургалт (100% Онлайн)',
+                name='Нягтлан-Нярвын хосолсон сургалт — 100% Онлайн',
                 course_type='100% Online',
                 start_date=default_start,
-                time='Бие даан судлах',
+                time='Хүссэн үедээ судлах',
                 price=360000,
-                description='Бие даан судлах онлайн сургалт. Видео хичээл, дасгал болон Magic Finance программын 6 сарын үнэгүй эрх багтсан.',
+                description=(
+                    'Бие даан судлах онлайн сургалт. Видео хичээл, бодлогууд, '
+                    'Magic Finance программын 6 сарын үнэгүй эрх багтана.'
+                ),
                 is_active=True,
             ),
             Course(
-                name='Нягтлан-Нярвын сургалт (Хосолсон)',
+                name='Нягтлан-Нярвын хосолсон сургалт — Хосолсон хэлбэр',
                 course_type='Hybrid',
                 start_date=default_start,
-                time='1, 3, 5-д танхимаар',
+                time='Даваа/Лхагва/Баасан танхимд, бусад өдөр онлайн',
                 price=440000,
-                description='Долоо хоногийн 3 өдөр танхимаар, бусад өдөр онлайнаар хичээллэх хосолсон хөтөлбөр.',
+                description=(
+                    '7 хоногийн 3 өдөр танхимаар, үлдсэн өдрүүдэд онлайнаар '
+                    'хичээллэх уян хатан хөтөлбөр.'
+                ),
                 is_active=True,
             ),
             Course(
-                name='Нягтлан-Нярвын сургалт (Багштай онлайн)',
+                name='Нягтлан-Нярвын хосолсон сургалт — Багштай онлайн',
                 course_type='Online with Teacher',
                 start_date=default_start,
-                time='1-5 дахь өдөр онлайнаар',
+                time='Даваа-Баасан онлайн',
                 price=660000,
-                description='Долоо хоногийн 1-5 дахь өдөр багштай шууд онлайн хичээл, асуулт хариулт.',
+                description=(
+                    '1-5 дахь өдөр шууд багштай онлайн хичээл, асуулт-хариулт, '
+                    'бодит жишээний дадлагатай хөтөлбөр.'
+                ),
                 is_active=True,
             ),
             Course(
-                name='Нягтлан-Нярвын сургалт (Танхим)',
+                name='Нягтлан-Нярвын хосолсон сургалт — Танхим',
                 course_type='Classroom',
                 start_date=default_start,
-                time='1-5 дахь өдөр танхимаар',
+                time='Даваа-Баасан, өглөө 10:00-13:00 эсвэл орой 18:00-21:00',
                 price=880000,
-                description='UB Tower Plus 509 тоотод 1-5 дахь өдөр танхимаар хичээллэх бүрэн сургалт. Өглөө 10:00-13:00 эсвэл орой 18:00-21:00.',
+                description=(
+                    'UB Tower Plus, 5 давхар 509 тоот танхимд тогтмол '
+                    'хичээллэх бүрэн хэмжээний сургалт. Багштай шууд харилцана.'
+                ),
                 is_active=True,
             ),
         ]
@@ -686,27 +956,69 @@ def seed_courses_and_faqs():
 
     if FAQ.query.count() == 0:
         faqs = [
-            FAQ(question='Сургалт хэдэн долоо хоног үргэлжлэх вэ?',
-                answer='Манай сургалт нийт 4 долоо хоног үргэлжилнэ. 1-р долоо хоног: нярвын тайлан, 2-р: санхүүгийн тайлан, 3-р: татвар, 4-р: Magic Finance программ дээр тайлан гаргалт.',
+            FAQ(question='Сургалт хэдэн долоо хоног үргэлжилдэг вэ?',
+                answer=(
+                    'Сургалт нийт 4 долоо хоног үргэлжилнэ. '
+                    '1-р долоо хоногт нярвын тайлан гаргахыг сурна. '
+                    '2-р долоо хоногт санхүүгийн тайлан, '
+                    '3-р долоо хоногт татварын хичээл, '
+                    '4-р долоо хоногт Magic Finance программ дээр '
+                    'тайлан гаргахыг үздэг.'
+                ),
                 category='Хөтөлбөр'),
             FAQ(question='Сургалтын үнэ хэд вэ?',
-                answer='100% Онлайн — 360,000₮, Хосолсон — 440,000₮, Багштай онлайн — 660,000₮, Танхим — 880,000₮. PocketZero-оор 4-6 хуваан, хүүгүй төлөх боломжтой.',
+                answer=(
+                    '100% Онлайн — 360,000₮, Хосолсон хэлбэр — 440,000₮, '
+                    'Багштай онлайн — 660,000₮, Танхим — 880,000₮. '
+                    'PocketZero-оор 4-6 хуваан, хүүгүй шимтгэлгүй төлөх '
+                    'боломжтой.'
+                ),
                 category='Төлбөр'),
             FAQ(question='Хичээл хэдэн цагт ордог вэ?',
-                answer='Өглөөний анги 10:00–13:00, оройн анги 18:00–21:00. Та өөрт тохирох цагаа сонгож болно.',
+                answer=(
+                    'Өглөөний анги 10:00–13:00, оройн анги 18:00–21:00 '
+                    'хооронд хичээллэдэг. Та цагаа сонгоход тань туслана.'
+                ),
                 category='Цаг'),
             FAQ(question='Сургалтын төв хаана байрладаг вэ?',
-                answer='БЗД 13-р хороолол, Натурын зам, UB Tower Plus, 5-р давхар, 509 тоот.',
+                answer=(
+                    'Манай сургалт БЗД 13-р хороолол, Натурын замд байрлах '
+                    'UB Tower Plus, 5 давхар, 509 тоотод явагддаг.'
+                ),
                 category='Хаяг'),
             FAQ(question='Сургалтын дараа сертификат олгодог уу?',
-                answer='Тийм. 4 долоо хоногийн хичээл дуусаад шалгалт өгсний дараа Мэжик Финансийн албан ёсны сертификат олгоно. Мөн Magic Finance программын 6 сарын үнэгүй эрх бэлэглэнэ.',
+                answer=(
+                    'Тийм. 4 долоо хоногийн хичээл дуусаад шалгалт өгсний '
+                    'дараа Мэжик Санхүүгийн Группын албан ёсны сертификат '
+                    'олгоно. Мөн Magic Finance программыг 6 сар үнэгүй '
+                    'ашиглах эрх бэлэглэнэ.'
+                ),
                 category='Сертификат'),
-            FAQ(question='Хэн ч сурч болох уу?',
-                answer='Тийм, та ямар ч мэргэжилтэй, ямар ч түвшний мэдлэгтэй байсан суралцах боломжтой. Бид эхнээс нь ойлгомжтой заадаг.',
+            FAQ(question='Ямар мэргэжилтэй хүн сурч болох вэ?',
+                answer=(
+                    'Та ямар ч мэргэжилтэй, ямар ч түвшний мэдлэгтэй байсан '
+                    'хамаагүй. Бид эхнээс нь ойлгомжтой, бодит жишээн дээр '
+                    'тулгуурлан заадаг тул шинэхэн суралцагч ч амжилттай '
+                    'төгсөж чадна.'
+                ),
                 category='Бүртгэл'),
             FAQ(question='Төлбөрөө хуваан төлж болох уу?',
-                answer='Болно. PocketZero апп ашиглаад 4-6 хуваан, хүүгүй шимтгэлгүй төлөх боломжтой. Эсвэл сургалт эхлэхдээ хагасыг нь, дараа нь үлдсэнийг төлөх ч болно.',
+                answer=(
+                    'Болно. PocketZero апп ашиглан 4-6 хуваан, хүүгүй '
+                    'шимтгэлгүй төлөх боломжтой. Эсвэл сургалтын эхэнд '
+                    'хагасыг нь төлж, хичээл явагдах хугацаандаа үлдсэнийг '
+                    'нөхөн төлж болно.'
+                ),
                 category='Төлбөр'),
+            FAQ(question='Magic Finance программ гэж юу вэ?',
+                answer=(
+                    'Magic Finance бол санхүүгийн тайлан гаргахад '
+                    'зориулагдсан, манай өөрсдийн хөгжүүлсэн программ. '
+                    'Гар аргаар хийдэг ажлыг 80% хүртэл хөнгөвчилж, '
+                    'хяналтаа сайжруулна. Суралцагч бүрт 6 сар үнэгүй '
+                    'ашиглах эрх олгоно.'
+                ),
+                category='Программ'),
         ]
         for f in faqs:
             db.session.add(f)
@@ -719,6 +1031,7 @@ def init_db():
     """Initialize database tables, seed admin user + default Courses/FAQs."""
     with app.app_context():
         db.create_all()
+        ensure_schema()
         seed_courses_and_faqs()
 
         if User.query.filter_by(username='admin').first():
@@ -748,6 +1061,12 @@ init_db()
 # Disabled by default to avoid duplicate work across gunicorn workers.
 if os.environ.get('ENABLE_POLLING', 'false').lower() == 'true':
     Thread(target=polling_task, daemon=True).start()
+
+# Optional follow-up nudges to silent leads. Off by default; turn on only
+# after upgrading from Render Free, otherwise the worker spins down before
+# the loop wakes up.
+if os.environ.get('ENABLE_NUDGE', 'false').lower() == 'true':
+    Thread(target=nudge_task, daemon=True).start()
 
 
 if __name__ == '__main__':
