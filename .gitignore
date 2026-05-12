@@ -10,3 +10,5 @@ venv/
 .vscode/
 *.log
 magic_bot.zip
+magic_icon_*.png
+gmc_icon_*.png
