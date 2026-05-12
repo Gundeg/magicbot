@@ -28,9 +28,45 @@ app.config['SECRET_KEY'] = _secret_key
 # Default to local SQLite for dev; override SQLALCHEMY_DATABASE_URI in
 # production to point at a Render Persistent Disk path (e.g.
 # sqlite:////var/data/magic_bot.db) or a Postgres connection string.
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
-    'SQLALCHEMY_DATABASE_URI', 'sqlite:///magic_bot.db'
-)
+_default_db_uri = 'sqlite:///magic_bot.db'
+_db_uri = os.environ.get('SQLALCHEMY_DATABASE_URI', '') or _default_db_uri
+
+
+def _ensure_sqlite_path_writable(uri):
+    """Make sure the parent directory of a sqlite:/// path exists & is writable.
+
+    Returns the original URI if it's usable, otherwise the default URI.
+    Skips non-sqlite URIs (e.g. postgresql://). Prevents the common Render
+    misconfig of setting SQLALCHEMY_DATABASE_URI before mounting the disk
+    from taking the whole service down.
+    """
+    if not uri.startswith('sqlite:'):
+        return uri
+    # sqlite:////absolute/path/db -> path is /absolute/path/db
+    # sqlite:///relative/path/db  -> path is relative/path/db
+    after_scheme = uri[len('sqlite:'):].lstrip('/')
+    sqlite_path = '/' + after_scheme if uri.startswith('sqlite:////') else after_scheme
+    parent = os.path.dirname(sqlite_path)
+    if not parent:
+        return uri
+    try:
+        os.makedirs(parent, exist_ok=True)
+        # Verify writable
+        probe = os.path.join(parent, '.write_test')
+        with open(probe, 'w') as f:
+            f.write('ok')
+        os.remove(probe)
+        return uri
+    except OSError as e:
+        print(
+            f"WARNING: SQLALCHEMY_DATABASE_URI={uri!r} is not usable "
+            f"({e!s}). Falling back to {_default_db_uri!r}. "
+            "Likely you set the URI before adding a Render Persistent Disk."
+        )
+        return _default_db_uri
+
+
+app.config['SQLALCHEMY_DATABASE_URI'] = _ensure_sqlite_path_writable(_db_uri)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize extensions
