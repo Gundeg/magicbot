@@ -1,7 +1,10 @@
 import os
 import re
 import json
+import hmac
+import hashlib
 import requests
+from collections import defaultdict, deque
 from pathlib import Path
 from datetime import datetime, timedelta
 from functools import wraps
@@ -11,7 +14,7 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 from openai import OpenAI
-from threading import Thread
+from threading import Thread, Lock
 import time
 
 PHONE_RE = re.compile(r'(?:\+?976[\s-]?)?[89]\d{7}')
@@ -22,7 +25,12 @@ _secret_key = os.environ.get('SECRET_KEY')
 if not _secret_key:
     raise RuntimeError("SECRET_KEY environment variable is required")
 app.config['SECRET_KEY'] = _secret_key
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///magic_bot.db'
+# Default to local SQLite for dev; override SQLALCHEMY_DATABASE_URI in
+# production to point at a Render Persistent Disk path (e.g.
+# sqlite:////var/data/magic_bot.db) or a Postgres connection string.
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+    'SQLALCHEMY_DATABASE_URI', 'sqlite:///magic_bot.db'
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize extensions
@@ -39,6 +47,9 @@ FACEBOOK_PAGE_ID = os.environ.get('FACEBOOK_PAGE_ID', '')
 FACEBOOK_ACCESS_TOKEN = os.environ.get('FACEBOOK_ACCESS_TOKEN', '')
 if not FACEBOOK_ACCESS_TOKEN:
     raise RuntimeError("FACEBOOK_ACCESS_TOKEN environment variable is required")
+# App Secret is used to verify X-Hub-Signature-256 on incoming webhooks.
+# Optional — if unset we log a warning and accept all payloads (dev mode).
+FACEBOOK_APP_SECRET = os.environ.get('FACEBOOK_APP_SECRET', '')
 GOOGLE_FORM_URL = os.environ.get('GOOGLE_FORM_URL', '')
 
 # Load training content
@@ -146,6 +157,62 @@ def admin_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+# ===================== WEBHOOK SECURITY + RATE LIMIT =====================
+
+def verify_facebook_signature(raw_body, header_value):
+    """Validate X-Hub-Signature-256 against HMAC-SHA256(raw_body, app_secret).
+
+    If FACEBOOK_APP_SECRET is unset we skip verification with a warning so dev
+    deploys don't break before the secret is wired. On Live Mode you MUST set
+    the secret — Facebook will sign every payload and an unsigned request
+    means an attacker is forging Messenger traffic.
+    """
+    if not FACEBOOK_APP_SECRET:
+        return True
+    if not header_value or not header_value.startswith('sha256='):
+        return False
+    expected = hmac.new(
+        FACEBOOK_APP_SECRET.encode('utf-8'),
+        raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    received = header_value.split('=', 1)[1].strip()
+    return hmac.compare_digest(expected, received)
+
+
+# Sliding-window rate limit: at most RATE_LIMIT_MAX messages per RATE_LIMIT_WINDOW
+# from a single Facebook sender_id. Defends OpenAI cost from one chatty/spammy
+# user. State is in-memory per worker — fine for a single Render instance; if
+# you scale horizontally swap this for Redis.
+RATE_LIMIT_MAX = int(os.environ.get('RATE_LIMIT_MAX', '5'))
+RATE_LIMIT_WINDOW = timedelta(seconds=int(os.environ.get('RATE_LIMIT_WINDOW_SECONDS', '60')))
+_rate_state = defaultdict(deque)
+_rate_state_lock = Lock()
+
+
+def check_rate_limit(sender_id):
+    """Return True if sender is within the limit; record the hit. False if over."""
+    now = datetime.utcnow()
+    cutoff = now - RATE_LIMIT_WINDOW
+    with _rate_state_lock:
+        dq = _rate_state[sender_id]
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        if len(dq) >= RATE_LIMIT_MAX:
+            return False
+        dq.append(now)
+        # Cheap periodic GC so dormant senders don't leak memory.
+        if len(_rate_state) > 5000:
+            for sid in [k for k, v in _rate_state.items() if not v]:
+                del _rate_state[sid]
+        return True
+
+
+RATE_LIMIT_REPLY = (
+    "Та маш олон мессеж бичиж байна. 1 минутын дараа дахин оролдоорой. 🙏"
+)
+
 
 # ===================== FACEBOOK API HELPERS =====================
 
@@ -784,16 +851,28 @@ def settings():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Facebook Messenger webhook"""
-    data = request.get_json()
-    
+    raw_body = request.get_data()
+    if not verify_facebook_signature(raw_body, request.headers.get('X-Hub-Signature-256', '')):
+        print("Webhook rejected: invalid or missing X-Hub-Signature-256")
+        return jsonify({'error': 'invalid signature'}), 403
+
+    data = request.get_json(silent=True) or {}
+
     if data.get('object') == 'page':
         for entry in data.get('entry', []):
             for messaging_event in entry.get('messaging', []):
                 sender_id = messaging_event.get('sender', {}).get('id')
                 recipient_id = messaging_event.get('recipient', {}).get('id')
-                
+
                 if messaging_event.get('message'):
                     message_text = messaging_event['message'].get('text')
+
+                    # Per-sender rate limit. Reply once with a polite throttle
+                    # message so the user knows their input was received, then
+                    # skip the OpenAI call.
+                    if sender_id and not check_rate_limit(sender_id):
+                        send_facebook_message(sender_id, RATE_LIMIT_REPLY)
+                        continue
                     
                     # Get or create Facebook user (handle webhook retries racing on the same sender)
                     fb_user = FacebookUser.query.filter_by(facebook_id=sender_id).first()
