@@ -93,6 +93,12 @@ if not FACEBOOK_ACCESS_TOKEN:
 # App Secret is used to verify X-Hub-Signature-256 on incoming webhooks.
 # Optional — if unset we log a warning and accept all payloads (dev mode).
 FACEBOOK_APP_SECRET = os.environ.get('FACEBOOK_APP_SECRET', '')
+if not FACEBOOK_APP_SECRET:
+    print(
+        "WARNING: FACEBOOK_APP_SECRET not set — accepting all webhook payloads "
+        "unverified. Live-mode deploys MUST set this or Facebook traffic can be "
+        "forged."
+    )
 GOOGLE_FORM_URL = os.environ.get('GOOGLE_FORM_URL', '')
 
 # Training content: env override wins so a single codebase can serve multiple
@@ -304,9 +310,19 @@ def send_facebook_message(recipient_id, message_text):
     }
     try:
         response = requests.post(url, json=data, headers=headers, params=params)
-        return response.status_code == 200
+        if response.status_code != 200:
+            # Surface the FB error body so token/permission issues stop being
+            # silent. Common codes: (#190) bad token, (#10)/(#200) missing
+            # pages_messaging, (#100) bad recipient_id, (#551) outside 24h.
+            body = response.text[:500] if response.text else '<empty>'
+            print(
+                f"Send API FAILED recipient={recipient_id} "
+                f"status={response.status_code} body={body}"
+            )
+            return False
+        return True
     except Exception as e:
-        print(f"Error sending message: {e}")
+        print(f"Error sending message to recipient={recipient_id}: {e}")
         return False
 
 def get_facebook_user_info(facebook_id):
@@ -1202,17 +1218,45 @@ def toggle_admin_role(admin_id):
 def webhook():
     """Facebook Messenger webhook"""
     raw_body = request.get_data()
-    if not verify_facebook_signature(raw_body, request.headers.get('X-Hub-Signature-256', '')):
-        print("Webhook rejected: invalid or missing X-Hub-Signature-256")
+    sig_header = request.headers.get('X-Hub-Signature-256', '')
+    if not verify_facebook_signature(raw_body, sig_header):
+        # Surface header presence + body size so we can distinguish "unsigned
+        # forged request" from "real Facebook delivery rejected because the app
+        # secret env var doesn't match the FB app's secret".
+        sig_preview = (sig_header[:14] + '…') if sig_header else '<missing>'
+        print(
+            f"Webhook rejected: signature mismatch "
+            f"sig_header={sig_preview} body_len={len(raw_body)} "
+            f"app_secret_set={bool(FACEBOOK_APP_SECRET)}"
+        )
         return jsonify({'error': 'invalid signature'}), 403
 
     data = request.get_json(silent=True) or {}
 
+    # One line per delivery so Render logs prove Facebook is actually hitting us
+    # and which senders are in the payload. Critical when "bot doesn't reply"
+    # turns out to be "webhook never fired".
+    entries = data.get('entry', []) if isinstance(data, dict) else []
+    senders = [
+        ev.get('sender', {}).get('id')
+        for entry in entries
+        for ev in entry.get('messaging', [])
+    ]
+    print(
+        f"Webhook received object={data.get('object')!r} "
+        f"entries={len(entries)} senders={senders}"
+    )
+
     if data.get('object') == 'page':
-        for entry in data.get('entry', []):
+        for entry in entries:
             for messaging_event in entry.get('messaging', []):
                 sender_id = messaging_event.get('sender', {}).get('id')
                 recipient_id = messaging_event.get('recipient', {}).get('id')
+                event_keys = [k for k in messaging_event.keys() if k not in ('sender', 'recipient', 'timestamp')]
+                print(
+                    f"Webhook event sender={sender_id} recipient={recipient_id} "
+                    f"kinds={event_keys}"
+                )
 
                 if messaging_event.get('message'):
                     message_text = messaging_event['message'].get('text')
