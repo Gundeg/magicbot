@@ -26,9 +26,15 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-people"></i> Утсаа үлдээсэн лидүүд</span>
-                <button type="button" class="btn btn-sm btn-light" id="exportBtn">
-                    <i class="bi bi-download"></i> CSV
-                </button>
+                <div>
+                    <button type="button" class="btn btn-sm btn-light" id="backfillBtn"
+                            title="Facebook-аас нэрийг дахин татах (Unknown гэсэн бүх хэрэглэгчид)">
+                        <i class="bi bi-arrow-clockwise"></i> Нэр шинэчлэх
+                    </button>
+                    <button type="button" class="btn btn-sm btn-light" id="exportBtn">
+                        <i class="bi bi-download"></i> CSV
+                    </button>
+                </div>
             </div>
             <div class="card-body">
                 <input type="text" class="form-control mb-3" id="searchInput" placeholder="Нэр эсвэл утсаар хайх...">
@@ -150,6 +156,31 @@ document.getElementById('searchInput').addEventListener('keyup', function () {
     document.querySelectorAll('#leadsList tr').forEach(row => {
         row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none';
     });
+});
+
+document.getElementById('backfillBtn').addEventListener('click', function () {
+    const btn = this;
+    btn.disabled = true;
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Шинэчилж байна...';
+    fetch('{{ url_for("backfill_names") }}', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json'},
+    })
+        .then(r => r.json())
+        .then(d => {
+            alert(
+                `Оролдсон: ${d.attempted}\n` +
+                `Шинэчилсэн: ${d.updated}\n` +
+                `Үлдсэн Unknown: ${d.remaining_unknown_after}\n\n` +
+                (d.updated > 0 ? 'Хуудсыг шинэчилж байна...' :
+                 'Нэр шинэчилсэнгүй. Render-ийн log-оос Facebook-ийн алдааг шалгана уу.')
+            );
+            if (d.updated > 0) location.reload();
+        })
+        .catch(e => alert('Алдаа: ' + e))
+        .finally(() => { btn.disabled = false; btn.innerHTML = original; });
 });
 
 document.getElementById('exportBtn').addEventListener('click', function () {

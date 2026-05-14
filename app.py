@@ -370,17 +370,61 @@ def send_facebook_message(recipient_id, message_text):
         return False
 
 def get_facebook_user_info(facebook_id):
-    """Get user info from Facebook"""
+    """Get user info from Facebook's User Profile API.
+
+    Returns the JSON dict on success, {} on any failure. Failures are logged
+    with status + body preview because the most common cause of empty names
+    is the app being in Development mode without Advanced Access on
+    pages_messaging — which silently returns 4xx with a 'permissions'
+    error. Without the log it looks identical to a successful empty response.
+
+    Note: 'email' usually isn't returned for Messenger PSIDs even on Live mode,
+    so only 'name' is reliably useful here.
+    """
     url = f"https://graph.facebook.com/v18.0/{facebook_id}"
-    params = {"fields": "name,email", "access_token": FACEBOOK_ACCESS_TOKEN}
+    params = {"fields": "name,first_name,last_name", "access_token": FACEBOOK_ACCESS_TOKEN}
     try:
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=5)
         if response.status_code == 200:
-            return response.json()
+            data = response.json() or {}
+            if not data.get('name'):
+                # 200 but no name field is unusual — log it so we don't
+                # invisibly fall back to "Unknown".
+                print(
+                    f"FB user profile: 200 OK but missing name for psid={facebook_id} "
+                    f"body={str(data)[:200]}"
+                )
+            return data
+        print(
+            f"FB user profile failed psid={facebook_id} status={response.status_code} "
+            f"body={response.text[:300]}"
+        )
         return {}
     except Exception as e:
-        print(f"Error getting user info: {e}")
+        print(f"FB user profile exception psid={facebook_id}: {e}")
         return {}
+
+
+def refresh_facebook_user_name(fb_user):
+    """Re-fetch the display name for a single FacebookUser and persist if we
+    get something useful. Returns the new name (or '' if still unknown).
+
+    Used in two places: (a) on a follow-up message when the existing row's
+    name is empty/Unknown, and (b) the /admin/api/backfill-names sweep that
+    retries every Unknown user after permissions are fixed.
+    """
+    info = get_facebook_user_info(fb_user.facebook_id)
+    name = (info.get('name') or '').strip()
+    if not name:
+        return ''
+    fb_user.name = name
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Refresh name commit failed for psid={fb_user.facebook_id}: {e}")
+        return ''
+    return name
 
 def get_recent_messages():
     """Poll for recent messages from Facebook Messenger"""
@@ -1323,6 +1367,41 @@ def issues():
     issues = AdminIssue.query.filter_by(status='open').all()
     return render_template('issues.html', issues=issues)
 
+@app.route('/admin/api/backfill-names', methods=['POST'])
+@login_required
+@admin_required
+def backfill_names():
+    """Retry the Facebook profile lookup for every user currently named 'Unknown'.
+
+    Use after pages_messaging gets Advanced Access (App Review) — historical
+    rows created in Dev mode will then become populatable. Caps at 200 users
+    per call so a manual click doesn't accidentally hammer the Graph API on
+    a huge backlog; re-run as needed.
+    """
+    targets = (FacebookUser.query
+               .filter(db.or_(
+                   FacebookUser.name == None,  # noqa: E711
+                   FacebookUser.name == '',
+                   FacebookUser.name == 'Unknown',
+               ))
+               .order_by(FacebookUser.id.asc())
+               .limit(200)
+               .all())
+    updated = 0
+    for u in targets:
+        if refresh_facebook_user_name(u):
+            updated += 1
+    return jsonify({
+        'attempted': len(targets),
+        'updated': updated,
+        'remaining_unknown_after': FacebookUser.query.filter(db.or_(
+            FacebookUser.name == None,  # noqa: E711
+            FacebookUser.name == '',
+            FacebookUser.name == 'Unknown',
+        )).count(),
+    })
+
+
 @app.route('/admin/api/handoff-poll')
 @login_required
 @admin_required
@@ -1828,7 +1907,7 @@ def webhook():
                         user_info = get_facebook_user_info(sender_id)
                         fb_user = FacebookUser(
                             facebook_id=sender_id,
-                            name=user_info.get('name', 'Unknown')
+                            name=(user_info.get('name') or '').strip() or 'Unknown'
                         )
                         db.session.add(fb_user)
                         try:
@@ -1836,6 +1915,11 @@ def webhook():
                         except IntegrityError:
                             db.session.rollback()
                             fb_user = FacebookUser.query.filter_by(facebook_id=sender_id).first()
+                    elif (fb_user.name or '').strip().lower() in ('', 'unknown'):
+                        # First attempt may have failed (Dev mode, rate limit, etc.) —
+                        # try again on this message. Best-effort; failure is logged
+                        # and we move on.
+                        refresh_facebook_user_name(fb_user)
                     
                     # Classify session state from the PRIOR conversation (before we save
                     # the new inbound message). Drives the greeting behaviour.
