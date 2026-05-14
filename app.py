@@ -1367,6 +1367,68 @@ def issues():
     issues = AdminIssue.query.filter_by(status='open').all()
     return render_template('issues.html', issues=issues)
 
+@app.route('/admin/api/test-telegram', methods=['POST'])
+@login_required
+@admin_required
+def test_telegram():
+    """Send a 'this is a test' message to every configured Telegram chat ID
+    so admins can verify the wiring without faking a handoff via Facebook.
+
+    Returns per-recipient status so the failing one stands out immediately —
+    most "no message arrived" issues are one wrong digit in a chat ID or the
+    token env var not actually being set on the Render service.
+    """
+    token = os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()
+    chat_ids = get_telegram_chat_ids()
+
+    result = {
+        'token_set': bool(token),
+        'token_preview': (token[:6] + '…' + token[-4:]) if token else '',
+        'chat_ids': chat_ids,
+        'attempts': [],
+        'success_count': 0,
+    }
+
+    if not token:
+        result['error'] = (
+            'TELEGRAM_BOT_TOKEN орчны хувьсагч тогтоогдоогүй байна. '
+            'Render dashboard → Environment руу орж нэмж, дахин deploy хийнэ үү.'
+        )
+        return jsonify(result)
+    if not chat_ids:
+        result['error'] = (
+            'Chat ID-ууд хоосон байна. Доорх "Telegram chat ID-ууд" хэсэгт '
+            'утгаа оруулаад "Save Settings" дарсан эсэхээ шалгана уу.'
+        )
+        return jsonify(result)
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    test_msg = (
+        f"✅ Test from MagicBot admin panel. "
+        f"Sent by: {current_user.username}. "
+        f"If you see this, your Telegram alerts are wired correctly."
+    )
+    for cid in chat_ids:
+        item = {'chat_id': cid, 'ok': False, 'status': None, 'error': None}
+        try:
+            resp = requests.post(url, json={
+                'chat_id': cid,
+                'text': test_msg,
+                'disable_web_page_preview': True,
+            }, timeout=10)
+            item['status'] = resp.status_code
+            if resp.status_code == 200:
+                item['ok'] = True
+                result['success_count'] += 1
+            else:
+                item['error'] = resp.text[:300]
+        except Exception as e:
+            item['error'] = str(e)
+        result['attempts'].append(item)
+
+    return jsonify(result)
+
+
 @app.route('/admin/api/backfill-names', methods=['POST'])
 @login_required
 @admin_required

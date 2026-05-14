@@ -84,13 +84,21 @@
 
                     <div class="mb-3">
                         <label for="telegramChatIds" class="form-label">Telegram chat ID-ууд</label>
-                        <input type="text" class="form-control" id="telegramChatIds"
-                               placeholder="123456789, 987654321"
-                               value="{{ settings.get('telegram_chat_ids', '') }}">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="telegramChatIds"
+                                   placeholder="123456789, 987654321"
+                                   value="{{ settings.get('telegram_chat_ids', '') }}">
+                            <button type="button" class="btn btn-outline-primary" id="testTelegramBtn"
+                                    title="Хадгалсан chat ID руу туршилтын мессеж явуулах">
+                                <i class="bi bi-send"></i> Туршиж үзэх
+                            </button>
+                        </div>
                         <div class="form-text">
                             Таслалаар тусгаарлан бичнэ. ID-аа авахдаа Telegram дээр өөрийнхөө ботод
                             мессеж бичээд <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>-ийг нээж үзнэ.
                             Бот токеныг <code>TELEGRAM_BOT_TOKEN</code> орчны хувьсагчид нуу.
+                            <strong>Анхаар:</strong> "Туршиж үзэх" товч ХАДГАЛСАН утга руу мессеж явуулна —
+                            ID өөрчилсөн бол эхлээд "Save Settings" дар.
                         </div>
                     </div>
 
@@ -190,6 +198,52 @@
 </div>
 
 <script>
+document.getElementById('testTelegramBtn').addEventListener('click', function () {
+    const btn = this;
+    btn.disabled = true;
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Илгээж байна...';
+    fetch('{{ url_for("test_telegram") }}', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json'},
+    })
+        .then(r => r.json())
+        .then(d => {
+            let msg = '';
+            if (!d.token_set) {
+                msg = '❌ TELEGRAM_BOT_TOKEN орчны хувьсагч тогтоогдоогүй.\n\n' +
+                      'Render dashboard → Environment руу орж нэмнэ үү:\n' +
+                      'Key: TELEGRAM_BOT_TOKEN\n' +
+                      'Value: BotFather-аас авсан токен\n\n' +
+                      'Дараа нь сервис автоматаар дахин deploy хийгдэх ёстой.';
+            } else if (!d.chat_ids || d.chat_ids.length === 0) {
+                msg = '❌ Chat ID хоосон. Дээрх талбарт ID оруулаад\n' +
+                      '"Save Settings" товчийг дарсан эсэхээ шалга.';
+            } else {
+                msg = `Token: ${d.token_preview}\n` +
+                      `Chat ID-ууд: ${d.chat_ids.join(', ')}\n` +
+                      `Амжилт: ${d.success_count}/${d.attempts.length}\n\n`;
+                d.attempts.forEach(a => {
+                    if (a.ok) {
+                        msg += `✅ ${a.chat_id} → Telegram-ыг шалгана уу!\n`;
+                    } else {
+                        msg += `❌ ${a.chat_id} → HTTP ${a.status || 'error'}: ${(a.error || '').slice(0, 200)}\n`;
+                    }
+                });
+                if (d.success_count === 0) {
+                    msg += '\nХамгийн түгээмэл шалтгаан:\n' +
+                           '• Chat ID-аа ботодоо мессеж бичээгүй (Telegram дээр өөрийн ботоо нээгээд /start дар)\n' +
+                           '• Chat ID буруу (тоо буруу хуулсан)\n' +
+                           '• Token буруу буюу хүчингүй';
+                }
+            }
+            alert(msg);
+        })
+        .catch(e => alert('Алдаа: ' + e))
+        .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+});
+
 document.getElementById('saveSettingsBtn').addEventListener('click', function() {
     const data = {
         center_name: document.getElementById('centerName').value,
