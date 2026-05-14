@@ -57,7 +57,7 @@
                         <td>
                             <small>{{ message.content[:80] }}{% if message.content|length > 80 %}...{% endif %}</small>
                             <br>
-                            <small class="text-muted" style="cursor: pointer;" onclick="showFullMessage('{{ message.content|replace(\"'\", \"\\\'\") }}')">
+                            <small class="text-muted" style="cursor: pointer;" onclick="showFullMessage({{ message.content|tojson }})">
                                 <i class="bi bi-eye"></i> View full
                             </small>
                         </td>

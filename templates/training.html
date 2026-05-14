@@ -32,14 +32,15 @@
 
             <div class="card">
                 <div class="card-header">
-                    <i class="bi bi-book-half"></i> Сургалтын агуулга (Training corpus)
+                    <i class="bi bi-book-half"></i> Сургалтын суурь агуулга (Base intro)
                 </div>
                 <div class="card-body">
                     <p class="text-muted small mb-2">
-                        Бизнесийн талаарх бүх мэдээлэл — үйлчилгээ, үнэ, давуу тал, түгээмэл асуултын хариулт.
-                        Бот энэ агуулгаас суралцаж хариулна. Урт байж болно (хэдэн мянган үг).
+                        Компанийн ерөнхий танилцуулга — нэг л удаа бичдэг "суурь" блок.
+                        Шинэ нэмэлт, тодруулга нэмэхдээ доорх "Нэмэлт тайлбарууд" хэсгийг ашигла —
+                        тэгвэл хуучин агуулгыг устгахгүй, олон удирдлагатай зэрэгцэн ажиллах боломжтой.
                     </p>
-                    <textarea name="training_content" class="form-control font-monospace" rows="20"
+                    <textarea name="training_content" class="form-control font-monospace" rows="14"
                               placeholder="Хоосон үлдээвэл анхдагч утга ашиглагдана.">{{ training_value }}</textarea>
                     {% if not training_value %}
                     <details class="mt-2">
@@ -54,13 +55,85 @@
 
             <div class="mb-4">
                 <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-check-circle"></i> Хадгалах
+                    <i class="bi bi-check-circle"></i> Persona болон суурь агуулга хадгалах
                 </button>
                 <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
                     Цуцлах
                 </a>
             </div>
         </form>
+
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-list-check"></i> Нэмэлт тайлбарууд (Snippets)</span>
+                <button class="btn btn-sm btn-light" id="addSnippetBtn" data-bs-toggle="modal" data-bs-target="#snippetModal">
+                    <i class="bi bi-plus-circle"></i> Нэмэлт нэмэх
+                </button>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Бодит чатанд бот алдсан зүйл бүрд энд нэг шинэ тайлбар нэм. Хуучин агуулгыг
+                    дарж бичихгүй, бүх нэмэлт ботын зааварт нэгтгэгдэнэ. <strong>★ Өндөр</strong> түвшний
+                    тайлбар хариултанд илүү жинтэй нөлөөлнө.
+                </p>
+                {% if snippets %}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Гарчиг</th>
+                                <th>Ангилал</th>
+                                <th>Ач холбогдол</th>
+                                <th>Төлөв</th>
+                                <th class="text-end">Үйлдэл</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for s in snippets %}
+                            <tr data-snippet='{{ {"id": s.id, "title": s.title, "body": s.body, "category": s.category or "", "priority": s.priority} | tojson | e }}'>
+                                <td>
+                                    <strong>{{ s.title }}</strong>
+                                    <div class="text-muted small">{{ s.body[:120] }}{% if s.body|length > 120 %}…{% endif %}</div>
+                                </td>
+                                <td>{{ s.category or "—" }}</td>
+                                <td>
+                                    {% if s.priority == 'high' %}
+                                        <span class="badge bg-warning text-dark">★ Өндөр</span>
+                                    {% else %}
+                                        <span class="badge bg-light text-muted border">Энгийн</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if s.is_active %}
+                                        <span class="badge bg-success">Идэвхтэй</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Идэвхгүй</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    <button type="button" class="btn btn-sm btn-warning edit-snippet" data-id="{{ s.id }}" title="Засах" aria-label="Засах">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary toggle-snippet" data-id="{{ s.id }}" title="Идэвх солих" aria-label="Идэвх солих">
+                                        <i class="bi bi-toggle2-on"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-danger delete-snippet" data-id="{{ s.id }}" title="Устгах" aria-label="Устгах">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-center text-muted py-4 mb-0">
+                    Одоогоор нэмэлт тайлбар алга. Шинэ алдаа гарах бүрт энд нэг тайлбар нэмэх нь
+                    хамгийн үр дүнтэй сургалтын арга юм.
+                </p>
+                {% endif %}
+            </div>
+        </div>
     </div>
 
     <div class="col-lg-3">
@@ -73,10 +146,12 @@
                     <strong>Хадгалсны дараа</strong> ботын дараагийн хариулт шинэ агуулгаар үүснэ. Дахин deploy хийх шаардлагагүй.
                 </p>
                 <p>
-                    <strong>Хоосон үлдээвэл</strong> Render-ийн TRAINING_CONTENT эсвэл BOT_PERSONA орчны хувьсагч, эсвэл pasted_content.txt файл ашиглагдана.
+                    <strong>Суурь агуулга</strong> = компанийн ерөнхий танилцуулга.
+                    <strong>Нэмэлт тайлбар</strong> = бодит чатнаас гарсан жижиг тодруулга, засвар.
                 </p>
                 <p class="mb-0">
-                    <strong>Зөвлөгөө:</strong> агуулгыг богино, ойлгомжтой хэсгүүдэд хувааж, давуу талыг тодорхой бич. Бот энэ бичвэрийг хариултдаа суурь болгож хэрэглэнэ.
+                    <strong>Зөвлөгөө:</strong> алдаа болгонд урт абзац бичихийн оронд богино, тодорхой нэг
+                    нэмэлт нэмж сур. Дараа нь засаж, идэвхгүй болгож, эсвэл устгаж болно.
                 </p>
             </div>
         </div>
@@ -93,4 +168,113 @@
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="snippetModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="snippetModalTitle">Нэмэлт тайлбар нэмэх</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
+            </div>
+            <div class="modal-body">
+                <form id="snippetForm">
+                    <input type="hidden" id="snippetId" value="">
+                    <div class="mb-3">
+                        <label class="form-label">Гарчиг <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="snippetTitle"
+                               placeholder="Жишээ: PocketZero-оор төлөх дэлгэрэнгүй" required>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-7 mb-3">
+                            <label class="form-label">Ангилал</label>
+                            <input type="text" class="form-control" id="snippetCategory"
+                                   placeholder="Жишээ: Төлбөр, Хичээл, Сертификат">
+                        </div>
+                        <div class="col-md-5 mb-3">
+                            <label class="form-label" for="snippetPriority">Ач холбогдол</label>
+                            <select class="form-control" id="snippetPriority" title="Ач холбогдол">
+                                <option value="normal">Энгийн</option>
+                                <option value="high">★ Өндөр (онцолж жинлэх)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Агуулга <span class="text-danger">*</span></label>
+                        <textarea class="form-control font-monospace" id="snippetBody" rows="8"
+                                  placeholder="Бодит чатнаас гарсан асуултанд яаж хариулахыг тайлбарла..." required></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Цуцлах</button>
+                <button type="button" class="btn btn-primary" id="saveSnippetBtn">Хадгалах</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const snippetUrl = '{{ url_for("training_snippets") }}';
+
+function postSnippet(payload) {
+    return fetch(snippetUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    }).then(r => r.json());
+}
+
+document.getElementById('addSnippetBtn').addEventListener('click', () => {
+    document.getElementById('snippetForm').reset();
+    document.getElementById('snippetId').value = '';
+    document.getElementById('snippetModalTitle').textContent = 'Нэмэлт тайлбар нэмэх';
+});
+
+document.getElementById('saveSnippetBtn').addEventListener('click', () => {
+    const id = document.getElementById('snippetId').value;
+    const payload = {
+        action: id ? 'edit' : 'add',
+        id: id,
+        title: document.getElementById('snippetTitle').value,
+        body: document.getElementById('snippetBody').value,
+        category: document.getElementById('snippetCategory').value,
+        priority: document.getElementById('snippetPriority').value,
+    };
+    postSnippet(payload).then(r => {
+        if (r.success) location.reload();
+        else alert(r.error || 'Алдаа гарлаа.');
+    });
+});
+
+document.querySelectorAll('.edit-snippet').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const row = btn.closest('tr');
+        const data = JSON.parse(row.dataset.snippet);
+        document.getElementById('snippetId').value = data.id;
+        document.getElementById('snippetTitle').value = data.title;
+        document.getElementById('snippetBody').value = data.body;
+        document.getElementById('snippetCategory').value = data.category;
+        document.getElementById('snippetPriority').value = data.priority;
+        document.getElementById('snippetModalTitle').textContent = 'Нэмэлт тайлбар засах';
+        new bootstrap.Modal(document.getElementById('snippetModal')).show();
+    });
+});
+
+document.querySelectorAll('.toggle-snippet').forEach(btn => {
+    btn.addEventListener('click', () => {
+        postSnippet({action: 'toggle', id: btn.dataset.id}).then(r => {
+            if (r.success) location.reload();
+        });
+    });
+});
+
+document.querySelectorAll('.delete-snippet').forEach(btn => {
+    btn.addEventListener('click', () => {
+        if (!confirm('Энэ тайлбарыг устгах уу?')) return;
+        postSnippet({action: 'delete', id: btn.dataset.id}).then(r => {
+            if (r.success) location.reload();
+        });
+    });
+});
+</script>
 {% endblock %}

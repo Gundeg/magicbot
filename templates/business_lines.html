@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block title %}Business Lines - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Бусад үйлчилгээ{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-diagram-3"></i> Компанийн бусад үйл ажиллагаа</span>
+        <button type="button" class="btn btn-sm btn-light" id="addLineBtn" data-bs-toggle="modal" data-bs-target="#lineModal">
+            <i class="bi bi-plus-circle"></i> Үйлчилгээ нэмэх
+        </button>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            Facebook хуудас бол компанийг сурталчилдаг ч, бот зөвхөн сургалтын хариулт өгөх ёсгүй.
+            Энд нэмсэн үйлчилгээний тухай асуувал бот доорх дүрмийн дагуу хариулна:
+        </p>
+        <ul class="text-muted small mb-3">
+            <li><span class="badge bg-info">Хариулах</span> — товч мэдээлэл өгөөд, дэлгэрэнгүйг ажилтнаас лавлахыг санал болгоно.</li>
+            <li><span class="badge bg-warning text-dark">Чиглүүлэх</span> — өөрөө хариулахгүй, утасны дугаар авч ажилтанд дамжуулна.</li>
+        </ul>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Нэр</th>
+                        <th>Тайлбар</th>
+                        <th>Үйлдэл</th>
+                        <th>Холбоо</th>
+                        <th>Төлөв</th>
+                        <th class="text-end">Удирдах</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in lines %}
+                    <tr data-line='{{ {"id": b.id, "name": b.name, "description": b.description or "", "action": b.action, "contact_info": b.contact_info or ""} | tojson | e }}'>
+                        <td><strong>{{ b.name }}</strong></td>
+                        <td class="text-muted small" style="max-width: 320px;">
+                            {{ (b.description or "")[:160] }}{% if b.description and b.description|length > 160 %}…{% endif %}
+                        </td>
+                        <td>
+                            {% if b.action == 'answer' %}
+                                <span class="badge bg-info">Хариулах</span>
+                            {% else %}
+                                <span class="badge bg-warning text-dark">Чиглүүлэх</span>
+                            {% endif %}
+                        </td>
+                        <td class="small">{{ b.contact_info or "—" }}</td>
+                        <td>
+                            {% if b.is_active %}
+                                <span class="badge bg-success">Идэвхтэй</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Идэвхгүй</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-sm btn-warning edit-line" data-id="{{ b.id }}" title="Засах" aria-label="Засах">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary toggle-line" data-id="{{ b.id }}" title="Идэвх солих" aria-label="Идэвх солих">
+                                <i class="bi bi-toggle2-on"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-danger delete-line" data-id="{{ b.id }}" title="Устгах" aria-label="Устгах">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">
+                            Одоогоор бусад үйлчилгээ нэмэгдээгүй. Жишээ нь "Magic Finance программ", "Санхүүгийн зөвлөгөө", "Тайлан гаргах үйлчилгээ" гэх мэт.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="lineModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="lineModalTitle">Үйлчилгээ нэмэх</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
+            </div>
+            <div class="modal-body">
+                <form id="lineForm">
+                    <input type="hidden" id="lineId" value="" title="lineId">
+                    <div class="mb-3">
+                        <label class="form-label" for="lineName">Үйлчилгээний нэр <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="lineName"
+                               placeholder="Жишээ: Magic Finance программ" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="lineDescription">Тайлбар</label>
+                        <textarea class="form-control" id="lineDescription" rows="4"
+                                  placeholder="Юу хийдэг, хэнд зориулагдсан, гол давуу тал..."></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-5 mb-3">
+                            <label class="form-label" for="lineAction">Ботын үйлдэл</label>
+                            <select class="form-control" id="lineAction" title="Ботын үйлдэл">
+                                <option value="refer">Чиглүүлэх (хүн рүү дамжуулах)</option>
+                                <option value="answer">Хариулах (товч мэдээлэл өгөх)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-7 mb-3">
+                            <label class="form-label" for="lineContact">Хариуцагч / холбоо барих</label>
+                            <input type="text" class="form-control" id="lineContact"
+                                   placeholder="Жишээ: Магик Финанс баг, 7700-9999">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Цуцлах</button>
+                <button type="button" class="btn btn-primary" id="saveLineBtn">Хадгалах</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const lineUrl = '{{ url_for("business_lines") }}';
+
+function postLine(payload) {
+    return fetch(lineUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    }).then(r => r.json());
+}
+
+document.getElementById('addLineBtn').addEventListener('click', () => {
+    document.getElementById('lineForm').reset();
+    document.getElementById('lineId').value = '';
+    document.getElementById('lineModalTitle').textContent = 'Үйлчилгээ нэмэх';
+});
+
+document.getElementById('saveLineBtn').addEventListener('click', () => {
+    const id = document.getElementById('lineId').value;
+    const payload = {
+        action: id ? 'edit' : 'add',
+        id: id,
+        name: document.getElementById('lineName').value,
+        description: document.getElementById('lineDescription').value,
+        line_action: document.getElementById('lineAction').value,
+        contact_info: document.getElementById('lineContact').value,
+    };
+    postLine(payload).then(r => {
+        if (r.success) location.reload();
+        else alert(r.error || 'Алдаа гарлаа.');
+    });
+});
+
+document.querySelectorAll('.edit-line').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const row = btn.closest('tr');
+        const data = JSON.parse(row.dataset.line);
+        document.getElementById('lineId').value = data.id;
+        document.getElementById('lineName').value = data.name;
+        document.getElementById('lineDescription').value = data.description;
+        document.getElementById('lineAction').value = data.action;
+        document.getElementById('lineContact').value = data.contact_info;
+        document.getElementById('lineModalTitle').textContent = 'Үйлчилгээ засах';
+        new bootstrap.Modal(document.getElementById('lineModal')).show();
+    });
+});
+
+document.querySelectorAll('.toggle-line').forEach(btn => {
+    btn.addEventListener('click', () => {
+        postLine({action: 'toggle', id: btn.dataset.id}).then(r => {
+            if (r.success) location.reload();
+        });
+    });
+});
+
+document.querySelectorAll('.delete-line').forEach(btn => {
+    btn.addEventListener('click', () => {
+        if (!confirm('Энэ үйлчилгээг устгах уу?')) return;
+        postLine({action: 'delete', id: btn.dataset.id}).then(r => {
+            if (r.success) location.reload();
+        });
+    });
+});
+</script>
+{% endblock %}

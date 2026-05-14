@@ -142,6 +142,12 @@
             <a class="nav-link {% if request.endpoint == 'training' %}active{% endif %}" href="{{ url_for('training') }}">
                 <i class="bi bi-mortarboard"></i> Training
             </a>
+            <a class="nav-link {% if request.endpoint == 'team' %}active{% endif %}" href="{{ url_for('team') }}">
+                <i class="bi bi-people-fill"></i> Team
+            </a>
+            <a class="nav-link {% if request.endpoint == 'business_lines' %}active{% endif %}" href="{{ url_for('business_lines') }}">
+                <i class="bi bi-diagram-3"></i> Business Lines
+            </a>
             <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="{{ url_for('settings') }}">
                 <i class="bi bi-gear"></i> Settings
             </a>
@@ -189,6 +195,86 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    {% if current_user.is_authenticated %}
+    <div id="handoffToastContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1080;"></div>
+    <script>
+    // Polls for new handoff issues every 15s and plays a beep + toast on
+    // first detection. Beep uses Web Audio API so we don't need a sound file
+    // hosted somewhere. Storage key tracks the latest issue id we've already
+    // notified about per browser, so the alert fires once per new issue.
+    (function () {
+        const POLL_URL = '{{ url_for("handoff_poll") }}';
+        const POLL_MS = 15000;
+        const STORAGE_KEY = 'magicbot_last_seen_handoff_id';
+
+        let audioCtx = null;
+        function beep() {
+            try {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                // Browsers suspend AudioContext until a user gesture; trying to
+                // resume is a no-op if it's already running.
+                audioCtx.resume && audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = 880;
+                gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.45);
+                osc.connect(gain).connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.5);
+            } catch (e) {
+                // Sound is best-effort; the toast still appears.
+            }
+        }
+
+        function showToast(count) {
+            const container = document.getElementById('handoffToastContainer');
+            if (!container) return;
+            const el = document.createElement('div');
+            el.className = 'toast align-items-center text-white bg-danger border-0 show';
+            el.role = 'alert';
+            el.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body">
+                        🤝 Шинэ handoff хүсэлт — нийт ${count} нээлттэй. <a href="{{ url_for('issues') }}" class="text-white text-decoration-underline">Үзэх</a>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Хаах"></button>
+                </div>`;
+            container.appendChild(el);
+            setTimeout(() => { el.remove(); }, 10000);
+        }
+
+        function pollOnce() {
+            fetch(POLL_URL, { credentials: 'same-origin' })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (!data || !data.latest_id) return;
+                    const lastSeen = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
+                    if (data.latest_id > lastSeen) {
+                        if (lastSeen > 0) {
+                            // Only alert when there's a genuinely NEW one — not
+                            // on first page load (avoids replaying old alerts).
+                            if (data.sound_enabled) beep();
+                            showToast(data.open_count);
+                        }
+                        localStorage.setItem(STORAGE_KEY, String(data.latest_id));
+                    }
+                })
+                .catch(() => {});
+        }
+
+        // Skip on the login page (handled by is_authenticated guard above).
+        pollOnce();
+        setInterval(pollOnce, POLL_MS);
+    })();
+    </script>
+    {% endif %}
+
     {% block extra_js %}{% endblock %}
 </body>
 </html>

@@ -150,6 +150,9 @@ class FacebookUser(db.Model):
     funnel_stage = db.Column(db.String(30), default='curious')
     # Last time we sent a proactive nudge (kept null until first nudge fires)
     last_nudge_at = db.Column(db.DateTime)
+    # When set and > now(), the bot will not auto-reply to this user — a human
+    # has been pinged and should take over. Cleared automatically once expired.
+    bot_muted_until = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -210,6 +213,47 @@ class GeneralSetting(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     key = db.Column(db.String(100), unique=True, nullable=False)
     value = db.Column(db.Text)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class TeamMember(db.Model):
+    """Staff/teacher directory the bot can reference when clients ask
+    who teaches what or who handles a given topic."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    role = db.Column(db.String(120))         # e.g. "Багш", "Хариуцагч", "Зөвлөх"
+    specialty = db.Column(db.String(255))    # e.g. "Татварын асуудал, Magic Finance"
+    bio = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class TrainingSnippet(db.Model):
+    """Additive, per-topic training notes. Managers add a new row when a
+    real chat surfaces something the bot got wrong, instead of editing one
+    giant blob and risking overwrite of someone else's work."""
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    category = db.Column(db.String(100))           # free-form tag
+    priority = db.Column(db.String(20), default='normal')  # 'high' | 'normal'
+    is_active = db.Column(db.Boolean, default=True)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class BusinessLine(db.Model):
+    """Other services the Facebook page promotes beyond training (e.g.
+    Magic Finance app, consulting, accounting outsourcing). Each line has
+    an action telling the bot whether to answer briefly or refer to staff."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False)
+    description = db.Column(db.Text)
+    action = db.Column(db.String(20), default='refer')  # 'answer' | 'refer'
+    contact_info = db.Column(db.String(255))            # e.g. phone, email, dept
+    is_active = db.Column(db.Boolean, default=True)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 # ===================== LOGIN MANAGER =====================
@@ -403,6 +447,8 @@ def ensure_schema():
         additions.append("ADD COLUMN funnel_stage VARCHAR(30) DEFAULT 'curious'")
     if 'last_nudge_at' not in existing:
         additions.append("ADD COLUMN last_nudge_at DATETIME")
+    if 'bot_muted_until' not in existing:
+        additions.append("ADD COLUMN bot_muted_until DATETIME")
 
     if not additions:
         return
@@ -548,6 +594,68 @@ def get_bot_persona():
     return get_setting('bot_persona', BOT_PERSONA)
 
 
+def _format_training_snippets():
+    """Build the additive-snippets section. High-priority snippets surface
+    first so the model weights them more heavily. Returns '' when there are
+    no active rows."""
+    snippets = (TrainingSnippet.query
+                .filter_by(is_active=True)
+                .order_by(
+                    db.case((TrainingSnippet.priority == 'high', 0), else_=1),
+                    TrainingSnippet.sort_order.asc(),
+                    TrainingSnippet.created_at.asc(),
+                )
+                .all())
+    if not snippets:
+        return ''
+    lines = []
+    for s in snippets:
+        tag = f" [{s.category}]" if s.category else ''
+        marker = '★ ' if s.priority == 'high' else ''
+        lines.append(f"{marker}{s.title}{tag}:\n{s.body}")
+    return "\n\n".join(lines)
+
+
+def _format_team_members():
+    members = (TeamMember.query
+               .filter_by(is_active=True)
+               .order_by(TeamMember.sort_order.asc(), TeamMember.id.asc())
+               .all())
+    if not members:
+        return ''
+    lines = []
+    for m in members:
+        parts = [m.name]
+        if m.role:
+            parts.append(f"({m.role})")
+        line = ' '.join(parts)
+        if m.specialty:
+            line += f" — мэргэшил: {m.specialty}"
+        if m.bio:
+            line += f". {m.bio}"
+        lines.append(f"- {line}")
+    return "\n".join(lines)
+
+
+def _format_business_lines():
+    """Return (answer_block, refer_block) — two sections so the prompt can
+    instruct the bot differently for each action."""
+    lines = (BusinessLine.query
+             .filter_by(is_active=True)
+             .order_by(BusinessLine.sort_order.asc(), BusinessLine.id.asc())
+             .all())
+    answer, refer = [], []
+    for b in lines:
+        desc = b.description or ''
+        contact = f" (Холбоо барих: {b.contact_info})" if b.contact_info else ''
+        entry = f"- {b.name}: {desc}{contact}"
+        if (b.action or 'refer') == 'answer':
+            answer.append(entry)
+        else:
+            refer.append(entry)
+    return "\n".join(answer), "\n".join(refer)
+
+
 def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name=''):
     """Build system prompt with training, FAQ, session-state and funnel context."""
     training = get_training_content()
@@ -560,6 +668,10 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
         f"- {c.name} ({c.course_type}): {int(c.price):,}₮, эхлэх: {c.start_date.strftime('%Y-%m-%d')}, цаг: {c.time}"
         for c in courses
     ])
+
+    snippets_text = _format_training_snippets()
+    team_text = _format_team_members()
+    answer_lines, refer_lines = _format_business_lines()
 
     registration_block = (
         f"БҮРТГЭЛИЙН ЛИНК:\n{GOOGLE_FORM_URL}\n" if GOOGLE_FORM_URL else ""
@@ -578,11 +690,38 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
     session_rule = SESSION_RULES.get(session_state, SESSION_RULES['new'])
     funnel_rule = FUNNEL_RULES.get(funnel_stage, FUNNEL_RULES['curious'])
 
+    snippets_section = (
+        f"\nНЭМЭЛТ ТАЙЛБАР, ТОДРУУЛГА (★ = өндөр ач холбогдолтой):\n{snippets_text}\n"
+        if snippets_text else ''
+    )
+    team_section = (
+        f"\nМАНАЙ БАГ (хэрэглэгч багш/ажилтны талаар асуувал ашиглана):\n{team_text}\n"
+        if team_text else ''
+    )
+
+    biz_section = ''
+    if answer_lines or refer_lines:
+        biz_section = "\nКОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ:\n"
+        if answer_lines:
+            biz_section += (
+                "Доорх үйлчилгээний талаар асуувал ТОВЧ хариулж болно "
+                "(сонирхол хадгалж, дэлгэрэнгүйг ажилтнаас лавлахыг санал болго):\n"
+                f"{answer_lines}\n"
+            )
+        if refer_lines:
+            biz_section += (
+                "Доорх үйлчилгээний талаар асуувал өөрөө хариулахгүй, "
+                "\"Энэ чиглэлийг манай тусгай ажилтан хариуцдаг. Утасны "
+                "дугаараа үлдээгээрэй, бид удахгүй холбогдоно\" гэж "
+                "найрсагаар чиглүүл:\n"
+                f"{refer_lines}\n"
+            )
+
     system_prompt = f"""{persona}
 
 СУРГАЛТЫН ТӨВИЙН МЭДЭЭЛЭЛ:
 {training}
-
+{snippets_section}{team_section}{biz_section}
 ИДЭВХТЭЙ АНГИУД:
 {courses_text}
 
@@ -599,7 +738,8 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
 4. Хэрэглэгч утасны дугаар бичсэн бол баярлал илэрхийлж, "Манай ажилтан удахгүй тантай холбогдоно" гэж мэдэгд.
 5. Шийдэх боломжгүй буюу мэдэхгүй асуудал тулгарвал "Энэ асуудлыг манай ажилтан тантай эргэж холбогдож тодруулна" гэж хэлэх.
 6. Эмодзи цөөн (1-2) хэрэглэж, илүү гар бичмэл маяг бүү аватарла.
-7. Өгүүлбэрүүдийн эхлэлийг сольж бай, "Сургалт..." гэх мэт ижил үгээр дандаа бүү эхэл."""
+7. Өгүүлбэрүүдийн эхлэлийг сольж бай, "Сургалт..." гэх мэт ижил үгээр дандаа бүү эхэл.
+8. Сургалтаас өөр чиглэлийн (компанийн бусад үйлчилгээ) асуултанд дээрх "КОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ" хэсгийн дүрмийн дагуу хариулна. Жагсаалтад байхгүй чиглэл бол "Тантай ажилтан холбогдох уу?" гэж асууж дугаар лав."""
     return system_prompt
 
 
@@ -786,6 +926,181 @@ def nudge_task():
             print(f"Nudge error: {e}")
         time.sleep(30 * 60)
 
+
+# ===================== HUMAN HANDOFF =====================
+
+# Keyword sets per sensitivity tier. Conservative is the launch default; admins
+# can raise sensitivity from /admin/settings when they're short-staffed or on
+# vacation. Substring match, lowercase.
+HANDOFF_KEYWORDS_EXPLICIT = [
+    'ажилтантай', 'ажилтан холб', 'оператортой', 'оператортой ярь', 'оператор',
+    'менежертэй', 'менежер', 'хүний хариу', 'хүнтэй ярь', 'live agent',
+    'жинхэнэ хүн', 'human', 'real person',
+]
+HANDOFF_KEYWORDS_FRUSTRATION = [
+    'болохгүй байна', 'ойлгохгүй', 'ойлгомжгүй', 'муухай', 'үнэхээр муу',
+    'гомдол', 'буруу хариу', 'хариулж чадахгүй', 'юу яриад байгаа',
+    'хэрэггүй бот',
+]
+
+HANDOFF_USER_REPLY = (
+    "Таны асуултыг манай ажилтан хариуцаж авлаа. Удахгүй холбогдох болно. "
+    "Түр хүлээгээрэй 🙏"
+)
+
+
+def get_handoff_sensitivity():
+    """conservative | balanced | aggressive — read from settings, default conservative."""
+    value = (get_setting('handoff_sensitivity', 'conservative') or '').strip().lower()
+    return value if value in ('conservative', 'balanced', 'aggressive') else 'conservative'
+
+
+def get_mute_duration_hours():
+    """How long the bot stays silent after a handoff is triggered."""
+    raw = (get_setting('mute_duration_hours', '2') or '2').strip()
+    try:
+        hours = int(raw)
+    except ValueError:
+        hours = 2
+    return max(0, min(hours, 168))  # clamp 0..7 days
+
+
+def get_telegram_chat_ids():
+    """Comma-separated chat IDs from settings. Returns [] when empty."""
+    raw = (get_setting('telegram_chat_ids', '') or '').strip()
+    if not raw:
+        return []
+    return [chunk.strip() for chunk in raw.replace(';', ',').split(',') if chunk.strip()]
+
+
+def get_sound_alerts_enabled():
+    return (get_setting('sound_alerts_enabled', 'on') or '').strip().lower() in ('on', 'true', '1', 'yes')
+
+
+def _matches_refer_business_line(text):
+    """True if the user message clearly names a business line flagged 'refer'.
+    Used as one of the conservative-tier handoff signals."""
+    if not text:
+        return False
+    lower = text.lower()
+    refer_lines = (BusinessLine.query
+                   .filter_by(is_active=True, action='refer')
+                   .all())
+    for line in refer_lines:
+        if line.name and line.name.lower() in lower:
+            return True
+    return False
+
+
+def should_handoff(message_text, fb_user):
+    """Decide whether the bot should escalate to a human.
+
+    Returns (bool, reason_label). reason_label is a short tag used in the
+    AdminIssue row and Telegram message — not shown to the end user.
+    Cheap to call: only string scans + one small DB query per inbound message.
+    """
+    if not message_text:
+        return False, ''
+    text = message_text.lower()
+    sensitivity = get_handoff_sensitivity()
+
+    for kw in HANDOFF_KEYWORDS_EXPLICIT:
+        if kw in text:
+            return True, f"explicit:{kw}"
+
+    if _matches_refer_business_line(message_text):
+        return True, 'business_line_refer'
+
+    if sensitivity in ('balanced', 'aggressive'):
+        for kw in HANDOFF_KEYWORDS_FRUSTRATION:
+            if kw in text:
+                return True, f"frustration:{kw}"
+
+    if sensitivity == 'aggressive':
+        # Same exact message 3+ times in the last hour from this user — they're
+        # clearly stuck and the bot isn't getting through.
+        cutoff = datetime.utcnow() - timedelta(hours=1)
+        recent = (Message.query
+                  .filter_by(facebook_user_id=fb_user.id, sender='user')
+                  .filter(Message.created_at >= cutoff)
+                  .order_by(Message.created_at.desc())
+                  .limit(5)
+                  .all())
+        same = [m for m in recent if (m.content or '').strip().lower() == text.strip()]
+        if len(same) >= 2:  # plus the current one = 3
+            return True, 'repeated_question'
+
+    return False, ''
+
+
+def send_telegram_notification(text):
+    """Send a Telegram message to every configured chat ID. Silent no-op if
+    TELEGRAM_BOT_TOKEN is not set or no chat IDs are configured.
+
+    The token stays in an env var (it's a credential); chat IDs live in DB
+    settings so admins can add/remove themselves from the UI."""
+    token = os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()
+    chat_ids = get_telegram_chat_ids()
+    if not token or not chat_ids:
+        return 0
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    sent = 0
+    for chat_id in chat_ids:
+        try:
+            resp = requests.post(url, json={
+                'chat_id': chat_id,
+                'text': text,
+                'disable_web_page_preview': True,
+            }, timeout=5)
+            if resp.status_code == 200:
+                sent += 1
+            else:
+                print(f"Telegram send failed for {chat_id}: {resp.status_code} {resp.text[:200]}")
+        except Exception as e:
+            print(f"Telegram send error for {chat_id}: {e}")
+    return sent
+
+
+def trigger_handoff(fb_user, reason, user_message):
+    """Run the full handoff flow: mute the bot for the configured window,
+    create an AdminIssue, ping admins via Telegram, send the user a polite
+    waiting message. Safe to call inside the webhook handler."""
+    hours = get_mute_duration_hours()
+    if hours > 0:
+        fb_user.bot_muted_until = datetime.utcnow() + timedelta(hours=hours)
+
+    issue = AdminIssue(
+        facebook_user_id=fb_user.id,
+        issue_type='handoff',
+        content=f"[{reason}] {user_message}"[:4000],
+        status='open',
+    )
+    db.session.add(issue)
+    db.session.commit()
+
+    # User-visible message — short, polite, not robotic.
+    send_facebook_message(fb_user.facebook_id, HANDOFF_USER_REPLY)
+    db.session.add(Message(
+        facebook_user_id=fb_user.id,
+        sender='bot',
+        content=HANDOFF_USER_REPLY,
+    ))
+    db.session.commit()
+
+    # Admin notification via Telegram (no-op if not configured).
+    display_name = fb_user.name or fb_user.facebook_id
+    phone_part = f"\n📞 {fb_user.phone}" if fb_user.phone else ''
+    tg_text = (
+        f"🤝 Шинэ handoff хүсэлт\n"
+        f"👤 {display_name}{phone_part}\n"
+        f"📝 Шалтгаан: {reason}\n"
+        f"💬 Мессеж: {user_message[:500]}\n\n"
+        f"Facebook Page Inbox дээрээс хариулна уу."
+    )
+    send_telegram_notification(tg_text)
+    return issue
+
+
 # ===================== ROUTES =====================
 
 @app.route('/')
@@ -854,11 +1169,16 @@ def logout():
 @admin_required
 def dashboard():
     leads_count = FacebookUser.query.filter_by(is_lead=True).count()
+    hot_prospects_count = (FacebookUser.query
+                           .filter_by(is_lead=False)
+                           .filter(FacebookUser.funnel_stage.in_(['pricing', 'ready']))
+                           .count())
     open_issues = AdminIssue.query.filter_by(status='open').count()
     total_messages = Message.query.count()
-    
-    return render_template('dashboard.html', 
+
+    return render_template('dashboard.html',
                          leads_count=leads_count,
+                         hot_prospects_count=hot_prospects_count,
                          open_issues=open_issues,
                          total_messages=total_messages)
 
@@ -946,8 +1266,42 @@ def faq():
 @login_required
 @admin_required
 def leads():
-    leads = FacebookUser.query.filter_by(is_lead=True).all()
-    return render_template('leads.html', leads=leads)
+    """Two buckets in one page:
+      1) Confirmed leads — dropped a phone number (is_lead=True). Today's only path.
+      2) Hot prospects — reached the 'pricing' or 'ready' funnel stage but haven't
+         shared a phone yet. These are warm and worth proactive follow-up.
+    """
+    confirmed = (FacebookUser.query
+                 .filter_by(is_lead=True)
+                 .order_by(FacebookUser.created_at.desc())
+                 .all())
+
+    last_msg_subq = (db.session.query(
+        Message.facebook_user_id.label('uid'),
+        db.func.max(Message.created_at).label('last_at'),
+    ).group_by(Message.facebook_user_id).subquery())
+
+    hot_rows = (db.session.query(FacebookUser, last_msg_subq.c.last_at)
+                .join(last_msg_subq, FacebookUser.id == last_msg_subq.c.uid)
+                .filter(FacebookUser.is_lead == False)  # noqa: E712
+                .filter(FacebookUser.funnel_stage.in_(['pricing', 'ready']))
+                .order_by(last_msg_subq.c.last_at.desc())
+                .all())
+
+    hot_prospects = []
+    for user, last_at in hot_rows:
+        last_user_msg = (Message.query
+                         .filter_by(facebook_user_id=user.id, sender='user')
+                         .order_by(Message.created_at.desc())
+                         .first())
+        hot_prospects.append({
+            'user': user,
+            'last_at': last_at,
+            'last_message': (last_user_msg.content if last_user_msg else '') or '',
+            'message_count': Message.query.filter_by(facebook_user_id=user.id).count(),
+        })
+
+    return render_template('leads.html', leads=confirmed, hot_prospects=hot_prospects)
 
 @app.route('/admin/issues', methods=['GET', 'POST'])
 @login_required
@@ -968,6 +1322,26 @@ def issues():
     
     issues = AdminIssue.query.filter_by(status='open').all()
     return render_template('issues.html', issues=issues)
+
+@app.route('/admin/api/handoff-poll')
+@login_required
+@admin_required
+def handoff_poll():
+    """Lightweight polling endpoint for the dashboard sound/badge.
+
+    Returns the count of open handoff issues and the id+timestamp of the
+    newest one, so the client JS can play a sound when a new id appears.
+    Kept cheap: two indexed queries, no LLM calls. Polled every 15s.
+    """
+    open_q = AdminIssue.query.filter_by(issue_type='handoff', status='open')
+    latest = open_q.order_by(AdminIssue.created_at.desc()).first()
+    return jsonify({
+        'open_count': open_q.count(),
+        'latest_id': latest.id if latest else None,
+        'latest_at': latest.created_at.isoformat() if latest else None,
+        'sound_enabled': get_sound_alerts_enabled(),
+    })
+
 
 @app.route('/admin/logs')
 @login_required
@@ -1025,13 +1399,193 @@ def training():
         )
         return redirect(url_for('training'))
 
+    snippets = (TrainingSnippet.query
+                .order_by(
+                    db.case((TrainingSnippet.priority == 'high', 0), else_=1),
+                    TrainingSnippet.sort_order.asc(),
+                    TrainingSnippet.created_at.desc(),
+                )
+                .all())
     return render_template(
         'training.html',
         training_value=get_setting('training_content', ''),
         training_fallback=TRAINING_CONTENT,
         persona_value=get_setting('bot_persona', ''),
         persona_fallback=BOT_PERSONA,
+        snippets=snippets,
     )
+
+
+# ===================== TRAINING SNIPPETS =====================
+
+@app.route('/admin/training/snippets', methods=['POST'])
+@login_required
+@admin_required
+def training_snippets():
+    """Add / edit / delete / toggle one training snippet at a time so multiple
+    managers can append knowledge without overwriting each other's work."""
+    data = request.get_json() or {}
+    action = data.get('action')
+
+    if action == 'add':
+        snippet = TrainingSnippet(
+            title=(data.get('title') or '').strip(),
+            body=(data.get('body') or '').strip(),
+            category=(data.get('category') or '').strip() or None,
+            priority='high' if data.get('priority') == 'high' else 'normal',
+            is_active=True,
+        )
+        if not snippet.title or not snippet.body:
+            return jsonify({'success': False, 'error': 'Гарчиг болон агуулга шаардлагатай.'}), 400
+        db.session.add(snippet)
+        db.session.commit()
+        return jsonify({'success': True, 'id': snippet.id})
+
+    if action == 'edit':
+        snippet = TrainingSnippet.query.get(data.get('id'))
+        if not snippet:
+            return jsonify({'success': False}), 404
+        snippet.title = (data.get('title') or '').strip()
+        snippet.body = (data.get('body') or '').strip()
+        snippet.category = (data.get('category') or '').strip() or None
+        snippet.priority = 'high' if data.get('priority') == 'high' else 'normal'
+        if not snippet.title or not snippet.body:
+            return jsonify({'success': False, 'error': 'Гарчиг болон агуулга шаардлагатай.'}), 400
+        db.session.commit()
+        return jsonify({'success': True})
+
+    if action == 'toggle':
+        snippet = TrainingSnippet.query.get(data.get('id'))
+        if not snippet:
+            return jsonify({'success': False}), 404
+        snippet.is_active = not snippet.is_active
+        db.session.commit()
+        return jsonify({'success': True, 'is_active': snippet.is_active})
+
+    if action == 'delete':
+        snippet = TrainingSnippet.query.get(data.get('id'))
+        if not snippet:
+            return jsonify({'success': False}), 404
+        db.session.delete(snippet)
+        db.session.commit()
+        return jsonify({'success': True})
+
+    return jsonify({'success': False, 'error': 'unknown action'}), 400
+
+
+# ===================== TEAM MEMBERS =====================
+
+@app.route('/admin/team', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def team():
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        action = data.get('action')
+
+        if action == 'add':
+            member = TeamMember(
+                name=(data.get('name') or '').strip(),
+                role=(data.get('role') or '').strip() or None,
+                specialty=(data.get('specialty') or '').strip() or None,
+                bio=(data.get('bio') or '').strip() or None,
+                is_active=True,
+            )
+            if not member.name:
+                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
+            db.session.add(member)
+            db.session.commit()
+            return jsonify({'success': True, 'id': member.id})
+
+        if action == 'edit':
+            member = TeamMember.query.get(data.get('id'))
+            if not member:
+                return jsonify({'success': False}), 404
+            member.name = (data.get('name') or '').strip()
+            member.role = (data.get('role') or '').strip() or None
+            member.specialty = (data.get('specialty') or '').strip() or None
+            member.bio = (data.get('bio') or '').strip() or None
+            if not member.name:
+                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
+            db.session.commit()
+            return jsonify({'success': True})
+
+        if action == 'toggle':
+            member = TeamMember.query.get(data.get('id'))
+            if not member:
+                return jsonify({'success': False}), 404
+            member.is_active = not member.is_active
+            db.session.commit()
+            return jsonify({'success': True, 'is_active': member.is_active})
+
+        if action == 'delete':
+            member = TeamMember.query.get(data.get('id'))
+            if not member:
+                return jsonify({'success': False}), 404
+            db.session.delete(member)
+            db.session.commit()
+            return jsonify({'success': True})
+
+        return jsonify({'success': False, 'error': 'unknown action'}), 400
+
+    members = (TeamMember.query
+               .order_by(TeamMember.sort_order.asc(), TeamMember.id.asc())
+               .all())
+    return render_template('team.html', members=members)
+
+
+# ===================== BUSINESS LINES =====================
+
+@app.route('/admin/business-lines', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def business_lines():
+    """Other services the page promotes (Magic Finance app, consulting, etc.).
+    Each line tells the bot to either answer briefly or refer to a human."""
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        action = data.get('action')
+
+        if action in ('add', 'edit'):
+            if action == 'add':
+                line = BusinessLine(is_active=True)
+                db.session.add(line)
+            else:
+                line = BusinessLine.query.get(data.get('id'))
+                if not line:
+                    return jsonify({'success': False}), 404
+            line.name = (data.get('name') or '').strip()
+            line.description = (data.get('description') or '').strip() or None
+            line.action = 'answer' if data.get('line_action') == 'answer' else 'refer'
+            line.contact_info = (data.get('contact_info') or '').strip() or None
+            if not line.name:
+                db.session.rollback()
+                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
+            db.session.commit()
+            return jsonify({'success': True, 'id': line.id})
+
+        if action == 'toggle':
+            line = BusinessLine.query.get(data.get('id'))
+            if not line:
+                return jsonify({'success': False}), 404
+            line.is_active = not line.is_active
+            db.session.commit()
+            return jsonify({'success': True, 'is_active': line.is_active})
+
+        if action == 'delete':
+            line = BusinessLine.query.get(data.get('id'))
+            if not line:
+                return jsonify({'success': False}), 404
+            db.session.delete(line)
+            db.session.commit()
+            return jsonify({'success': True})
+
+        return jsonify({'success': False, 'error': 'unknown action'}), 400
+
+    lines = (BusinessLine.query
+             .order_by(BusinessLine.sort_order.asc(), BusinessLine.id.asc())
+             .all())
+    return render_template('business_lines.html', lines=lines)
 
 
 # ===================== ADMIN USER MANAGEMENT =====================
@@ -1306,6 +1860,26 @@ def webhook():
                     db.session.add(user_msg)
                     db.session.commit()
 
+                    # Handoff in progress — bot is muted, human takes over via FB
+                    # Page Inbox. We still log the inbound message so the admin can
+                    # see context, but skip the OpenAI call and the auto-reply.
+                    now = datetime.utcnow()
+                    if fb_user.bot_muted_until and fb_user.bot_muted_until > now:
+                        continue
+
+                    # Auto-clear an expired mute so we don't carry stale state.
+                    if fb_user.bot_muted_until and fb_user.bot_muted_until <= now:
+                        fb_user.bot_muted_until = None
+                        db.session.commit()
+
+                    # Decide whether this message needs a human before spending an
+                    # OpenAI call. Avoids the awkward case where the bot answers
+                    # AND we tell the user "human will reply" in the same turn.
+                    handoff, reason = should_handoff(message_text, fb_user)
+                    if handoff:
+                        trigger_handoff(fb_user, reason, message_text)
+                        continue
+
                     # Get conversation history
                     history = Message.query.filter_by(facebook_user_id=fb_user.id).order_by(Message.created_at).all()
                     conversation = [
@@ -1321,7 +1895,7 @@ def webhook():
                         funnel_stage=fb_user.funnel_stage or 'curious',
                         user_first_name=first_name_of(fb_user.name),
                     )
-                    
+
                     # Save bot message
                     bot_msg = Message(
                         facebook_user_id=fb_user.id,
@@ -1330,7 +1904,7 @@ def webhook():
                     )
                     db.session.add(bot_msg)
                     db.session.commit()
-                    
+
                     # Send response via Facebook
                     send_facebook_message(sender_id, bot_response)
                     

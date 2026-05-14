@@ -28,11 +28,13 @@
         </div>
     </div>
     <div class="col-md-3">
-        <div class="stat-card">
-            <i class="bi bi-book" style="font-size: 2rem; color: #764ba2;"></i>
-            <h3>4</h3>
-            <p>Active Courses</p>
-        </div>
+        <a href="{{ url_for('leads') }}#hotTab" class="text-decoration-none">
+            <div class="stat-card">
+                <i class="bi bi-fire" style="font-size: 2rem; color: #dc3545;"></i>
+                <h3>{{ hot_prospects_count }}</h3>
+                <p>Hot Prospects</p>
+            </div>
+        </a>
     </div>
 </div>
 

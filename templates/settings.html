@@ -59,6 +59,51 @@
 
                     <hr>
 
+                    <h6>Хүний хариу (Human handoff)</h6>
+                    <p class="text-muted small mb-3">
+                        Бот хариулж чадахгүй гэж шийдсэн үед админд мэдэгдэл явуулж,
+                        тогтоосон хугацаагаар автомат хариултаа зогсооно.
+                    </p>
+
+                    <div class="mb-3">
+                        <label for="handoffSensitivity" class="form-label">Илрүүлэх мэдрэмж</label>
+                        <select class="form-control" id="handoffSensitivity" title="Илрүүлэх мэдрэмж">
+                            <option value="conservative" {% if settings.get('handoff_sensitivity', 'conservative') == 'conservative' %}selected{% endif %}>Болгоомжтой — зөвхөн "ажилтантай ярим" гэх мэт</option>
+                            <option value="balanced" {% if settings.get('handoff_sensitivity') == 'balanced' %}selected{% endif %}>Дунд зэрэг — гомдол, шүүмжлэлийг мөн оруулна</option>
+                            <option value="aggressive" {% if settings.get('handoff_sensitivity') == 'aggressive' %}selected{% endif %}>Идэвхтэй — давтан асуух, ойлгомжгүй гэх мэт бүгдийг</option>
+                        </select>
+                        <div class="form-text">Амралттай үед эсвэл ажилтан цөөн үед "Идэвхтэй" болгож болно.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="muteDurationHours" class="form-label">Ботыг чимээгүй болгох цаг (handoff болсны дараа)</label>
+                        <input type="number" min="0" max="168" class="form-control" id="muteDurationHours"
+                               value="{{ settings.get('mute_duration_hours', '2') }}">
+                        <div class="form-text">0 = чимээгүй болгохгүй. Хэт том утга 168 цаг (7 хоног) хүртэл.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="telegramChatIds" class="form-label">Telegram chat ID-ууд</label>
+                        <input type="text" class="form-control" id="telegramChatIds"
+                               placeholder="123456789, 987654321"
+                               value="{{ settings.get('telegram_chat_ids', '') }}">
+                        <div class="form-text">
+                            Таслалаар тусгаарлан бичнэ. ID-аа авахдаа Telegram дээр өөрийнхөө ботод
+                            мессеж бичээд <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>-ийг нээж үзнэ.
+                            Бот токеныг <code>TELEGRAM_BOT_TOKEN</code> орчны хувьсагчид нуу.
+                        </div>
+                    </div>
+
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="soundAlertsEnabled"
+                               {% if (settings.get('sound_alerts_enabled', 'on') or '').lower() in ('on', 'true', '1', 'yes') %}checked{% endif %}>
+                        <label class="form-check-label" for="soundAlertsEnabled">
+                            Админ хуудсан дээр дуун дохио өгөх (шинэ handoff гарвал)
+                        </label>
+                    </div>
+
+                    <hr>
+
                     <h6>Auto-Comment Settings</h6>
 
                     <div class="mb-3">
@@ -155,6 +200,10 @@ document.getElementById('saveSettingsBtn').addEventListener('click', function() 
         google_form_url: document.getElementById('googleFormUrl').value,
         handoff_message: document.getElementById('handoffMessage').value,
         bot_welcome: document.getElementById('botWelcome').value,
+        handoff_sensitivity: document.getElementById('handoffSensitivity').value,
+        mute_duration_hours: document.getElementById('muteDurationHours').value,
+        telegram_chat_ids: document.getElementById('telegramChatIds').value,
+        sound_alerts_enabled: document.getElementById('soundAlertsEnabled').checked ? 'on' : '',
         training_comment: document.getElementById('trainingComment').value,
         celebration_comment: document.getElementById('celebrationComment').value,
         default_comment: document.getElementById('defaultComment').value

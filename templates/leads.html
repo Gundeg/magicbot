@@ -5,116 +5,139 @@
 {% block page_title %}Leads Management{% endblock %}
 
 {% block content %}
-<div class="card">
-    <div class="card-header">
-        <i class="bi bi-people"></i> Leads List
-    </div>
-    <div class="card-body">
-        <div class="row mb-3">
-            <div class="col-md-4">
-                <input type="text" class="form-control" id="searchInput" placeholder="Search by name or phone...">
-            </div>
-            <div class="col-md-4">
-                <select class="form-control" id="statusFilter">
-                    <option value="">All Status</option>
-                    <option value="new">New</option>
-                    <option value="contacted">Contacted</option>
-                    <option value="converted">Converted</option>
-                </select>
-            </div>
-            <div class="col-md-4">
-                <button class="btn btn-primary w-100" id="exportBtn">
-                    <i class="bi bi-download"></i> Export to CSV
+<ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#confirmedTab" type="button" role="tab">
+            <i class="bi bi-person-check"></i> Бүртгэгдсэн лид
+            <span class="badge bg-primary ms-1">{{ leads|length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#hotTab" type="button" role="tab">
+            <i class="bi bi-fire text-danger"></i> Халуун сонирхогч
+            <span class="badge bg-danger ms-1">{{ hot_prospects|length }}</span>
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <!-- ===== Tab 1: Confirmed leads (phone given) ===== -->
+    <div class="tab-pane fade show active" id="confirmedTab" role="tabpanel">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-people"></i> Утсаа үлдээсэн лидүүд</span>
+                <button type="button" class="btn btn-sm btn-light" id="exportBtn">
+                    <i class="bi bi-download"></i> CSV
                 </button>
             </div>
-        </div>
-
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Phone</th>
-                        <th>Status</th>
-                        <th>Date Added</th>
-                        <th>Messages</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="leadsList">
-                    {% for lead in leads %}
-                    <tr data-lead-id="{{ lead.id }}">
-                        <td>{{ lead.name or 'Unknown' }}</td>
-                        <td>
-                            {% if lead.phone %}
-                                <a href="tel:{{ lead.phone }}">{{ lead.phone }}</a>
+            <div class="card-body">
+                <input type="text" class="form-control mb-3" id="searchInput" placeholder="Нэр эсвэл утсаар хайх...">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Нэр</th>
+                                <th>Утас</th>
+                                <th>Төлөв</th>
+                                <th>Үе шат</th>
+                                <th>Бүртгэгдсэн</th>
+                                <th>Мессеж</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leadsList">
+                            {% for lead in leads %}
+                            <tr data-lead-id="{{ lead.id }}">
+                                <td>{{ lead.name or 'Unknown' }}</td>
+                                <td>
+                                    {% if lead.phone %}
+                                        <a href="tel:{{ lead.phone }}">{{ lead.phone }}</a>
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if lead.lead_status == 'new' %}
+                                        <span class="badge bg-info">Шинэ</span>
+                                    {% elif lead.lead_status == 'contacted' %}
+                                        <span class="badge bg-warning text-dark">Холбогдсон</span>
+                                    {% elif lead.lead_status == 'converted' %}
+                                        <span class="badge bg-success">Бүртгүүлсэн</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ lead.lead_status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td><span class="badge bg-light text-muted border">{{ lead.funnel_stage or 'curious' }}</span></td>
+                                <td><small>{{ lead.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                                <td><span class="badge bg-secondary">{{ lead.messages|length }}</span></td>
+                            </tr>
                             {% else %}
-                                <span class="text-muted">Not provided</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if lead.lead_status == 'new' %}
-                                <span class="badge bg-info">New</span>
-                            {% elif lead.lead_status == 'contacted' %}
-                                <span class="badge bg-warning">Contacted</span>
-                            {% elif lead.lead_status == 'converted' %}
-                                <span class="badge bg-success">Converted</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ lead.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                        <td>
-                            <span class="badge bg-secondary">{{ lead.messages|length }}</span>
-                        </td>
-                        <td>
-                            <button class="btn btn-sm btn-info view-lead" data-id="{{ lead.id }}">
-                                <i class="bi bi-eye"></i> View
-                            </button>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="6" class="text-center text-muted">No leads yet.</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                            <tr>
+                                <td colspan="6" class="text-center text-muted py-4">
+                                    Одоогоор утсаа үлдээсэн лид алга. Халуун сонирхогчдыг "Халуун сонирхогч" хэсгээс хар.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
-</div>
 
-<!-- Lead Details Modal -->
-<div class="modal fade" id="leadModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Lead Details</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    <!-- ===== Tab 2: Hot prospects (funnel: pricing/ready, no phone yet) ===== -->
+    <div class="tab-pane fade" id="hotTab" role="tabpanel">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-fire text-danger"></i> Утсаа өгөөгүй ч сонирхож буй хэрэглэгчид
             </div>
-            <div class="modal-body">
-                <div class="row mb-3">
-                    <div class="col-md-6">
-                        <strong>Name:</strong>
-                        <p id="leadName"></p>
-                    </div>
-                    <div class="col-md-6">
-                        <strong>Phone:</strong>
-                        <p id="leadPhone"></p>
-                    </div>
-                </div>
-                <div class="row mb-3">
-                    <div class="col-md-6">
-                        <strong>Status:</strong>
-                        <p id="leadStatus"></p>
-                    </div>
-                    <div class="col-md-6">
-                        <strong>Date Added:</strong>
-                        <p id="leadDate"></p>
-                    </div>
-                </div>
-                <hr>
-                <h6>Conversation History</h6>
-                <div id="conversationHistory" style="max-height: 400px; overflow-y: auto;">
-                    <p class="text-muted">Loading...</p>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Эдгээр хүмүүс үнэ асуусан буюу "бүртгүүлмээр" гэх мэт сигнал илгээсэн ч утсаа үлдээгээгүй байна.
+                    Танай ажилтан энэ жагсаалтаас санаачлан холбогдох боломжтой.
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Нэр</th>
+                                <th>Үе шат</th>
+                                <th>Сүүлд бичсэн</th>
+                                <th>Сүүлийн мессеж</th>
+                                <th>Нийт</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in hot_prospects %}
+                            <tr>
+                                <td>
+                                    <strong>{{ p.user.name or 'Unknown' }}</strong>
+                                    <div class="text-muted small">FB: {{ p.user.facebook_id }}</div>
+                                </td>
+                                <td>
+                                    {% if p.user.funnel_stage == 'ready' %}
+                                        <span class="badge bg-danger">🔥 Бэлэн</span>
+                                    {% elif p.user.funnel_stage == 'pricing' %}
+                                        <span class="badge bg-warning text-dark">💰 Үнэ судалж буй</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ p.user.funnel_stage }}</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>{{ p.last_at.strftime('%Y-%m-%d %H:%M') if p.last_at else '—' }}</small></td>
+                                <td class="text-muted small" style="max-width: 380px;">
+                                    {{ p.last_message[:160] }}{% if p.last_message|length > 160 %}…{% endif %}
+                                </td>
+                                <td><span class="badge bg-secondary">{{ p.message_count }}</span></td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted py-4">
+                                    Одоогоор халуун сонирхогч алга. Үнэ асуусан буюу бүртгүүлэх хүсэлт илэрхийлсэн
+                                    хүн гарвал энд гарч ирнэ.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -122,67 +145,28 @@
 </div>
 
 <script>
-document.querySelectorAll('.view-lead').forEach(btn => {
-    btn.addEventListener('click', function() {
-        const leadId = this.dataset.id;
-        const row = document.querySelector(`tr[data-lead-id="${leadId}"]`);
-        const cells = row.querySelectorAll('td');
-        
-        document.getElementById('leadName').textContent = cells[0].textContent;
-        document.getElementById('leadPhone').textContent = cells[1].textContent;
-        document.getElementById('leadStatus').textContent = cells[2].textContent;
-        document.getElementById('leadDate').textContent = cells[3].textContent;
-        
-        // Load conversation history
-        document.getElementById('conversationHistory').innerHTML = '<p class="text-muted">No messages yet.</p>';
-        
-        new bootstrap.Modal(document.getElementById('leadModal')).show();
-    });
-});
-
-document.getElementById('exportBtn').addEventListener('click', function() {
-    const leads = Array.from(document.querySelectorAll('#leadsList tr')).map(row => {
-        const cells = row.querySelectorAll('td');
-        return {
-            name: cells[0].textContent,
-            phone: cells[1].textContent,
-            status: cells[2].textContent,
-            date: cells[3].textContent
-        };
-    });
-
-    let csv = 'Name,Phone,Status,Date\n';
-    leads.forEach(lead => {
-        csv += `"${lead.name}","${lead.phone}","${lead.status}","${lead.date}"\n`;
-    });
-
-    const blob = new Blob([csv], {type: 'text/csv'});
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'leads.csv';
-    a.click();
-});
-
-// Search and filter
-document.getElementById('searchInput').addEventListener('keyup', function() {
+document.getElementById('searchInput').addEventListener('keyup', function () {
     const query = this.value.toLowerCase();
     document.querySelectorAll('#leadsList tr').forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(query) ? '' : 'none';
+        row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none';
     });
 });
 
-document.getElementById('statusFilter').addEventListener('change', function() {
-    const status = this.value;
-    document.querySelectorAll('#leadsList tr').forEach(row => {
-        if (!status) {
-            row.style.display = '';
-        } else {
-            const statusCell = row.querySelector('td:nth-child(3)');
-            row.style.display = statusCell.textContent.toLowerCase().includes(status) ? '' : 'none';
-        }
-    });
+document.getElementById('exportBtn').addEventListener('click', function () {
+    const rows = Array.from(document.querySelectorAll('#leadsList tr'))
+        .filter(r => r.dataset.leadId)
+        .map(row => {
+            const c = row.querySelectorAll('td');
+            return [c[0].textContent.trim(), c[1].textContent.trim(), c[2].textContent.trim(),
+                    c[3].textContent.trim(), c[4].textContent.trim()];
+        });
+    let csv = 'Name,Phone,Status,Stage,Date\n';
+    rows.forEach(r => { csv += r.map(v => `"${v.replace(/"/g, '""')}"`).join(',') + '\n'; });
+    const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+    const a = document.createElement('a');
+    a.href = window.URL.createObjectURL(blob);
+    a.download = 'leads.csv';
+    a.click();
 });
 </script>
 {% endblock %}
