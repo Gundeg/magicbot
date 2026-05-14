@@ -5,6 +5,56 @@
 {% block page_title %}Admin-Assigned Issues{% endblock %}
 
 {% block content %}
+{% if muted_users %}
+<div class="card border-warning">
+    <div class="card-header bg-warning text-dark">
+        <i class="bi bi-volume-mute"></i> Бот чимээгүй байгаа хэрэглэгчид
+        <span class="badge bg-dark ms-1">{{ muted_users|length }}</span>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            Эдгээр хэрэглэгчид handoff авсан тул бот хариулахгүй байна.
+            Та өөрөө Facebook Page Inbox дээрээс хариулсан бол доорх "Bot-ыг асаах" товчоор
+            ботын автомат хариултыг сэргээж болно (туршилт хийх үед ч хэрэгтэй).
+        </p>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Хэрэглэгч</th>
+                        <th>Утас</th>
+                        <th>Дуустал</th>
+                        <th class="text-end">Үйлдэл</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in muted_users %}
+                    <tr>
+                        <td>
+                            <strong>{{ u.name or 'Unknown' }}</strong>
+                            <div class="text-muted small">FB: {{ u.facebook_id }}</div>
+                        </td>
+                        <td><small>{{ u.phone or '—' }}</small></td>
+                        <td>
+                            <small>{{ u.bot_muted_until.strftime('%Y-%m-%d %H:%M') }} UTC</small>
+                            {% set remaining = ((u.bot_muted_until - now).total_seconds() / 60) | round(0, 'floor') | int %}
+                            <div class="text-muted small">~{{ remaining }} мин үлдсэн</div>
+                        </td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-sm btn-outline-success unmute-btn"
+                                    data-user-id="{{ u.id }}" title="Bot-ыг асаах" aria-label="Bot-ыг асаах">
+                                <i class="bi bi-volume-up"></i> Bot-ыг асаах
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div class="card">
     <div class="card-header">
         <i class="bi bi-exclamation-circle"></i> Issues Assigned to Admin
@@ -127,6 +177,28 @@
 </div>
 
 <script>
+document.querySelectorAll('.unmute-btn').forEach(btn => {
+    btn.addEventListener('click', function () {
+        const userId = this.dataset.userId;
+        if (!confirm('Энэ хэрэглэгчид зориулсан ботын автомат хариултыг сэргээх үү?')) return;
+        const orig = this.innerHTML;
+        this.disabled = true;
+        this.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+        fetch('{{ url_for("issues") }}', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: 'unmute', user_id: userId}),
+        })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) location.reload();
+                else { alert(d.error || 'Алдаа'); this.disabled = false; this.innerHTML = orig; }
+            })
+            .catch(e => { alert('Алдаа: ' + e); this.disabled = false; this.innerHTML = orig; });
+    });
+});
+
 document.querySelectorAll('.status-select').forEach(select => {
     select.addEventListener('change', function() {
         const issueId = this.dataset.id;

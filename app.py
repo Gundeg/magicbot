@@ -975,16 +975,30 @@ def nudge_task():
 
 # Keyword sets per sensitivity tier. Conservative is the launch default; admins
 # can raise sensitivity from /admin/settings when they're short-staffed or on
-# vacation. Substring match, lowercase.
+# vacation. Substring match, lowercase. Stems are deliberately short so that
+# Mongolian agglutinative suffixes don't defeat them — 'ажилтан' catches
+# ажилтантай / ажилтанд / ажилтны / ажилтанаас / ажилтны / ажилтанаа etc.
 HANDOFF_KEYWORDS_EXPLICIT = [
-    'ажилтантай', 'ажилтан холб', 'оператортой', 'оператортой ярь', 'оператор',
-    'менежертэй', 'менежер', 'хүний хариу', 'хүнтэй ярь', 'live agent',
-    'жинхэнэ хүн', 'human', 'real person',
+    # Mongolian noun stems — saying any of these in chat almost always
+    # signals "I want a human", not a casual reference.
+    'ажилтан',       # ажилтан/тантай/тны/анд/наас/нтай
+    'оператор',
+    'менежер',
+    'админтай',      # talk to admin
+    'жинхэнэ хүн',   # a real person
+    'хүнтэй',        # with a person — "хүнтэй ярья", "хүнтэй холбогдоё"
+    'хүн рүү',       # to a person
+    'хүн руу',
+    'хүний хариу',   # human response
+    'хүнээр',        # by a person
+    # English fallbacks
+    'live agent', 'real agent', 'real person', 'human agent',
+    'speak to human', 'talk to human', 'operator please',
 ]
 HANDOFF_KEYWORDS_FRUSTRATION = [
     'болохгүй байна', 'ойлгохгүй', 'ойлгомжгүй', 'муухай', 'үнэхээр муу',
     'гомдол', 'буруу хариу', 'хариулж чадахгүй', 'юу яриад байгаа',
-    'хэрэггүй бот',
+    'хэрэггүй бот', 'утгагүй', 'ойлгосонгүй',
 ]
 
 HANDOFF_USER_REPLY = (
@@ -1354,7 +1368,7 @@ def issues():
     if request.method == 'POST':
         data = request.get_json()
         action = data.get('action')
-        
+
         if action == 'update_status':
             issue = AdminIssue.query.get(data.get('id'))
             if issue:
@@ -1363,9 +1377,26 @@ def issues():
                     issue.resolved_at = datetime.utcnow()
                 db.session.commit()
                 return jsonify({'success': True})
-    
-    issues = AdminIssue.query.filter_by(status='open').all()
-    return render_template('issues.html', issues=issues)
+
+        if action == 'unmute':
+            user_id = data.get('user_id')
+            user = FacebookUser.query.get(user_id)
+            if not user:
+                return jsonify({'success': False, 'error': 'user not found'}), 404
+            user.bot_muted_until = None
+            db.session.commit()
+            return jsonify({'success': True})
+
+        return jsonify({'success': False, 'error': 'unknown action'}), 400
+
+    issues = AdminIssue.query.filter_by(status='open').order_by(AdminIssue.created_at.desc()).all()
+    now = datetime.utcnow()
+    muted_users = (FacebookUser.query
+                   .filter(FacebookUser.bot_muted_until != None)  # noqa: E711
+                   .filter(FacebookUser.bot_muted_until > now)
+                   .order_by(FacebookUser.bot_muted_until.asc())
+                   .all())
+    return render_template('issues.html', issues=issues, muted_users=muted_users, now=now)
 
 @app.route('/admin/api/test-telegram', methods=['POST'])
 @login_required
