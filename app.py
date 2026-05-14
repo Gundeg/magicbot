@@ -1760,6 +1760,18 @@ def business_lines():
     return render_template('business_lines.html', lines=lines)
 
 
+# ===================== DOCUMENTATION =====================
+
+@app.route('/admin/docs')
+@login_required
+@admin_required
+def docs():
+    """In-app admin user manual + technical specification. Static content,
+    kept under the same auth as the rest of the admin panel so it isn't
+    accidentally indexable."""
+    return render_template('docs.html')
+
+
 # ===================== ADMIN USER MANAGEMENT =====================
 
 MIN_ADMIN_PASSWORD_LENGTH = 12

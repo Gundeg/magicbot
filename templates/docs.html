@@ -1,0 +1,474 @@
+{% extends "base.html" %}
+
+{% block title %}Docs - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Заавар & Техникийн баримт{% endblock %}
+
+{% block extra_css %}
+<style>
+    .doc-section { scroll-margin-top: 80px; }
+    .doc-toc a { text-decoration: none; color: #555; display: block; padding: 4px 0; }
+    .doc-toc a:hover { color: #667eea; }
+    .doc-content h4 { color: #667eea; margin-top: 2rem; }
+    .doc-content h5 { color: #444; margin-top: 1.5rem; font-size: 1.05rem; }
+    .doc-content code { background: #f5f5f5; padding: 1px 6px; border-radius: 3px; color: #c7254e; }
+    .doc-content table th { background: #f8f9fa; }
+</style>
+{% endblock %}
+
+{% block content %}
+<ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#manualTab" type="button" role="tab">
+            <i class="bi bi-book"></i> Админы гарын авлага
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#techTab" type="button" role="tab">
+            <i class="bi bi-cpu"></i> Technical Specification
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+
+<!-- ============================================================
+     TAB 1: ADMIN USER MANUAL (Mongolian, for managers/admins)
+============================================================ -->
+<div class="tab-pane fade show active" id="manualTab" role="tabpanel">
+    <div class="row">
+        <div class="col-lg-3 mb-3">
+            <div class="card">
+                <div class="card-header">Гарчиг</div>
+                <div class="card-body doc-toc small">
+                    <a href="#m-overview">1. Танилцуулга</a>
+                    <a href="#m-dashboard">2. Dashboard</a>
+                    <a href="#m-leads">3. Лидүүд</a>
+                    <a href="#m-issues">4. Handoff & Issues</a>
+                    <a href="#m-logs">5. Чатын лог</a>
+                    <a href="#m-courses">6. Сургалтын анги</a>
+                    <a href="#m-faq">7. FAQ</a>
+                    <a href="#m-training">8. Ботын сургалт</a>
+                    <a href="#m-team">9. Багийн гишүүд</a>
+                    <a href="#m-business">10. Бусад үйлчилгээ</a>
+                    <a href="#m-settings">11. Settings</a>
+                    <a href="#m-admins">12. Админ хэрэглэгчид</a>
+                    <a href="#m-troubleshooting">13. Алдааны шийдэл</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-9 doc-content">
+            <div class="card">
+                <div class="card-body">
+
+<h4 id="m-overview" class="doc-section">1. Танилцуулга</h4>
+<p>
+    Magic Bot бол Facebook Page чатанд ирсэн мессежид AI-аар автоматаар хариулдаг систем.
+    Та энэ админ панелаас ботын зан төлвийг тохируулж, лид, асуудал, мессежийн бүртгэлийг харж,
+    зайлшгүй шаардлагатай үед өөрөө гар оруулж болно.
+</p>
+<p class="mb-0">
+    <strong>Гол санаа:</strong> бот 80% энгийн асуултанд хариулна, үлдсэн 20%-д (гомдол, ажилтантай шууд
+    ярих хүсэлт г.м.) Telegram-аар тантай холбогдоно.
+</p>
+
+<h4 id="m-dashboard" class="doc-section">2. Dashboard</h4>
+<p>Дөрвөн үндсэн үзүүлэлт:</p>
+<ul>
+    <li><strong>Leads</strong> — утсаа үлдээсэн нийт лидийн тоо.</li>
+    <li><strong>Open Issues</strong> — шийдэгдээгүй handoff болон бусад асуудал.</li>
+    <li><strong>Total Messages</strong> — ботоор дамжсан нийт мессеж.</li>
+    <li><strong>Hot Prospects</strong> — үнэ асуусан, бүртгүүлэх хүсэлтэй болсон ч утсаа үлдээгээгүй хэрэглэгчид.</li>
+</ul>
+
+<h4 id="m-leads" class="doc-section">3. Лидүүд (<code>/admin/leads</code>)</h4>
+<p>Хоёр таб:</p>
+<h5>3.1 Бүртгэгдсэн лид</h5>
+<p>
+    Утсаа чатанд бичсэн хэрэглэгчид. Ботын дугаар таних регекс <code>(?:\+?976[\s-]?)?[89]\d{7}</code>
+    (Монгол утасны 8 оронтой 8/9-р эхлэх дугаар) ашигладаг. Утас илэрсэн даруйд <code>is_lead = True</code>
+    болж, "Холбогдсон" төлөвт орно.
+</p>
+<h5>3.2 Халуун сонирхогч (Hot Prospects)</h5>
+<p>
+    Үнэ асуусан буюу бүртгүүлэх хүсэлтэй боллоо гэх сигнал илгээсэн ч утсаа үлдээгээгүй хэрэглэгчид.
+    Тэдний сүүлд бичсэн мессеж, цаг, нийт мессежийн тоог харж өөрсдөө идэвхтэй холбогдох боломжтой.
+</p>
+<h5>3.3 Нэр шинэчлэх</h5>
+<p>
+    "Unknown" нэртэй хэрэглэгчид байвал "Нэр шинэчлэх" товчоор Facebook-аас дахин татаж болно.
+    Хэрэглэгчийн нэр анх амжилтгүй татагдсан (Facebook апп Development mode-д байсан гэх мэт)
+    тохиолдолд хэрэглэгддэг.
+</p>
+
+<h4 id="m-issues" class="doc-section">4. Handoff & Issues (<code>/admin/issues</code>)</h4>
+<h5>4.1 Handoff гэж юу вэ</h5>
+<p>
+    Бот хэрэглэгчид өөрөө хариулж чадахгүй гэж шийдсэн үед "ажилтан холбогдоно" гэж хариулаад,
+    автомат хариултаа тогтоосон цагаар (анхдагч 2 цаг) зогсооно. Хэрэглэгчийн асуултыг тус хуудсанд
+    issue болгон бүртгэж, Telegram-аар админ багт мэдэгдэнэ.
+</p>
+<h5>4.2 Бот чимээгүй болсон хэрэглэгчид</h5>
+<p>
+    Хуудсын дээд хэсэгт байгаа шар картанд handoff авсан, одоо ботын автомат хариулт нь түр зогссон
+    хэрэглэгчид харагдана. Танд цаг хүлээх шаардлагагүй болсон тохиолдолд <strong>"Bot-ыг асаах"</strong>
+    товчоор автомат хариултыг шууд сэргээж болно (тестийн үед маш хэрэгтэй).
+</p>
+<h5>4.3 Issue-н төлөв</h5>
+<p>
+    Issue нь Open / In Progress / Resolved төлөвтэй. Та шаардлагатай үедээ status-ийг гараар сольж болно.
+</p>
+
+<h4 id="m-logs" class="doc-section">5. Чатын лог (<code>/admin/logs</code>)</h4>
+<p>
+    Сүүлийн 100 мессежийг хугацааны эсрэг дарааллаар харуулна. Хайх талбараас тодорхой нэр, утсаар хайх
+    боломжтой. "Export Logs" товчоор CSV болгож татаж авч болно.
+</p>
+
+<h4 id="m-courses" class="doc-section">6. Сургалтын анги (<code>/admin/courses</code>)</h4>
+<p>
+    Бот үе шатанд тохирсон анги санал болгохын тулд энэ жагсаалтыг ашиглана. Анги нэмэхдээ:
+</p>
+<ul>
+    <li><strong>Course Name</strong> — бүтэн нэр (жишээ: "Нягтлан-Нярвын хосолсон сургалт — Танхим")</li>
+    <li><strong>Course Type</strong> — 100% Online / Hybrid / Online with Teacher / Classroom</li>
+    <li><strong>Start Date, Time, Price</strong> — анги эхлэх огноо, цаг, төлбөр</li>
+    <li><strong>Description</strong> — товч тайлбар (бот эндээс эшилж хариулна)</li>
+</ul>
+
+<h4 id="m-faq" class="doc-section">7. FAQ (<code>/admin/faq</code>)</h4>
+<p>
+    Түгээмэл асуулт-хариултыг бот системийн заавартай хамт уншиж хариулна. Категориудаар нь ангилж бичих
+    нь хайхад илүү тохиромжтой. Шинэ асуулт олон удаа давтагдах юм бол FAQ болгож нэмж бай.
+</p>
+
+<h4 id="m-training" class="doc-section">8. Ботын сургалт (<code>/admin/training</code>)</h4>
+<p>Гурван хэсэгтэй:</p>
+<h5>8.1 Persona (Дүр)</h5>
+<p>
+    Ботын "хэн би вэ" гэдэг танилцуулга. Жишээ: "Та Мэжик Санхүүгийн Группын Facebook чат туслах..."
+    Энэ нь системийн зааварчилгааны эхний өгүүлбэр. Аяг ширэгийг хэрхэн авч явахыг тодорхойлно.
+</p>
+<h5>8.2 Суурь агуулга (Base intro)</h5>
+<p>
+    Компанийн ерөнхий танилцуулга — 1 удаа бичдэг урт блок. Энд бизнесийн талаарх ерөнхий мэдээллийг
+    бичнэ. Хоосон үлдээвэл Render-ийн <code>TRAINING_CONTENT</code> орчны хувьсагч, эсвэл
+    <code>pasted_content.txt</code> файл ашиглагдана.
+</p>
+<h5>8.3 Нэмэлт тайлбарууд (Snippets)</h5>
+<p>
+    <strong>Энэ хэсэг хамгийн чухал</strong>. Бодит чатанд бот алдаа хийх бүрд энд нэг шинэ snippet
+    нэмж бай. Жишээ:
+</p>
+<ul>
+    <li>"PocketZero-оор төлөх дэлгэрэнгүй" (Гарчиг)</li>
+    <li>"Төлбөр" (Ангилал)</li>
+    <li>"Өндөр" эсвэл "Энгийн" (Ач холбогдол)</li>
+    <li>"PocketZero нь Khan Bank-ийн... " (Агуулга)</li>
+</ul>
+<p>
+    Олон удирдлагатай зэрэгцэн ажиллах гол давуу тал нь нэгнийхээ ажлыг дарж бичихгүй.
+    <strong>★ Өндөр</strong> ач холбогдолтой snippet нь хариултанд илүү жинтэй нөлөөлнө.
+</p>
+
+<h4 id="m-team" class="doc-section">9. Багийн гишүүд (<code>/admin/team</code>)</h4>
+<p>
+    Бот "Багш хэн бэ?", "Татварын асуудлыг хэн хариуцдаг вэ?" гэх асуултанд хариулахын тулд
+    энэ жагсаалтыг ашиглана. Гишүүн бүрт:
+</p>
+<ul>
+    <li><strong>Нэр</strong> (заавал)</li>
+    <li><strong>Албан тушаал</strong> — Жишээ: "Ахлах багш", "Хариуцагч"</li>
+    <li><strong>Мэргэшил</strong> — Жишээ: "Татварын тайлан, Magic Finance программ"</li>
+    <li><strong>Тайлбар</strong> — товч намтар (1-2 өгүүлбэр оновчтой)</li>
+</ul>
+<p>
+    Идэвхгүй болгох тохиргоо нь "одоохондоо чөлөөтэй байгаа гишүүн"-ийг ботод үзүүлэхгүй байх боломж олгоно.
+</p>
+
+<h4 id="m-business" class="doc-section">10. Бусад үйлчилгээ (<code>/admin/business-lines</code>)</h4>
+<p>
+    Facebook хуудас бол компанийг сурталчилдаг боловч бот зөвхөн сургалтын хариулт өгөх ёсгүй.
+    Энд Magic Finance программ, тайлан гаргах үйлчилгээ гэх мэт компанийн бусад чиглэлийг бүртгэж,
+    ботын үйлдлийг сонгож өгнө:
+</p>
+<ul>
+    <li><strong>Хариулах (Answer)</strong> — товч мэдээлэл өгөөд, дэлгэрэнгүйг ажилтнаас лавлахыг санал болгоно.</li>
+    <li><strong>Чиглүүлэх (Refer)</strong> — өөрөө хариулахгүй, утас аваад ажилтанд дамжуулна (handoff үүсгэнэ).</li>
+</ul>
+
+<h4 id="m-settings" class="doc-section">11. Settings (<code>/admin/settings</code>)</h4>
+<h5>11.1 Хүний хариу хэсэг</h5>
+<ul>
+    <li><strong>Илрүүлэх мэдрэмж</strong> — handoff хэр амархан гарахыг тохируулна.
+        <ul>
+            <li><em>Болгоомжтой</em> — зөвхөн "ажилтан/оператор/менежертэй ярья" гэх мэт тодорхой үгстэй мессежид.</li>
+            <li><em>Дунд зэрэг</em> — гомдол, шүүмжлэлийн үгсийг мөн оруулна.</li>
+            <li><em>Идэвхтэй</em> — давтан асуух, ойлгомжгүй гэх мэт бүгдийг. Амралттай үед сонгож болно.</li>
+        </ul>
+    </li>
+    <li><strong>Ботыг чимээгүй болгох цаг</strong> — handoff гарсны дараа автомат хариултыг хичнээн цагт зогсоох (анхдагч 2).</li>
+    <li><strong>Telegram chat ID-ууд</strong> — мэдэгдэл хүлээн авах chat ID-ууд (бүлэг чатын ID-г сөрөг тоо хэлбэрээр).</li>
+    <li><strong>Туршиж үзэх товч</strong> — Telegram-ын холболтыг даруй шалгахад зориулсан.</li>
+    <li><strong>Дуун дохио</strong> — админ хуудсан дээр шинэ handoff гарвал товч дуу гаргах.</li>
+</ul>
+
+<h4 id="m-admins" class="doc-section">12. Админ хэрэглэгчид (<code>/admin/admins</code>)</h4>
+<p>
+    Хоёр түвшний эрх: <strong>admin</strong> (бүх админ үйлдэл) ба <strong>super_admin</strong>
+    (нэмж: админ нэмэх / устгах / нууц үг шинэчлэх / эрх солих). Нууц үг хамгийн багадаа 12 тэмдэгт байх ёстой.
+</p>
+<p>
+    Нууц үгээ мартсан тохиолдолд Render-ийн <code>RESET_ADMIN_USERNAME</code> ба <code>RESET_ADMIN_PASSWORD</code>
+    орчны хувьсагчид утга өгч, дахин deploy хийгээд, нэвтэрсний дараа эдгээр хувьсагчийг устгана.
+</p>
+
+<h4 id="m-troubleshooting" class="doc-section">13. Алдааны шийдэл</h4>
+<h5>Бот хэрэглэгчид хариулахаа больсон</h5>
+<p>
+    <code>/admin/issues</code>-н дээд хэсэгт байгаа "Бот чимээгүй байгаа хэрэглэгчид" картыг шалгана уу.
+    Тухайн хэрэглэгчийн ботыг асаах боломжтой.
+</p>
+<h5>Шинэ handoff гарсан ч Telegram дээр мессеж ирэхгүй байна</h5>
+<p>
+    Settings → "Туршиж үзэх" товчийг дарж шалгана уу. Алдаа гаргавал диалог нь шалтгааныг харуулна (token буруу,
+    chat ID буруу, бот руу /start бичээгүй гэх мэт).
+</p>
+<h5>Нэр "Unknown" гэж харагдаж байна</h5>
+<p>
+    Facebook апп Development mode-д байгаа бол ажилтан биш хэрэглэгчдийн нэр татагдахгүй. App Review
+    хүлээгдэж байгаа эсэхээ шалгана уу. Бэлэн болсон дараа <code>/admin/leads</code>-н "Нэр шинэчлэх"
+    товчоор бүгдийг нь шинэчлэх боломжтой.
+</p>
+<h5>Бот зөв хариулж чадахгүй болсон</h5>
+<p>
+    "Алдаа гарсан асуулт" болгонд <code>/admin/training</code>-н "Нэмэлт тайлбарууд" хэсэгт нэг шинэ snippet
+    нэмж бай. Энэ нь хамгийн үр дүнтэй сургалтын арга юм.
+</p>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     TAB 2: TECHNICAL SPECIFICATION (English, for developers)
+============================================================ -->
+<div class="tab-pane fade" id="techTab" role="tabpanel">
+    <div class="row">
+        <div class="col-lg-3 mb-3">
+            <div class="card">
+                <div class="card-header">Contents</div>
+                <div class="card-body doc-toc small">
+                    <a href="#t-overview">1. Overview</a>
+                    <a href="#t-stack">2. Stack</a>
+                    <a href="#t-tenancy">3. Multi-tenancy</a>
+                    <a href="#t-datamodel">4. Data model</a>
+                    <a href="#t-webhook">5. Webhook lifecycle</a>
+                    <a href="#t-handoff">6. Handoff logic</a>
+                    <a href="#t-funnel">7. Funnel + session</a>
+                    <a href="#t-notify">8. Notifications</a>
+                    <a href="#t-env">9. Environment variables</a>
+                    <a href="#t-deploy">10. Deployment</a>
+                    <a href="#t-schema">11. Schema migration</a>
+                    <a href="#t-security">12. Security</a>
+                    <a href="#t-limits">13. Known limitations</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-9 doc-content">
+            <div class="card">
+                <div class="card-body">
+
+<h4 id="t-overview" class="doc-section">1. Overview</h4>
+<p>
+    Magic Bot is a single-codebase, multi-tenant Flask app that connects a Facebook Page to OpenAI's
+    Chat Completions API to auto-reply in Mongolian. One service instance backs one Facebook Page;
+    multiple businesses are served by cloning the Render service and overriding a small set of
+    branding-related environment variables.
+</p>
+
+<h4 id="t-stack" class="doc-section">2. Stack</h4>
+<table class="table table-sm table-bordered">
+    <thead><tr><th>Layer</th><th>Tech</th></tr></thead>
+    <tbody>
+        <tr><td>Web framework</td><td>Flask 3 + Flask-Login + Flask-SQLAlchemy</td></tr>
+        <tr><td>LLM</td><td>OpenAI <code>gpt-4o-mini</code> via <code>openai</code> SDK</td></tr>
+        <tr><td>Messenger</td><td>Facebook Graph API v18.0 (webhook + Send API)</td></tr>
+        <tr><td>Alerts</td><td>Telegram Bot API <code>sendMessage</code></td></tr>
+        <tr><td>DB</td><td>SQLite by default, Postgres-compatible via SQLAlchemy URI</td></tr>
+        <tr><td>Frontend</td><td>Bootstrap 5 + Bootstrap Icons (CDN)</td></tr>
+        <tr><td>Hosting</td><td>Render (Free or paid web service)</td></tr>
+        <tr><td>Process</td><td>gunicorn via Procfile</td></tr>
+    </tbody>
+</table>
+
+<h4 id="t-tenancy" class="doc-section">3. Multi-tenancy</h4>
+<p>
+    All branding/persona is environment-driven so the same code runs for any business:
+    <code>TRAINING_CONTENT</code>, <code>BOT_PERSONA</code>, <code>COMPANY_*</code>,
+    <code>PRODUCT_NAME</code>, <code>SEED_DEFAULTS</code>. To onboard a new bot: clone the Render
+    service, point it at a new Facebook App + Page, override the env vars, set
+    <code>SEED_DEFAULTS=false</code> so it doesn't inherit Magic's catalog.
+</p>
+
+<h4 id="t-datamodel" class="doc-section">4. Data model</h4>
+<table class="table table-sm table-bordered">
+    <thead><tr><th>Table</th><th>Purpose</th></tr></thead>
+    <tbody>
+        <tr><td><code>user</code></td><td>Admin login users; <code>role</code> ∈ {admin, super_admin}</td></tr>
+        <tr><td><code>facebook_user</code></td><td>One row per Page-scoped ID. Tracks funnel stage, is_lead, phone, last nudge, bot_muted_until</td></tr>
+        <tr><td><code>message</code></td><td>Inbound + outbound chat messages</td></tr>
+        <tr><td><code>course</code></td><td>Active class catalog included in the system prompt</td></tr>
+        <tr><td><code>faq</code></td><td>Q/A pairs included in the system prompt</td></tr>
+        <tr><td><code>admin_issue</code></td><td>Handoff queue (issue_type='handoff') and other unresolved items</td></tr>
+        <tr><td><code>page_post</code></td><td>FB Page posts the bot has already auto-commented on</td></tr>
+        <tr><td><code>general_setting</code></td><td>Key/value bucket for runtime-editable settings (handoff_sensitivity, telegram_chat_ids, etc.)</td></tr>
+        <tr><td><code>team_member</code></td><td>Staff directory included in the system prompt</td></tr>
+        <tr><td><code>training_snippet</code></td><td>Additive per-topic notes, priority high/normal, optional category</td></tr>
+        <tr><td><code>business_line</code></td><td>Other services with action=answer/refer driving off-topic behaviour</td></tr>
+    </tbody>
+</table>
+
+<h4 id="t-webhook" class="doc-section">5. Webhook lifecycle</h4>
+<p><code>POST /webhook</code> handler steps:</p>
+<ol>
+    <li>Verify <code>X-Hub-Signature-256</code> against HMAC-SHA256(body, <code>FACEBOOK_APP_SECRET</code>). Skipped with warning if secret unset.</li>
+    <li>Log delivery object + entries + sender IDs.</li>
+    <li>Per-sender sliding-window rate limit (default 5 msg / 60s). Over-limit users get one polite throttle reply.</li>
+    <li>Get-or-create <code>FacebookUser</code> by PSID. Lookup name via FB Graph; retry on subsequent messages if name still empty.</li>
+    <li>Classify session state from prior message timestamp (new / active / gap / returning).</li>
+    <li>Advance funnel stage (no regression).</li>
+    <li>Persist inbound message.</li>
+    <li><strong>Mute check</strong>: if <code>bot_muted_until &gt; now</code>, skip everything below. Auto-clear expired mutes.</li>
+    <li><strong>Handoff check</strong>: <code>should_handoff()</code> on the message. If positive: trigger handoff (send waiting reply, mute, create issue, Telegram notify) and stop.</li>
+    <li>Build system prompt: persona + base training + active snippets (high priority first) + courses + FAQ + team + business lines + funnel/session rules.</li>
+    <li>Call OpenAI with last 10 messages of conversation history.</li>
+    <li>Persist outbound message, send via FB Send API.</li>
+    <li>Phone regex on inbound message; if matched and not yet a lead, mark <code>is_lead</code>, save phone, send a "thank you for the number" reply.</li>
+</ol>
+
+<h4 id="t-handoff" class="doc-section">6. Handoff logic</h4>
+<p>Three sensitivity tiers, controlled via <code>handoff_sensitivity</code> setting:</p>
+<ul>
+    <li><strong>conservative</strong> (default) — explicit stem matches (ажилтан / оператор / менежер / хүнтэй / live agent / human / etc.) + business-line refer matches.</li>
+    <li><strong>balanced</strong> — adds frustration phrases (болохгүй байна / ойлгомжгүй / гомдол / utgagүй / etc.).</li>
+    <li><strong>aggressive</strong> — adds repeated-question detection (same message 3× in 1h).</li>
+</ul>
+<p>
+    Stems are deliberately short to defeat Mongolian agglutinative suffixes: <code>'ажилтан'</code> catches
+    <em>ажилтантай / ажилтанд / ажилтны / ажилтнаас</em>, etc. On match: <code>trigger_handoff()</code>
+    sets <code>bot_muted_until = now + mute_duration_hours</code>, creates AdminIssue with
+    <code>issue_type='handoff'</code>, sends the user a polite waiting reply, fires Telegram notifications.
+</p>
+
+<h4 id="t-funnel" class="doc-section">7. Funnel + session</h4>
+<p>
+    <strong>Funnel</strong>: <code>curious → exploring_courses → pricing → ready</code>. Detection is
+    keyword-based, <em>never regresses</em>. Stage drives a per-stage prompt section guiding the bot's
+    tone (informational at curious, registration push at ready).
+</p>
+<p>
+    <strong>Session</strong> classified from time since last message: new / active (&lt;2h) / gap (2-24h) /
+    returning (24h+). Drives greeting behaviour (don't say "Сайн байна уу" mid-active conversation).
+</p>
+
+<h4 id="t-notify" class="doc-section">8. Notifications</h4>
+<p>Two channels, both optional:</p>
+<ol>
+    <li>
+        <strong>Telegram</strong> — <code>send_telegram_notification(text)</code> reads
+        <code>TELEGRAM_BOT_TOKEN</code> from env, chat IDs from the <code>telegram_chat_ids</code> setting
+        (comma-separated; group IDs are negative). Fires on every handoff. Silent no-op if either is empty.
+    </li>
+    <li>
+        <strong>In-dashboard</strong> — every admin page polls <code>/admin/api/handoff-poll</code> every 15s;
+        localStorage tracks the last-seen issue id. On new id, plays a beep via Web Audio API
+        (oscillator → gain → destination, no asset file) and shows a red toast.
+    </li>
+</ol>
+
+<h4 id="t-env" class="doc-section">9. Environment variables</h4>
+<h5>Required</h5>
+<table class="table table-sm table-bordered">
+    <thead><tr><th>Var</th><th>Purpose</th></tr></thead>
+    <tbody>
+        <tr><td><code>SECRET_KEY</code></td><td>Flask session signing key</td></tr>
+        <tr><td><code>FACEBOOK_ACCESS_TOKEN</code></td><td>Page access token from Facebook Graph API Explorer</td></tr>
+        <tr><td><code>FACEBOOK_PAGE_ID</code></td><td>Numeric Page ID</td></tr>
+        <tr><td><code>OPENAI_API_KEY</code></td><td>OpenAI API key</td></tr>
+    </tbody>
+</table>
+<h5>Highly recommended</h5>
+<table class="table table-sm table-bordered">
+    <tbody>
+        <tr><td><code>FACEBOOK_APP_SECRET</code></td><td>Enables HMAC signature verification. Required for Live mode.</td></tr>
+        <tr><td><code>VERIFY_TOKEN</code></td><td>Webhook verification token matched by FB on subscription</td></tr>
+        <tr><td><code>INITIAL_ADMIN_PASSWORD</code></td><td>Bootstrap admin password on first deploy</td></tr>
+        <tr><td><code>ADMIN_EMAIL</code></td><td>Email for the bootstrap admin</td></tr>
+    </tbody>
+</table>
+<h5>Optional</h5>
+<table class="table table-sm table-bordered">
+    <tbody>
+        <tr><td><code>SQLALCHEMY_DATABASE_URI</code></td><td>Override default <code>sqlite:///magic_bot.db</code>. Use <code>sqlite:////var/data/magic_bot.db</code> with a Render persistent disk, or a Postgres URI.</td></tr>
+        <tr><td><code>TELEGRAM_BOT_TOKEN</code></td><td>Enables Telegram handoff notifications</td></tr>
+        <tr><td><code>GOOGLE_FORM_URL</code></td><td>Registration link the bot embeds for "ready" stage users</td></tr>
+        <tr><td><code>TRAINING_CONTENT</code> / <code>BOT_PERSONA</code></td><td>Per-deployment branding fallbacks (DB setting wins if present)</td></tr>
+        <tr><td><code>COMPANY_*</code> / <code>PRODUCT_NAME</code></td><td>Used by the public <code>/privacy</code> page</td></tr>
+        <tr><td><code>SEED_DEFAULTS</code></td><td><code>false</code> to skip seeding Magic's default courses/FAQs (use on non-Magic deployments)</td></tr>
+        <tr><td><code>ENABLE_POLLING</code></td><td><code>true</code> to enable Page-post auto-commenting (off by default to avoid duplicate work across gunicorn workers)</td></tr>
+        <tr><td><code>ENABLE_NUDGE</code></td><td><code>true</code> to enable silent-lead follow-up nudges</td></tr>
+        <tr><td><code>RATE_LIMIT_MAX</code> / <code>RATE_LIMIT_WINDOW_SECONDS</code></td><td>Per-sender rate limit (default 5 per 60s)</td></tr>
+        <tr><td><code>RESET_ADMIN_USERNAME</code> + <code>RESET_ADMIN_PASSWORD</code></td><td>One-time forgot-password recovery; remove both after use to prevent repeated resets on every restart</td></tr>
+    </tbody>
+</table>
+
+<h4 id="t-deploy" class="doc-section">10. Deployment</h4>
+<ol>
+    <li>Create a Render web service from this repository. Procfile points gunicorn at <code>app:app</code>.</li>
+    <li>Set the required env vars. SQLite without a persistent disk gets wiped on every redeploy — for production attach a Render persistent disk at <code>/var/data</code> and set <code>SQLALCHEMY_DATABASE_URI=sqlite:////var/data/magic_bot.db</code>.</li>
+    <li>In the Facebook Developer Console: webhook URL = <code>https://&lt;render-url&gt;/webhook</code>, verify token = your <code>VERIFY_TOKEN</code>, subscribe the page to <code>messages</code> events.</li>
+    <li>For Live mode: submit <code>pages_messaging</code> for Advanced Access via App Review. Without it, only people with app roles can chat with the bot and have their profiles resolved.</li>
+    <li>Privacy policy URL = <code>https://&lt;render-url&gt;/privacy</code>.</li>
+</ol>
+
+<h4 id="t-schema" class="doc-section">11. Schema migration</h4>
+<p>
+    <code>init_db()</code> runs on every boot (gunicorn worker import). It does <code>db.create_all()</code>
+    for new tables and calls <code>ensure_schema()</code> which uses SQLite-style
+    <code>ALTER TABLE ADD COLUMN</code> (also valid on Postgres) to add columns introduced after the first
+    deploy — currently <code>funnel_stage</code>, <code>last_nudge_at</code>, <code>bot_muted_until</code>.
+    Idempotent: skips additions that already exist.
+</p>
+
+<h4 id="t-security" class="doc-section">12. Security</h4>
+<ul>
+    <li><strong>Webhook signature verification</strong> — HMAC-SHA256 against the raw body. Mandatory in Live mode.</li>
+    <li><strong>Rate limiting</strong> — sliding window per sender (in-memory; for multi-worker swap to Redis).</li>
+    <li><strong>Admin password policy</strong> — minimum 12 characters, hashed with Werkzeug's PBKDF2-SHA256.</li>
+    <li><strong>Role tiers</strong> — destructive admin actions (create / delete / role change / password reset) require <code>super_admin</code>.</li>
+    <li><strong>Last super_admin protection</strong> — can't delete or demote the last super_admin or the last admin.</li>
+    <li><strong>Auto-self-heal</strong> — if a deployment has admins but none are super_admin, the oldest is promoted on boot.</li>
+</ul>
+
+<h4 id="t-limits" class="doc-section">13. Known limitations</h4>
+<ul>
+    <li><strong>SQLite + multi-worker gunicorn</strong> — fine for one or two workers under low load; under higher concurrency move to Postgres.</li>
+    <li><strong>Rate-limit state is in-memory</strong> — each gunicorn worker has its own counter. Scale-out requires Redis.</li>
+    <li><strong>OpenAI cost per inbound message</strong> — every non-handoff, non-muted message hits the API. Aggressive rate limits, business-line refer, and snippet quality are your levers.</li>
+    <li><strong>Name lookup depends on FB permissions</strong> — Development mode + non-app-role users → name stays "Unknown" until <code>pages_messaging</code> gets Advanced Access.</li>
+    <li><strong>Polling auto-commenting is off by default</strong> — turning it on with multiple gunicorn workers will produce duplicate comments. Run one worker if you enable it.</li>
+</ul>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+</div>
+{% endblock %}
