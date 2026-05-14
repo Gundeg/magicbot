@@ -45,6 +45,7 @@
                             <td class="text-end pe-3">
                                 {% if is_super and admin.id != current_user.id %}
                                     <form method="POST" action="{{ url_for('toggle_admin_role', admin_id=admin.id) }}" class="d-inline">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <button type="submit" class="btn btn-sm btn-outline-primary"
                                                 title="{% if admin.role == 'super_admin' %}Энгийн админ болгох{% else %}Супер админ болгох{% endif %}">
                                             {% if admin.role == 'super_admin' %}
@@ -84,6 +85,7 @@
             </div>
             <div class="card-body">
                 <form method="POST" action="{{ url_for('create_admin') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label class="form-label">Нэвтрэх нэр</label>
                         <input type="text" name="username" class="form-control" required autocomplete="off">
@@ -121,6 +123,7 @@
             </div>
             <div class="card-body">
                 <form method="POST" action="{{ url_for('change_my_password') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label class="form-label">Одоогийн нууц үг</label>
                         <input type="password" name="current_password" class="form-control" required autocomplete="current-password">
@@ -164,6 +167,7 @@
             <div class="modal-dialog">
                 <div class="modal-content">
                     <form method="POST" action="{{ url_for('delete_admin', admin_id=admin.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="modal-header">
                             <h5 class="modal-title">Админыг устгах уу?</h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -187,6 +191,7 @@
             <div class="modal-dialog">
                 <div class="modal-content">
                     <form method="POST" action="{{ url_for('reset_admin_password', admin_id=admin.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="modal-header">
                             <h5 class="modal-title">{{ admin.username }} - нууц үг сэргээх</h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>

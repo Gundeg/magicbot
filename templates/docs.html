@@ -382,7 +382,9 @@
     <li>
         <strong>Telegram</strong> — <code>send_telegram_notification(text)</code> reads
         <code>TELEGRAM_BOT_TOKEN</code> from env, chat IDs from the <code>telegram_chat_ids</code> setting
-        (comma-separated; group IDs are negative). Fires on every handoff. Silent no-op if either is empty.
+        (comma-separated; group IDs are negative). Fires on every handoff. <strong>Silent no-op if the
+        token env var or the chat IDs setting is empty</strong> — the handoff itself still completes,
+        only the Telegram leg is skipped. Per-recipient errors are logged but never block the handoff.
     </li>
     <li>
         <strong>In-dashboard</strong> — every admin page polls <code>/admin/api/handoff-poll</code> every 15s;

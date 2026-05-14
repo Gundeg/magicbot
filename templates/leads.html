@@ -74,7 +74,7 @@
                                 </td>
                                 <td><span class="badge bg-light text-muted border">{{ lead.funnel_stage or 'curious' }}</span></td>
                                 <td><small>{{ lead.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
-                                <td><span class="badge bg-secondary">{{ lead.messages|length }}</span></td>
+                                <td><span class="badge bg-secondary">{{ confirmed_msg_counts.get(lead.id, 0) }}</span></td>
                             </tr>
                             {% else %}
                             <tr>

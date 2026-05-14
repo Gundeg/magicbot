@@ -18,7 +18,9 @@ except ImportError:
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_wtf.csrf import CSRFProtect
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 from werkzeug.security import check_password_hash, generate_password_hash
 from openai import OpenAI
 from threading import Thread, Lock
@@ -81,6 +83,12 @@ db = SQLAlchemy(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+# CSRFProtect guards every non-GET endpoint. Templates emit a hidden
+# csrf_token input via {{ csrf_token() }} for form POSTs; JS fetches read
+# the token from the meta tag in base.html and send it as X-CSRFToken.
+# The Facebook webhook is exempted below since the request comes from
+# Meta's infrastructure (authenticated via X-Hub-Signature-256 instead).
+csrf = CSRFProtect(app)
 
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
@@ -1136,6 +1144,10 @@ def trigger_handoff(fb_user, reason, user_message):
     db.session.add(issue)
     db.session.commit()
 
+    # Drop the polling cache so the admin toast fires on the very next refresh
+    # instead of waiting out the 2-second TTL.
+    _invalidate_handoff_poll_cache()
+
     # User-visible message — short, polite, not robotic.
     send_facebook_message(fb_user.facebook_id, HANDOFF_USER_REPLY)
     db.session.add(Message(
@@ -1334,32 +1346,72 @@ def leads():
                  .order_by(FacebookUser.created_at.desc())
                  .all())
 
+    # Pre-compute message counts in one query instead of letting Jinja call
+    # `lead.messages|length` per row (which would trigger one SELECT per lead).
+    confirmed_msg_counts = dict(
+        db.session.query(Message.facebook_user_id, db.func.count(Message.id))
+        .filter(Message.facebook_user_id.in_([l.id for l in confirmed]))
+        .group_by(Message.facebook_user_id)
+        .all()
+    ) if confirmed else {}
+
+    # Aggregate everything we need per user in three indexed subqueries so the
+    # outer query is O(1) regardless of prospect count — avoids an N+1 where
+    # each row used to fire one "last user message" lookup and one count().
     last_msg_subq = (db.session.query(
         Message.facebook_user_id.label('uid'),
         db.func.max(Message.created_at).label('last_at'),
     ).group_by(Message.facebook_user_id).subquery())
 
-    hot_rows = (db.session.query(FacebookUser, last_msg_subq.c.last_at)
-                .join(last_msg_subq, FacebookUser.id == last_msg_subq.c.uid)
-                .filter(FacebookUser.is_lead == False)  # noqa: E712
-                .filter(FacebookUser.funnel_stage.in_(['pricing', 'ready']))
-                .order_by(last_msg_subq.c.last_at.desc())
-                .all())
+    msg_count_subq = (db.session.query(
+        Message.facebook_user_id.label('uid'),
+        db.func.count(Message.id).label('msg_count'),
+    ).group_by(Message.facebook_user_id).subquery())
+
+    # max(id) gives the latest user-sent message for each user. Safe because
+    # ids are autoincrement and monotonic with insert order on both SQLite
+    # and Postgres — much cheaper than a correlated ORDER BY/LIMIT 1.
+    last_user_msg_subq = (db.session.query(
+        Message.facebook_user_id.label('uid'),
+        db.func.max(Message.id).label('last_user_msg_id'),
+    ).filter(Message.sender == 'user')
+     .group_by(Message.facebook_user_id).subquery())
+
+    hot_rows = (db.session.query(
+        FacebookUser,
+        last_msg_subq.c.last_at,
+        msg_count_subq.c.msg_count,
+        last_user_msg_subq.c.last_user_msg_id,
+    ).join(last_msg_subq, FacebookUser.id == last_msg_subq.c.uid)
+     .outerjoin(msg_count_subq, FacebookUser.id == msg_count_subq.c.uid)
+     .outerjoin(last_user_msg_subq, FacebookUser.id == last_user_msg_subq.c.uid)
+     .filter(FacebookUser.is_lead == False)  # noqa: E712
+     .filter(FacebookUser.funnel_stage.in_(['pricing', 'ready']))
+     .order_by(last_msg_subq.c.last_at.desc())
+     .all())
+
+    # One batched fetch for every message body we'll display.
+    msg_ids = [row[3] for row in hot_rows if row[3]]
+    content_by_id = {}
+    if msg_ids:
+        for m in Message.query.filter(Message.id.in_(msg_ids)).all():
+            content_by_id[m.id] = m.content or ''
 
     hot_prospects = []
-    for user, last_at in hot_rows:
-        last_user_msg = (Message.query
-                         .filter_by(facebook_user_id=user.id, sender='user')
-                         .order_by(Message.created_at.desc())
-                         .first())
+    for user, last_at, msg_count, last_user_msg_id in hot_rows:
         hot_prospects.append({
             'user': user,
             'last_at': last_at,
-            'last_message': (last_user_msg.content if last_user_msg else '') or '',
-            'message_count': Message.query.filter_by(facebook_user_id=user.id).count(),
+            'last_message': content_by_id.get(last_user_msg_id, ''),
+            'message_count': msg_count or 0,
         })
 
-    return render_template('leads.html', leads=confirmed, hot_prospects=hot_prospects)
+    return render_template(
+        'leads.html',
+        leads=confirmed,
+        hot_prospects=hot_prospects,
+        confirmed_msg_counts=confirmed_msg_counts,
+    )
 
 @app.route('/admin/issues', methods=['GET', 'POST'])
 @login_required
@@ -1389,7 +1441,11 @@ def issues():
 
         return jsonify({'success': False, 'error': 'unknown action'}), 400
 
-    issues = AdminIssue.query.filter_by(status='open').order_by(AdminIssue.created_at.desc()).all()
+    issues = (AdminIssue.query
+              .options(joinedload(AdminIssue.facebook_user))
+              .filter_by(status='open')
+              .order_by(AdminIssue.created_at.desc())
+              .all())
     now = datetime.utcnow()
     muted_users = (FacebookUser.query
                    .filter(FacebookUser.bot_muted_until != None)  # noqa: E711
@@ -1412,9 +1468,11 @@ def test_telegram():
     token = os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()
     chat_ids = get_telegram_chat_ids()
 
+    # Intentionally NOT echoing any part of the token back to the client.
+    # Partial token exposure helps brute-force narrowing and lands the
+    # fragment in browser history / dev tools / proxy logs.
     result = {
         'token_set': bool(token),
-        'token_preview': (token[:6] + '…' + token[-4:]) if token else '',
         'chat_ids': chat_ids,
         'attempts': [],
         'success_count': 0,
@@ -1495,6 +1553,14 @@ def backfill_names():
     })
 
 
+# Tiny in-memory TTL cache for the polling endpoint. With N admins × M open
+# tabs each polling every 15s, this trims most hits to a dict lookup. The
+# 2-second TTL is shorter than the client poll interval, so a new handoff
+# is still visible within ~2-15s of creation.
+_handoff_poll_cache = {'expires_at': 0.0, 'payload': None}
+_HANDOFF_POLL_TTL = 2.0
+
+
 @app.route('/admin/api/handoff-poll')
 @login_required
 @admin_required
@@ -1503,23 +1569,43 @@ def handoff_poll():
 
     Returns the count of open handoff issues and the id+timestamp of the
     newest one, so the client JS can play a sound when a new id appears.
-    Kept cheap: two indexed queries, no LLM calls. Polled every 15s.
+    Two indexed queries per refresh; results cached for 2s to stay cheap
+    under multi-admin/multi-tab load.
     """
+    now = time.time()
+    if _handoff_poll_cache['payload'] is not None and now < _handoff_poll_cache['expires_at']:
+        return jsonify(_handoff_poll_cache['payload'])
+
     open_q = AdminIssue.query.filter_by(issue_type='handoff', status='open')
     latest = open_q.order_by(AdminIssue.created_at.desc()).first()
-    return jsonify({
+    payload = {
         'open_count': open_q.count(),
         'latest_id': latest.id if latest else None,
         'latest_at': latest.created_at.isoformat() if latest else None,
         'sound_enabled': get_sound_alerts_enabled(),
-    })
+    }
+    _handoff_poll_cache['payload'] = payload
+    _handoff_poll_cache['expires_at'] = now + _HANDOFF_POLL_TTL
+    return jsonify(payload)
+
+
+def _invalidate_handoff_poll_cache():
+    """Drop the cached poll payload so the very next /admin/api/handoff-poll
+    request rebuilds it. Called when a handoff fires so the toast appears
+    within the same poll cycle instead of waiting out the TTL."""
+    _handoff_poll_cache['payload'] = None
+    _handoff_poll_cache['expires_at'] = 0.0
 
 
 @app.route('/admin/logs')
 @login_required
 @admin_required
 def logs():
-    messages = Message.query.order_by(Message.created_at.desc()).limit(100).all()
+    messages = (Message.query
+                .options(joinedload(Message.facebook_user))
+                .order_by(Message.created_at.desc())
+                .limit(100)
+                .all())
     return render_template('logs.html', messages=messages)
 
 @app.route('/admin/settings', methods=['GET', 'POST'])
@@ -1952,9 +2038,14 @@ def toggle_admin_role(admin_id):
     return redirect(url_for('admins'))
 
 
+@csrf.exempt
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Facebook Messenger webhook"""
+    """Facebook Messenger webhook.
+
+    CSRF is intentionally disabled here — Facebook posts here directly, not
+    a browser. The request is authenticated by HMAC-SHA256 against the raw
+    body using FACEBOOK_APP_SECRET (see verify_facebook_signature)."""
     raw_body = request.get_data()
     sig_header = request.headers.get('X-Hub-Signature-256', '')
     if not verify_facebook_signature(raw_body, sig_header):

@@ -221,7 +221,7 @@ document.getElementById('testTelegramBtn').addEventListener('click', function ()
                 msg = '❌ Chat ID хоосон. Дээрх талбарт ID оруулаад\n' +
                       '"Save Settings" товчийг дарсан эсэхээ шалга.';
             } else {
-                msg = `Token: ${d.token_preview}\n` +
+                msg = `Token: ✓ тогтоогдсон\n` +
                       `Chat ID-ууд: ${d.chat_ids.join(', ')}\n` +
                       `Амжилт: ${d.success_count}/${d.attempts.length}\n\n`;
                 d.attempts.forEach(a => {
