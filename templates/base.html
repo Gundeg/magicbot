@@ -297,6 +297,9 @@
                 <a class="nav-link {% if request.endpoint == 'business_lines' %}active{% endif %}" href="{{ url_for('business_lines') }}">
                     <i class="bi bi-diagram-3"></i> Бизнесийн чиглэл
                 </a>
+                <a class="nav-link {% if request.endpoint == 'products' %}active{% endif %}" href="{{ url_for('products') }}">
+                    <i class="bi bi-box-seam"></i> Бүтээгдэхүүн
+                </a>
                 <a class="nav-link {% if request.endpoint == 'handoff_keywords' %}active{% endif %}" href="{{ url_for('handoff_keywords') }}">
                     <i class="bi bi-tags"></i> Дамжуулах түлхүүр үгс
                 </a>

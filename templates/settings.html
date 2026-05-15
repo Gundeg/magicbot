@@ -9,6 +9,34 @@
     <div class="col-md-8">
         <div class="card">
             <div class="card-header">
+                <i class="bi bi-building"></i> Гол оффис (Main office fallback)
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Бизнесийн чиглэлд тусгайлсан хаяг / утас оруулаагүй үед бот энд бичсэн утгыг
+                    ашиглана. Жишээ: CPA, Audit, Программ — бүгд нэг гол оффистой бол хаягийг
+                    зөвхөн энд бичээд тэдгээрийн хувийн "Хаяг" талбарыг хоосон үлдээнэ. Гол оффис
+                    нүүх үед нэг л газар шинэчилнэ.
+                </p>
+                <div class="row">
+                    <div class="col-md-8 mb-3">
+                        <label for="mainOfficeAddress" class="form-label">Гол оффисын хаяг</label>
+                        <input type="text" class="form-control" id="mainOfficeAddress"
+                               value="{{ settings.get('main_office_address', '') }}"
+                               placeholder="Жишээ: БЗД 13-р хороолол, UB Tower Plus, 15 давхар, 1502 тоот">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label for="mainOfficePhone" class="form-label">Гол оффисын утас</label>
+                        <input type="text" class="form-control" id="mainOfficePhone"
+                               value="{{ settings.get('main_office_phone', '') }}"
+                               placeholder="Жишээ: 7288-7288">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header">
                 <i class="bi bi-gear"></i> Training Center Information
             </div>
             <div class="card-body">
@@ -277,6 +305,8 @@ document.getElementById('testTelegramBtn').addEventListener('click', function ()
 
 document.getElementById('saveSettingsBtn').addEventListener('click', function() {
     const data = {
+        main_office_address: document.getElementById('mainOfficeAddress').value,
+        main_office_phone: document.getElementById('mainOfficePhone').value,
         center_name: document.getElementById('centerName').value,
         center_description: document.getElementById('centerDescription').value,
         center_phone: document.getElementById('centerPhone').value,

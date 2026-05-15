@@ -281,8 +281,12 @@ class BusinessLine(db.Model):
     # `contact_info` so admins can update one number/URL/address without
     # rewriting the description blob.
     address = db.Column(db.Text)
+    email = db.Column(db.String(200))
     signup_form_url = db.Column(db.String(500))
     signup_phone = db.Column(db.String(100))
+    # Training has both a registration form and an exam form (software-only
+    # learning path). Other lines leave this null.
+    exam_form_url = db.Column(db.String(500))
     # Stats vary per line (training has 'students', software has 'users'),
     # so each line carries its own three numbers instead of a single
     # company-wide About Us block.
@@ -294,6 +298,63 @@ class BusinessLine(db.Model):
     sort_order = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Product(db.Model):
+    """A distinct product offered under a BusinessLine. Used when one line
+    sells several separable things (Magic Finance + Microsoft + Kaspersky
+    under the Program line). Training-style services use Course instead
+    since they need scheduling fields.
+
+    The bot does not quote prices; questions about purchase, support,
+    docs, etc. get answered with the matching ProductLink. Prices live
+    only in the request-form workflow operated by humans."""
+    id = db.Column(db.Integer, primary_key=True)
+    business_line_id = db.Column(
+        db.Integer, db.ForeignKey('business_line.id'), nullable=False
+    )
+    # Admin-input external code. Same disambiguation pattern as Course —
+    # the name can repeat (e.g. multiple Microsoft license SKUs) but the
+    # number stays unique across all Products.
+    product_number = db.Column(db.Integer, unique=True)
+    name = db.Column(db.String(200), nullable=False)
+    vendor = db.Column(db.String(120))
+    description = db.Column(db.Text)
+    # Promote one product per line to the top of the bot's mental list.
+    is_main_product = db.Column(db.Boolean, default=False)
+    is_active = db.Column(db.Boolean, default=True)
+    status_note = db.Column(db.String(255))
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    business_line = db.relationship(
+        'BusinessLine',
+        backref=db.backref('products', lazy=True, cascade='all, delete-orphan')
+    )
+
+
+class ProductLink(db.Model):
+    """One resource link attached to a Product — purchase form, support
+    ticket URL, manual, community forum, download page, etc.
+
+    `kind` is free-form so admins can add new categories without a code
+    deploy. The bot is told to match user intent semantically against
+    kind + label and quote the matching link, never invent one."""
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(
+        db.Integer, db.ForeignKey('product.id'), nullable=False
+    )
+    kind = db.Column(db.String(40), nullable=False)
+    label = db.Column(db.String(160))
+    url = db.Column(db.String(500), nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    product = db.relationship(
+        'Product',
+        backref=db.backref('links', lazy=True, cascade='all, delete-orphan',
+                           order_by='ProductLink.sort_order')
+    )
 
 class HandoffKeyword(db.Model):
     """Keyword/phrase that triggers a human handoff. Replaces the hardcoded
@@ -572,12 +633,57 @@ def ensure_schema():
     add_columns('business_line', {
         'status_note': 'status_note VARCHAR(255)',
         'address': 'address TEXT',
+        'email': 'email VARCHAR(200)',
         'signup_form_url': 'signup_form_url VARCHAR(500)',
         'signup_phone': 'signup_phone VARCHAR(100)',
+        'exam_form_url': 'exam_form_url VARCHAR(500)',
         'established_year': 'established_year INTEGER',
         'num_products_or_services': 'num_products_or_services INTEGER',
         'total_clients_or_users': 'total_clients_or_users INTEGER',
     })
+
+    # Product + ProductLink were added later; create them on existing DBs that
+    # never ran create_all() against the new schema.
+    if 'product' not in inspector.get_table_names():
+        with db.engine.begin() as conn:
+            try:
+                conn.exec_driver_sql(
+                    "CREATE TABLE product ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  business_line_id INTEGER NOT NULL REFERENCES business_line(id),"
+                    "  product_number INTEGER UNIQUE,"
+                    "  name VARCHAR(200) NOT NULL,"
+                    "  vendor VARCHAR(120),"
+                    "  description TEXT,"
+                    "  is_main_product BOOLEAN DEFAULT 0,"
+                    "  is_active BOOLEAN DEFAULT 1,"
+                    "  status_note VARCHAR(255),"
+                    "  sort_order INTEGER DEFAULT 0,"
+                    "  created_at DATETIME,"
+                    "  updated_at DATETIME"
+                    ")"
+                )
+                print("Schema migration: created product table")
+            except Exception as e:
+                print(f"Schema migration skipped (product table): {e}")
+    if 'product_link' not in inspector.get_table_names():
+        with db.engine.begin() as conn:
+            try:
+                conn.exec_driver_sql(
+                    "CREATE TABLE product_link ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  product_id INTEGER NOT NULL REFERENCES product(id),"
+                    "  kind VARCHAR(40) NOT NULL,"
+                    "  label VARCHAR(160),"
+                    "  url VARCHAR(500) NOT NULL,"
+                    "  is_active BOOLEAN DEFAULT 1,"
+                    "  sort_order INTEGER DEFAULT 0,"
+                    "  created_at DATETIME"
+                    ")"
+                )
+                print("Schema migration: created product_link table")
+            except Exception as e:
+                print(f"Schema migration skipped (product_link table): {e}")
 
     # Create handoff_keyword table if it doesn't exist (create_all handles new DBs,
     # but existing DBs won't have it).
@@ -798,6 +904,18 @@ def get_bot_persona():
     return get_setting('bot_persona', BOT_PERSONA)
 
 
+def get_main_office_address():
+    """Fallback address used by BusinessLines that don't set their own.
+    Single point of update when the head office moves."""
+    return get_setting('main_office_address', '')
+
+
+def get_main_office_phone():
+    """Fallback general phone used by BusinessLines whose contact_info is
+    blank (e.g. product lines that route through the central switchboard)."""
+    return get_setting('main_office_phone', '')
+
+
 def _format_training_snippets():
     """Build the additive-snippets section. High-priority snippets surface
     first so the model weights them more heavily. Returns '' when there are
@@ -845,13 +963,42 @@ ALLOWED_COURSE_TYPES = ('100% Online', 'Hybrid', 'Online with Teacher', 'Classro
 SELF_PACED_COURSE_TYPE = '100% Online'
 
 
+def _format_product_entry(p):
+    """One product under a business line, with its active ProductLinks
+    listed beneath it. Each link's `kind` is preserved so the bot can
+    semantically match user intent against it."""
+    head = f"  • "
+    if p.product_number:
+        head += f"[#{p.product_number}] "
+    head += p.name
+    if p.is_main_product:
+        head += " ★main"
+    if p.vendor:
+        head += f" ({p.vendor})"
+    lines = [head]
+    if p.description:
+        lines.append(f"    Тайлбар: {p.description}")
+    if p.status_note:
+        lines.append(f"    Тэмдэглэл: {p.status_note}")
+    active_links = [l for l in p.links if l.is_active]
+    if active_links:
+        lines.append("    Холбоосууд:")
+        for l in sorted(active_links, key=lambda x: (x.sort_order, x.id)):
+            label = l.label or l.kind
+            lines.append(f"      - [{l.kind}] {label}: {l.url}")
+    return "\n".join(lines)
+
+
 def _format_business_line_entry(b):
     """Single-line summary for a business line, with structured fields the
-    admin filled in (address, sign-up channels, stats) appended so the bot
-    can quote them without parsing the freeform description."""
+    admin filled in (address, sign-up channels, stats, child products)
+    appended so the bot can quote them without parsing the freeform
+    description. Address and main phone fall back to the global
+    main_office_* settings when this line doesn't set its own."""
     parts = [f"- {b.name}"]
     if b.description:
         parts.append(f": {b.description}")
+
     extras = []
     if b.established_year:
         extras.append(f"үүсгэн байгуулагдсан: {b.established_year}")
@@ -859,16 +1006,42 @@ def _format_business_line_entry(b):
         extras.append(f"бүтээгдэхүүн/үйлчилгээ: {b.num_products_or_services}")
     if b.total_clients_or_users:
         extras.append(f"харилцагч/хэрэглэгч: {b.total_clients_or_users:,}")
-    if b.address:
-        extras.append(f"хаяг: {b.address}")
+
+    address = b.address or get_main_office_address()
+    if address:
+        # Tag whether the line is at its own address or the shared head
+        # office, so the bot doesn't claim the line has a dedicated
+        # address when it actually shares the main one.
+        if b.address:
+            extras.append(f"хаяг: {address}")
+        else:
+            extras.append(f"хаяг (Гол оффис): {address}")
+
     if b.contact_info:
         extras.append(f"холбоо барих: {b.contact_info}")
+    else:
+        main_phone = get_main_office_phone()
+        if main_phone:
+            extras.append(f"холбоо барих (Гол оффис): {main_phone}")
+
+    if b.email:
+        extras.append(f"имэйл: {b.email}")
     if b.signup_phone:
         extras.append(f"бүртгэлийн утас: {b.signup_phone}")
     if b.signup_form_url:
         extras.append(f"бүртгэлийн линк: {b.signup_form_url}")
+    if b.exam_form_url:
+        extras.append(f"шалгалтын линк: {b.exam_form_url}")
     if extras:
         parts.append("\n  (" + "; ".join(extras) + ")")
+
+    # Child Products (e.g. Magic Finance + Microsoft + Kaspersky under
+    # the Program line). Sorted so the main product comes first.
+    products = [p for p in (b.products or []) if p.is_active]
+    if products:
+        products.sort(key=lambda p: (not p.is_main_product, p.sort_order, p.id))
+        parts.append("\n  Бүтээгдэхүүнүүд:\n" + "\n".join(_format_product_entry(p) for p in products))
+
     return "".join(parts)
 
 
@@ -1058,7 +1231,8 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
 5. Шийдэх боломжгүй буюу мэдэхгүй асуудал тулгарвал "Энэ асуудлыг манай ажилтан тантай эргэж холбогдож тодруулна" гэж хэлэх.
 6. Эмодзи цөөн (1-2) хэрэглэж, илүү гар бичмэл маяг бүү аватарла.
 7. Өгүүлбэрүүдийн эхлэлийг сольж бай, "Сургалт..." гэх мэт ижил үгээр дандаа бүү эхэл.
-8. Сургалтаас өөр чиглэлийн (компанийн бусад үйлчилгээ) асуултанд дээрх "КОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ" хэсгийн дүрмийн дагуу хариулна. Жагсаалтад байхгүй чиглэл бол "Тантай ажилтан холбогдох уу?" гэж асууж дугаар лав."""
+8. Сургалтаас өөр чиглэлийн (компанийн бусад үйлчилгээ) асуултанд дээрх "КОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ" хэсгийн дүрмийн дагуу хариулна. Жагсаалтад байхгүй чиглэл бол "Тантай ажилтан холбогдох уу?" гэж асууж дугаар лав.
+9. БҮТЭЭГДЭХҮҮНИЙ ДҮРЭМ: Бот бүтээгдэхүүн (Magic Finance, Microsoft license, Kaspersky г.м.)-ийн үнэ, санал хэлэхгүй. Худалдан авах, дэмжлэг (ticket), гарын авлага (manual), community, татах (download) гэх мэт асуулт ирэхэд тухайн бүтээгдэхүүний "Холбоосууд" жагсаалтаас хэрэглэгчийн санаатай таарах нэгийг сонгож, тэр линкийг өгөөд "манай ажилтан тантай холбогдож үнэ, нөхцөл нь дэлгэрэнгүй хэлэлцэнэ" гэж нэм. Жагсаалтад тохирох холбоос байхгүй бол үнэ зохиохгүйгээр ажилтантай холбогдох санал тавь."""
     return system_prompt
 
 
@@ -2447,8 +2621,10 @@ def business_lines():
             line.contact_info = (data.get('contact_info') or '').strip() or None
             line.status_note = (data.get('status_note') or '').strip() or None
             line.address = (data.get('address') or '').strip() or None
+            line.email = (data.get('email') or '').strip() or None
             line.signup_form_url = (data.get('signup_form_url') or '').strip() or None
             line.signup_phone = (data.get('signup_phone') or '').strip() or None
+            line.exam_form_url = (data.get('exam_form_url') or '').strip() or None
 
             def _opt_int(field):
                 raw = data.get(field)
@@ -2498,6 +2674,138 @@ def business_lines():
 
 
 # ===================== HANDOFF KEYWORDS =====================
+
+def _parse_product_payload(data, existing=None):
+    """Validate + coerce the JSON payload from the product modal. Returns
+    (kwargs_for_product, links_list, error). The links_list replaces the
+    Product's existing ProductLink rows wholesale on save."""
+    name = (data.get('name') or '').strip()
+    if not name:
+        return None, None, 'Бүтээгдэхүүний нэр шаардлагатай.'
+
+    bl_id = data.get('business_line_id')
+    try:
+        bl_id = int(bl_id)
+    except (TypeError, ValueError):
+        return None, None, 'business_line_id шаардлагатай.'
+    if not BusinessLine.query.get(bl_id):
+        return None, None, 'Сонгосон бизнесийн чиглэл олдсонгүй.'
+
+    raw_number = data.get('product_number')
+    if raw_number in (None, '', 'null'):
+        return None, None, (
+            'Бүтээгдэхүүний дугаар (product_number) шаардлагатай. '
+            'Жишээ: 2001. Давтагдашгүй бүхэл тоо.'
+        )
+    try:
+        product_number = int(raw_number)
+    except (TypeError, ValueError):
+        return None, None, 'product_number бүхэл тоо байх ёстой.'
+    clash = Product.query.filter_by(product_number=product_number).first()
+    if clash and (existing is None or clash.id != existing.id):
+        return None, None, (
+            f'#{product_number} дугаартай бүтээгдэхүүн аль хэдийн бүртгэлтэй '
+            f'(id={clash.id}).'
+        )
+
+    raw_links = data.get('links') or []
+    if not isinstance(raw_links, list):
+        return None, None, 'links талбар жагсаалт байх ёстой.'
+    links = []
+    for i, link in enumerate(raw_links):
+        kind = (link.get('kind') or '').strip()
+        url = (link.get('url') or '').strip()
+        if not kind and not url:
+            continue  # let admin leave empty rows
+        if not kind or not url:
+            return None, None, f'Холбоос #{i+1}: kind болон URL хоёулаа шаардлагатай.'
+        links.append({
+            'kind': kind[:40],
+            'label': (link.get('label') or '').strip()[:160] or None,
+            'url': url[:500],
+            'is_active': bool(link.get('is_active', True)),
+            'sort_order': int(link.get('sort_order') or i),
+        })
+
+    return {
+        'business_line_id': bl_id,
+        'product_number': product_number,
+        'name': name,
+        'vendor': (data.get('vendor') or '').strip() or None,
+        'description': (data.get('description') or '').strip() or None,
+        'is_main_product': bool(data.get('is_main_product')),
+    }, links, None
+
+
+@app.route('/admin/products', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def products():
+    """CRUD for Products and their child ProductLinks. One POST round-trip
+    saves a Product plus its full link list — simpler than tracking link
+    ids on the client. Toggle/delete are separate actions like Courses."""
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        action = data.get('action')
+
+        if action == 'add':
+            fields, links, err = _parse_product_payload(data)
+            if err:
+                return jsonify({'success': False, 'error': err}), 400
+            product = Product(**fields)
+            db.session.add(product)
+            db.session.flush()
+            for link in links:
+                db.session.add(ProductLink(product_id=product.id, **link))
+            db.session.commit()
+            return jsonify({'success': True, 'id': product.id})
+
+        if action == 'edit':
+            product = Product.query.get(data.get('id'))
+            if not product:
+                return jsonify({'success': False, 'error': 'Бүтээгдэхүүн олдсонгүй.'}), 404
+            fields, links, err = _parse_product_payload(data, existing=product)
+            if err:
+                return jsonify({'success': False, 'error': err}), 400
+            for key, value in fields.items():
+                setattr(product, key, value)
+            # Replace all links wholesale.
+            ProductLink.query.filter_by(product_id=product.id).delete()
+            for link in links:
+                db.session.add(ProductLink(product_id=product.id, **link))
+            db.session.commit()
+            return jsonify({'success': True})
+
+        if action == 'toggle':
+            product = Product.query.get(data.get('id'))
+            if not product:
+                return jsonify({'success': False}), 404
+            product.is_active = not product.is_active
+            product.status_note = (data.get('status_note') or '').strip() or None
+            db.session.commit()
+            return jsonify({'success': True, 'is_active': product.is_active})
+
+        if action == 'delete':
+            product = Product.query.get(data.get('id'))
+            if not product:
+                return jsonify({'success': False}), 404
+            db.session.delete(product)
+            db.session.commit()
+            return jsonify({'success': True})
+
+        return jsonify({'success': False, 'error': 'unknown action'}), 400
+
+    all_products = (Product.query
+                    .options(joinedload(Product.business_line),
+                             joinedload(Product.links))
+                    .order_by(Product.business_line_id.asc(),
+                              Product.sort_order.asc(),
+                              Product.id.asc())
+                    .all())
+    lines = BusinessLine.query.order_by(BusinessLine.sort_order.asc(),
+                                        BusinessLine.id.asc()).all()
+    return render_template('products.html', products=all_products, business_lines=lines)
+
 
 @app.route('/admin/handoff-keywords', methods=['GET', 'POST'])
 @login_required
@@ -3068,6 +3376,67 @@ def seed_courses_and_faqs():
     db.session.commit()
 
 
+def seed_products():
+    """Seed 3 starter Products under the Program / Magic Finance business
+    line so admins have rows to edit-in-place rather than create from
+    scratch. Idempotent: skipped when Products already exist, or when
+    SEED_DEFAULTS=false (i.e. non-MagicBot deployments)."""
+    if os.environ.get('SEED_DEFAULTS', 'true').strip().lower() != 'true':
+        return
+    if Product.query.count() > 0:
+        return
+
+    # Try the most likely matches for the program/software line. Match in
+    # Python because SQLite's ILIKE doesn't case-fold Cyrillic correctly,
+    # which would otherwise miss names like "Программ ба License".
+    needles = ('magic finance', 'программ', 'software')
+    program_line = None
+    for line in BusinessLine.query.all():
+        if any(n in (line.name or '').lower() for n in needles):
+            program_line = line
+            break
+    if not program_line:
+        print("seed_products: no program/software BusinessLine found — skipping.")
+        return
+
+    starters = [
+        {
+            'product_number': 2001,
+            'name': 'Magic Finance',
+            'vendor': 'Magic Cloud LLC',
+            'description': (
+                'Санхүү, татварын тайлан гаргахад зориулсан программ. 90 орчим '
+                'төрлийн тайлан гаргах боломжтой (Санхүүгийн, Татварын, '
+                'Удирдлагын, Туслах). Сургалтын төгсөгчдөд үнэгүй license '
+                'олгоно: Танхим (100% танхим) ба Багштай онлайн → 1 жил; '
+                'Хосолсон ба 100% Онлайн → 6 сар.'
+            ),
+            'is_main_product': True,
+            'sort_order': 0,
+        },
+        {
+            'product_number': 2002,
+            'name': 'Microsoft license',
+            'vendor': 'Microsoft',
+            'description': 'Microsoft программ хангамжийн license. Дэлгэрэнгүйг ажилтнаас лавлана уу.',
+            'is_main_product': False,
+            'sort_order': 1,
+        },
+        {
+            'product_number': 2003,
+            'name': 'Kaspersky license',
+            'vendor': 'Kaspersky',
+            'description': 'Kaspersky аюулгүй байдлын программ хангамжийн license. Дэлгэрэнгүйг ажилтнаас лавлана уу.',
+            'is_main_product': False,
+            'sort_order': 2,
+        },
+    ]
+    for s in starters:
+        db.session.add(Product(business_line_id=program_line.id, **s))
+    db.session.commit()
+    print(f"Seeded {len(starters)} starter products under '{program_line.name}'.")
+
+
 def seed_handoff_keywords():
     """Populate HandoffKeyword table from the default lists on first run. Idempotent."""
     if HandoffKeyword.query.count() > 0:
@@ -3150,6 +3519,7 @@ def init_db():
         ensure_schema()
         seed_courses_and_faqs()
         seed_handoff_keywords()
+        seed_products()
         advance_recurring_courses()
 
         if not User.query.filter_by(username='admin').first():
