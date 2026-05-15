@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 
-{% block title %}FAQ - Magic Bot Admin{% endblock %}
+{% block title %}Түгээмэл асуулт - Magic Bot Admin{% endblock %}
 
-{% block page_title %}FAQ Management{% endblock %}
+{% block page_title %}Түгээмэл асуулт (FAQ){% endblock %}
 
 {% block content %}
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-question-circle"></i> Manage FAQ</span>
-        <button class="btn btn-sm btn-light" data-bs-toggle="modal" data-bs-target="#faqModal">
-            <i class="bi bi-plus-circle"></i> Add FAQ
+        <span><i class="bi bi-question-circle"></i> FAQ удирдах</span>
+        <button class="btn btn-sm btn-light" id="addFaqBtn" data-bs-toggle="modal" data-bs-target="#faqModal">
+            <i class="bi bi-plus-circle"></i> FAQ нэмэх
         </button>
     </div>
     <div class="card-body">
@@ -17,24 +17,27 @@
             <table class="table table-hover">
                 <thead>
                     <tr>
-                        <th>Question</th>
-                        <th>Category</th>
-                        <th>Actions</th>
+                        <th>Асуулт</th>
+                        <th>Ангилал</th>
+                        <th>Үйлдэл</th>
                     </tr>
                 </thead>
                 <tbody id="faqList">
                     {% for faq in faqs %}
-                    <tr data-faq-id="{{ faq.id }}">
+                    <tr data-faq-id="{{ faq.id }}"
+                        data-question="{{ faq.question | e }}"
+                        data-answer="{{ faq.answer | e }}"
+                        data-category="{{ faq.category or '' | e }}">
                         <td>
                             <strong>{{ faq.question }}</strong>
                             <br>
-                            <small class="text-muted">{{ faq.answer[:100] }}...</small>
+                            <small class="text-muted">{{ faq.answer[:100] }}{% if faq.answer|length > 100 %}...{% endif %}</small>
                         </td>
                         <td>
                             {% if faq.category %}
                                 <span class="badge bg-info">{{ faq.category }}</span>
                             {% else %}
-                                <span class="badge bg-secondary">General</span>
+                                <span class="badge bg-secondary">Ерөнхий</span>
                             {% endif %}
                         </td>
                         <td>
@@ -48,7 +51,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="3" class="text-center text-muted">No FAQs yet. Add one to get started.</td>
+                        <td colspan="3" class="text-center text-muted">FAQ байхгүй байна. Нэмэхийн тулд дээрх товчийг дарна уу.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -62,35 +65,41 @@
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="faqModalTitle">Add FAQ</h5>
+                <h5 class="modal-title" id="faqModalTitle">FAQ нэмэх</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <form id="faqForm">
                     <input type="hidden" id="faqId" value="">
                     <div class="mb-3">
-                        <label for="faqQuestion" class="form-label">Question</label>
+                        <label for="faqQuestion" class="form-label">Асуулт</label>
                         <input type="text" class="form-control" id="faqQuestion" required>
                     </div>
                     <div class="mb-3">
-                        <label for="faqAnswer" class="form-label">Answer</label>
+                        <label for="faqAnswer" class="form-label">Хариулт</label>
                         <textarea class="form-control" id="faqAnswer" rows="5" required></textarea>
                     </div>
                     <div class="mb-3">
-                        <label for="faqCategory" class="form-label">Category</label>
-                        <input type="text" class="form-control" id="faqCategory" placeholder="e.g., Pricing, Schedule, Requirements">
+                        <label for="faqCategory" class="form-label">Ангилал</label>
+                        <input type="text" class="form-control" id="faqCategory" placeholder="Жишээ: Үнэ, Хуваарь, Шаардлага">
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="saveFaqBtn">Save FAQ</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Цуцлах</button>
+                <button type="button" class="btn btn-primary" id="saveFaqBtn">Хадгалах</button>
             </div>
         </div>
     </div>
 </div>
 
 <script>
+document.getElementById('addFaqBtn').addEventListener('click', function() {
+    document.getElementById('faqForm').reset();
+    document.getElementById('faqId').value = '';
+    document.getElementById('faqModalTitle').textContent = 'FAQ нэмэх';
+});
+
 document.getElementById('saveFaqBtn').addEventListener('click', function() {
     const faqId = document.getElementById('faqId').value;
     const data = {
@@ -108,15 +117,13 @@ document.getElementById('saveFaqBtn').addEventListener('click', function() {
     })
     .then(r => r.json())
     .then(result => {
-        if (result.success) {
-            location.reload();
-        }
+        if (result.success) location.reload();
     });
 });
 
 document.querySelectorAll('.delete-faq').forEach(btn => {
     btn.addEventListener('click', function() {
-        if (confirm('Are you sure?')) {
+        if (confirm('Энэ FAQ-г устгах уу?')) {
             fetch('{{ url_for("faq") }}', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -134,19 +141,19 @@ document.querySelectorAll('.edit-faq').forEach(btn => {
     btn.addEventListener('click', function() {
         const faqId = this.dataset.id;
         const row = document.querySelector(`tr[data-faq-id="${faqId}"]`);
-        const cells = row.querySelectorAll('td');
-        
-        // This is a simplified version - in production, fetch full FAQ data
+
         document.getElementById('faqId').value = faqId;
-        document.getElementById('faqModalTitle').textContent = 'Edit FAQ';
+        document.getElementById('faqQuestion').value = row.dataset.question;
+        document.getElementById('faqAnswer').value = row.dataset.answer;
+        document.getElementById('faqCategory').value = row.dataset.category;
+        document.getElementById('faqModalTitle').textContent = 'FAQ засах';
     });
 });
 
-// Reset form when modal closes
 document.getElementById('faqModal').addEventListener('hidden.bs.modal', function() {
     document.getElementById('faqForm').reset();
     document.getElementById('faqId').value = '';
-    document.getElementById('faqModalTitle').textContent = 'Add FAQ';
+    document.getElementById('faqModalTitle').textContent = 'FAQ нэмэх';
 });
 </script>
 {% endblock %}

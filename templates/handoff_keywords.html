@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+
+{% block title %}Дамжуулах түлхүүр үгс - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Дамжуулах түлхүүр үгс{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col">
+        <p class="text-muted small mb-0">
+            Хэрэглэгчийн мессежид эдгээр түлхүүр үгс илэрсэн үед бот автоматаар admin-д дамжуулна.
+            <strong>Тодорхой</strong> — шууд "ажилтантай ярьмаар байна" гэх мэт.
+            <strong>Бухимдал</strong> — гомдлын илэрхийлэл, давтагдах асуулт гэх мэт.
+        </p>
+    </div>
+    <div class="col-auto">
+        <button class="btn btn-primary btn-sm" id="addKwBtn" data-bs-toggle="modal" data-bs-target="#kwModal">
+            <i class="bi bi-plus-circle"></i> Нэмэх
+        </button>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-chat-right-text"></i> Тодорхой дамжуулалт</span>
+                <span class="badge bg-light text-dark border">
+                    {{ keywords | selectattr('keyword_type', 'equalto', 'explicit') | list | length }}
+                </span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">Түлхүүр үг</th>
+                                <th>Тэмдэглэл</th>
+                                <th>Төлөв</th>
+                                <th class="text-end pe-3">Үйлдэл</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for kw in keywords if kw.keyword_type == 'explicit' %}
+                            <tr data-kw-id="{{ kw.id }}"
+                                data-keyword="{{ kw.keyword | e }}"
+                                data-type="{{ kw.keyword_type }}"
+                                data-note="{{ (kw.note or '') | e }}"
+                                data-active="{{ '1' if kw.is_active else '0' }}">
+                                <td class="ps-3">
+                                    <code>{{ kw.keyword }}</code>
+                                </td>
+                                <td class="small text-muted">{{ kw.note or '—' }}</td>
+                                <td>
+                                    {% if kw.is_active %}
+                                        <span class="badge bg-success" style="font-size:0.65rem;">Идэвхтэй</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary" style="font-size:0.65rem;">Идэвхгүй</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end pe-3">
+                                    <button class="btn btn-xs btn-outline-secondary edit-kw p-1 px-2"
+                                            data-id="{{ kw.id }}" data-bs-toggle="modal" data-bs-target="#kwModal"
+                                            title="Засах"><i class="bi bi-pencil" style="font-size:0.75rem;"></i></button>
+                                    <button class="btn btn-xs btn-outline-warning toggle-kw p-1 px-2"
+                                            data-id="{{ kw.id }}"
+                                            title="Идэвх солих"><i class="bi bi-toggle2-on" style="font-size:0.75rem;"></i></button>
+                                    <button class="btn btn-xs btn-outline-danger delete-kw p-1 px-2"
+                                            data-id="{{ kw.id }}"
+                                            title="Устгах"><i class="bi bi-trash" style="font-size:0.75rem;"></i></button>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" class="text-center text-muted small py-3">Байхгүй</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-emoji-frown"></i> Бухимдалын дамжуулалт</span>
+                <span class="badge bg-light text-dark border">
+                    {{ keywords | selectattr('keyword_type', 'equalto', 'frustration') | list | length }}
+                </span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">Түлхүүр үг</th>
+                                <th>Тэмдэглэл</th>
+                                <th>Төлөв</th>
+                                <th class="text-end pe-3">Үйлдэл</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for kw in keywords if kw.keyword_type == 'frustration' %}
+                            <tr data-kw-id="{{ kw.id }}"
+                                data-keyword="{{ kw.keyword | e }}"
+                                data-type="{{ kw.keyword_type }}"
+                                data-note="{{ (kw.note or '') | e }}"
+                                data-active="{{ '1' if kw.is_active else '0' }}">
+                                <td class="ps-3">
+                                    <code>{{ kw.keyword }}</code>
+                                </td>
+                                <td class="small text-muted">{{ kw.note or '—' }}</td>
+                                <td>
+                                    {% if kw.is_active %}
+                                        <span class="badge bg-success" style="font-size:0.65rem;">Идэвхтэй</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary" style="font-size:0.65rem;">Идэвхгүй</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end pe-3">
+                                    <button class="btn btn-xs btn-outline-secondary edit-kw p-1 px-2"
+                                            data-id="{{ kw.id }}" data-bs-toggle="modal" data-bs-target="#kwModal"
+                                            title="Засах"><i class="bi bi-pencil" style="font-size:0.75rem;"></i></button>
+                                    <button class="btn btn-xs btn-outline-warning toggle-kw p-1 px-2"
+                                            data-id="{{ kw.id }}"
+                                            title="Идэвх солих"><i class="bi bi-toggle2-on" style="font-size:0.75rem;"></i></button>
+                                    <button class="btn btn-xs btn-outline-danger delete-kw p-1 px-2"
+                                            data-id="{{ kw.id }}"
+                                            title="Устгах"><i class="bi bi-trash" style="font-size:0.75rem;"></i></button>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" class="text-center text-muted small py-3">Байхгүй</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Keyword Modal -->
+<div class="modal fade" id="kwModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="kwModalTitle">Түлхүүр үг нэмэх</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="kwForm">
+                    <input type="hidden" id="kwId" value="">
+                    <div class="mb-3">
+                        <label for="kwKeyword" class="form-label">Түлхүүр үг <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="kwKeyword"
+                               placeholder="жишээ: ажилтантай ярьмаар байна" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="kwType" class="form-label">Төрөл</label>
+                        <select class="form-select" id="kwType">
+                            <option value="explicit">Тодорхой дамжуулалт</option>
+                            <option value="frustration">Бухимдалын дамжуулалт</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="kwNote" class="form-label">Тэмдэглэл</label>
+                        <input type="text" class="form-control" id="kwNote" placeholder="Яагаад энэ үгийг нэмсэн?">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Цуцлах</button>
+                <button type="button" class="btn btn-primary" id="saveKwBtn">Хадгалах</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const KW_URL = '{{ url_for("handoff_keywords") }}';
+
+document.getElementById('addKwBtn').addEventListener('click', function() {
+    document.getElementById('kwForm').reset();
+    document.getElementById('kwId').value = '';
+    document.getElementById('kwModalTitle').textContent = 'Түлхүүр үг нэмэх';
+});
+
+document.getElementById('saveKwBtn').addEventListener('click', function() {
+    const id = document.getElementById('kwId').value;
+    const data = {
+        action: id ? 'edit' : 'add',
+        id: id,
+        keyword: document.getElementById('kwKeyword').value,
+        keyword_type: document.getElementById('kwType').value,
+        note: document.getElementById('kwNote').value,
+    };
+    fetch(KW_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) location.reload();
+        else alert('Алдаа: ' + (res.error || 'Тодорхойгүй'));
+    });
+});
+
+document.querySelectorAll('.edit-kw').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const row = document.querySelector(`tr[data-kw-id="${this.dataset.id}"]`);
+        document.getElementById('kwId').value = this.dataset.id;
+        document.getElementById('kwKeyword').value = row.dataset.keyword;
+        document.getElementById('kwType').value = row.dataset.type;
+        document.getElementById('kwNote').value = row.dataset.note;
+        document.getElementById('kwModalTitle').textContent = 'Түлхүүр үг засах';
+    });
+});
+
+document.querySelectorAll('.toggle-kw').forEach(btn => {
+    btn.addEventListener('click', function() {
+        fetch(KW_URL, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: 'toggle', id: this.dataset.id}),
+        })
+        .then(r => r.json())
+        .then(res => { if (res.success) location.reload(); });
+    });
+});
+
+document.querySelectorAll('.delete-kw').forEach(btn => {
+    btn.addEventListener('click', function() {
+        if (!confirm('Энэ түлхүүр үгийг устгах уу?')) return;
+        fetch(KW_URL, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: 'delete', id: this.dataset.id}),
+        })
+        .then(r => r.json())
+        .then(res => { if (res.success) location.reload(); });
+    });
+});
+
+document.getElementById('kwModal').addEventListener('hidden.bs.modal', function() {
+    document.getElementById('kwForm').reset();
+    document.getElementById('kwId').value = '';
+    document.getElementById('kwModalTitle').textContent = 'Түлхүүр үг нэмэх';
+});
+</script>
+{% endblock %}

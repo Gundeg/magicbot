@@ -1,91 +1,213 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Magic Bot Admin{% endblock %}
+{% block title %}Хяналтын самбар - Magic Bot Admin{% endblock %}
 
-{% block page_title %}Dashboard{% endblock %}
+{% block page_title %}Хяналтын самбар{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-md-3">
-        <div class="stat-card">
-            <i class="bi bi-people" style="font-size: 2rem; color: #667eea;"></i>
-            <h3>{{ leads_count }}</h3>
-            <p>Leads</p>
-        </div>
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('leads') }}" class="text-decoration-none">
+            <div class="stat-card">
+                <div class="stat-icon"><i class="bi bi-person-plus"></i></div>
+                <h3>{{ leads_count }}</h3>
+                <p>Нийт харилцагч</p>
+            </div>
+        </a>
     </div>
-    <div class="col-md-3">
-        <div class="stat-card">
-            <i class="bi bi-exclamation-circle" style="font-size: 2rem; color: #dc3545;"></i>
-            <h3>{{ open_issues }}</h3>
-            <p>Open Issues</p>
-        </div>
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('issues') }}" class="text-decoration-none">
+            <div class="stat-card">
+                <div class="stat-icon" style="background: #fdecea; color: #dc3545;"><i class="bi bi-exclamation-circle"></i></div>
+                <h3 style="color: #dc3545;">{{ open_issues }}</h3>
+                <p>Нээлттэй асуудал</p>
+            </div>
+        </a>
     </div>
-    <div class="col-md-3">
-        <div class="stat-card">
-            <i class="bi bi-chat-left-text" style="font-size: 2rem; color: #28a745;"></i>
-            <h3>{{ total_messages }}</h3>
-            <p>Total Messages</p>
-        </div>
+    <div class="col-6 col-md-3">
+        <a href="{{ url_for('logs') }}" class="text-decoration-none">
+            <div class="stat-card">
+                <div class="stat-icon" style="background: #e8f5e9; color: #28a745;"><i class="bi bi-chat-left-text"></i></div>
+                <h3 style="color: #28a745;">{{ total_messages }}</h3>
+                <p>Нийт мессеж</p>
+            </div>
+        </a>
     </div>
-    <div class="col-md-3">
+    <div class="col-6 col-md-3">
         <a href="{{ url_for('leads') }}#hotTab" class="text-decoration-none">
             <div class="stat-card">
-                <i class="bi bi-fire" style="font-size: 2rem; color: #dc3545;"></i>
-                <h3>{{ hot_prospects_count }}</h3>
-                <p>Hot Prospects</p>
+                <div class="stat-icon" style="background: #fff3e0; color: #e65100;"><i class="bi bi-fire"></i></div>
+                <h3 style="color: #e65100;">{{ hot_prospects_count }}</h3>
+                <p>Халуун харилцагч</p>
             </div>
         </a>
     </div>
 </div>
 
-<div class="row mt-4">
+<div class="row">
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header">
-                <i class="bi bi-exclamation-circle"></i> Recent Issues
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-exclamation-circle"></i> Сүүлийн асуудлууд</span>
+                <a href="{{ url_for('issues') }}" class="btn btn-sm btn-light">Бүгдийг харах</a>
             </div>
-            <div class="card-body">
-                <p class="text-muted">No open issues at the moment.</p>
-                <a href="{{ url_for('issues') }}" class="btn btn-sm btn-primary">View All Issues</a>
+            <div class="card-body p-0">
+                {% if recent_issues %}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">Хэрэглэгч</th>
+                                <th>Агуулга</th>
+                                <th>Төлөв</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for issue in recent_issues %}
+                            <tr>
+                                <td class="ps-3 small">{{ issue.facebook_user.name or 'Unknown' }}</td>
+                                <td class="small text-truncate" style="max-width: 180px;">{{ issue.content[:60] }}</td>
+                                <td>
+                                    {% if issue.status == 'open' %}
+                                        <span class="badge bg-danger" style="font-size:0.65rem;">Нээлттэй</span>
+                                    {% elif issue.status == 'in_progress' %}
+                                        <span class="badge bg-warning text-dark" style="font-size:0.65rem;">Хийгдэж байна</span>
+                                    {% else %}
+                                        <span class="badge bg-success" style="font-size:0.65rem;">Шийдсэн</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="p-3 text-center text-muted small">Нээлттэй асуудал алга.</div>
+                {% endif %}
             </div>
         </div>
     </div>
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header">
-                <i class="bi bi-people"></i> Recent Leads
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-person-plus"></i> Сүүлийн харилцагчид</span>
+                <a href="{{ url_for('leads') }}" class="btn btn-sm btn-light">Бүгдийг харах</a>
             </div>
-            <div class="card-body">
-                <p class="text-muted">No new leads yet.</p>
-                <a href="{{ url_for('leads') }}" class="btn btn-sm btn-primary">View All Leads</a>
+            <div class="card-body p-0">
+                {% if recent_leads %}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">Нэр</th>
+                                <th>Шат</th>
+                                <th>Огноо</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for lead in recent_leads %}
+                            <tr>
+                                <td class="ps-3 small">{{ lead.name or 'Unknown' }}</td>
+                                <td>
+                                    <span class="badge" style="background: var(--brand); font-size:0.65rem;">
+                                        {{ lead.funnel_stage or '—' }}
+                                    </span>
+                                </td>
+                                <td class="small text-muted">{{ lead.created_at.strftime('%m/%d') }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="p-3 text-center text-muted small">Харилцагч бүртгэгдээгүй байна.</div>
+                {% endif %}
             </div>
         </div>
     </div>
 </div>
 
-<div class="row mt-4">
+<div class="row mt-2">
     <div class="col-12">
         <div class="card">
-            <div class="card-header">
-                <i class="bi bi-info-circle"></i> System Status
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-pie-chart"></i> Харилцааны ангилал</span>
+                <button type="button" class="btn btn-sm btn-light" id="classifyBtn"
+                        title="AI ашиглан бүх харилцааг ангилах">
+                    <i class="bi bi-magic"></i> Ангилах
+                </button>
             </div>
             <div class="card-body">
-                <div class="row">
-                    <div class="col-md-4">
-                        <strong>Facebook Polling:</strong>
-                        <span class="badge bg-success">Active</span>
-                    </div>
-                    <div class="col-md-4">
-                        <strong>AI Bot:</strong>
-                        <span class="badge bg-success">Running</span>
-                    </div>
-                    <div class="col-md-4">
-                        <strong>Auto-commenting:</strong>
-                        <span class="badge bg-success">Enabled</span>
-                    </div>
+                {% if topic_breakdown %}
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Ангилал</th>
+                                <th class="text-end">Хэрэглэгч</th>
+                                <th style="width:45%"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% set total_classified = topic_breakdown.values()|sum %}
+                            {% for topic, count in topic_breakdown|dictsort(by='value', reverse=true) %}
+                            <tr>
+                                <td>
+                                    {% if topic == 'general' %}
+                                        <span class="badge bg-info">Ерөнхий асуулт</span>
+                                    {% elif topic == 'not_related' %}
+                                        <span class="badge bg-secondary">Холбоогүй</span>
+                                    {% elif topic == 'other_request' %}
+                                        <span class="badge bg-warning text-dark">Бусад хүсэлт</span>
+                                    {% elif topic == 'unclassified' %}
+                                        <span class="badge bg-light text-muted border">Ангилагдаагүй</span>
+                                    {% else %}
+                                        <span class="badge" style="background:var(--brand);">{{ topic }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end fw-semibold">{{ count }}</td>
+                                <td>
+                                    {% if total_classified > 0 %}
+                                    <div class="progress" style="height:8px;margin-top:6px;">
+                                        <div class="progress-bar" style="width:{{ (count / total_classified * 100)|round(1) }}%;background:var(--brand);"></div>
+                                    </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
+                {% else %}
+                <div class="text-center text-muted small py-3">
+                    Ангилал байхгүй байна. "Ангилах" товч дарж AI ангиллыг эхлүүлнэ үү.
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>
 </div>
+
+<script>
+document.getElementById('classifyBtn').addEventListener('click', function () {
+    const btn = this;
+    btn.disabled = true;
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Ангилж байна...';
+    fetch('{{ url_for("classify_conversations_backfill") }}', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json'},
+    })
+    .then(r => r.json())
+    .then(d => {
+        alert(`Оролдсон: ${d.attempted}\nАнгилагдсан: ${d.classified}\n\nХуудсыг шинэчилж байна...`);
+        location.reload();
+    })
+    .catch(e => alert('Алдаа: ' + e))
+    .finally(() => { btn.disabled = false; btn.innerHTML = orig; });
+});
+</script>
+
 {% endblock %}
+

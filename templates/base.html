@@ -5,109 +5,249 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     {# csrf_token() works regardless of login state — Flask-WTF binds it to the session #}
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{% block title %}Magic Finance Bot - Admin Dashboard{% endblock %}</title>
+    <title>{% block title %}Magic Finance Bot - Удирдлагын самбар{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
     <style>
-        body {
-            background-color: #f5f5f5;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        :root {
+            --brand: #005050;
+            --brand-dark: #003838;
+            --brand-light: #006868;
+            --brand-muted: rgba(0, 80, 80, 0.12);
         }
+        body {
+            background-color: #f0f4f4;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #1a1a2e;
+        }
+        /* ── Sidebar ── */
         .sidebar {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--brand);
             min-height: 100vh;
-            padding: 20px 0;
+            padding: 0;
             position: fixed;
-            width: 250px;
+            width: 240px;
             left: 0;
             top: 0;
-        }
-        .sidebar .nav-link {
-            color: rgba(255,255,255,0.8);
-            padding: 12px 20px;
-            margin: 5px 0;
-            border-radius: 5px;
-            transition: all 0.3s ease;
-        }
-        .sidebar .nav-link:hover,
-        .sidebar .nav-link.active {
-            background-color: rgba(255,255,255,0.2);
-            color: white;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 3px 0 12px rgba(0,0,0,0.15);
+            z-index: 1000;
         }
         .sidebar .brand {
-            color: white;
-            padding: 20px;
+            padding: 20px 16px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.15);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        .sidebar .brand img {
+            width: 120px;
+            height: auto;
+            object-fit: contain;
+            filter: brightness(0) invert(1);
+        }
+        .sidebar .brand small {
+            color: rgba(255,255,255,0.7);
+            font-size: 0.7rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .sidebar-nav {
+            flex: 1;
+            padding: 12px 10px;
+            overflow-y: auto;
+        }
+        .sidebar .nav-section {
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.45);
+            padding: 14px 10px 4px;
+        }
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.82);
+            padding: 9px 12px;
+            margin: 1px 0;
+            border-radius: 6px;
+            transition: background 0.18s, color 0.18s;
+            font-size: 0.88rem;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+        }
+        .sidebar .nav-link i {
+            font-size: 1rem;
+            width: 18px;
             text-align: center;
-            border-bottom: 1px solid rgba(255,255,255,0.2);
-            margin-bottom: 20px;
+            flex-shrink: 0;
         }
-        .sidebar .brand h4 {
-            margin: 0;
-            font-weight: bold;
+        .sidebar .nav-link:hover {
+            background-color: rgba(255,255,255,0.14);
+            color: white;
         }
+        .sidebar .nav-link.active {
+            background-color: rgba(255,255,255,0.22);
+            color: white;
+            font-weight: 600;
+        }
+        .sidebar-footer {
+            padding: 14px 16px;
+            border-top: 1px solid rgba(255,255,255,0.12);
+        }
+        .sidebar-footer .logout-link {
+            color: rgba(255,255,255,0.7);
+            font-size: 0.82rem;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 4px;
+            border-radius: 5px;
+            transition: color 0.15s, background 0.15s;
+        }
+        .sidebar-footer .logout-link:hover {
+            color: white;
+            background: rgba(255,255,255,0.1);
+        }
+        .sidebar-footer .credit {
+            font-size: 0.68rem;
+            color: rgba(255,255,255,0.45);
+            margin-top: 10px;
+            line-height: 1.4;
+            text-align: center;
+        }
+        .sidebar-footer .credit a {
+            color: rgba(255,255,255,0.65);
+            text-decoration: none;
+        }
+        .sidebar-footer .credit a:hover {
+            color: rgba(255,255,255,0.9);
+        }
+        /* ── Main content ── */
         .main-content {
-            margin-left: 250px;
-            padding: 20px;
+            margin-left: 240px;
+            padding: 0;
+            min-height: 100vh;
         }
-        .navbar-top {
+        .topbar {
             background: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+            padding: 0 24px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
+        .topbar .page-title {
+            font-weight: 600;
+            font-size: 1rem;
+            color: #1a1a2e;
+            margin: 0;
+        }
+        .topbar .user-badge {
+            font-size: 0.85rem;
+            color: #555;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .content-area {
+            padding: 22px 24px;
+        }
+        /* ── Cards ── */
         .card {
             border: none;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            border-radius: 8px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+            border-radius: 10px;
             margin-bottom: 20px;
         }
         .card-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--brand);
             color: white;
             border: none;
-            padding: 15px 20px;
+            padding: 13px 18px;
             font-weight: 600;
+            border-radius: 10px 10px 0 0 !important;
+            font-size: 0.92rem;
         }
-        .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-        }
-        .btn-primary:hover {
-            background: linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%);
-        }
+        /* ── Stat cards ── */
         .stat-card {
             background: white;
             padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 10px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.08);
             text-align: center;
-            margin-bottom: 15px;
+            margin-bottom: 16px;
+            transition: box-shadow 0.18s, transform 0.18s;
+        }
+        .stat-card:hover {
+            box-shadow: 0 4px 16px rgba(0,80,80,0.15);
+            transform: translateY(-2px);
         }
         .stat-card h3 {
-            color: #667eea;
-            font-weight: bold;
-            margin: 10px 0;
+            color: var(--brand);
+            font-weight: 700;
+            margin: 8px 0 4px;
+            font-size: 1.8rem;
         }
         .stat-card p {
             color: #666;
             margin: 0;
+            font-size: 0.85rem;
         }
+        .stat-card .stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: var(--brand-muted);
+            color: var(--brand);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 6px;
+            font-size: 1.2rem;
+        }
+        /* ── Buttons ── */
+        .btn-primary {
+            background: var(--brand);
+            border-color: var(--brand);
+        }
+        .btn-primary:hover, .btn-primary:focus {
+            background: var(--brand-dark);
+            border-color: var(--brand-dark);
+        }
+        .btn-outline-primary {
+            color: var(--brand);
+            border-color: var(--brand);
+        }
+        .btn-outline-primary:hover {
+            background: var(--brand);
+            border-color: var(--brand);
+        }
+        /* ── Tables ── */
         .table-hover tbody tr:hover {
-            background-color: #f9f9f9;
+            background-color: #f5fafa;
         }
-        .badge-lead {
-            background-color: #667eea;
-        }
-        .badge-open {
-            background-color: #dc3545;
-        }
-        .badge-resolved {
-            background-color: #28a745;
-        }
+        /* ── Badges ── */
+        .badge-lead { background-color: var(--brand); }
+        .badge-open { background-color: #dc3545; }
+        .badge-resolved { background-color: #28a745; }
+        /* ── Alerts ── */
+        .alert-success { border-left: 4px solid #28a745; }
+        .alert-danger { border-left: 4px solid #dc3545; }
+        /* ── Responsive ── */
         @media (max-width: 768px) {
             .sidebar {
                 width: 100%;
                 height: auto;
                 position: relative;
+                min-height: unset;
             }
             .main-content {
                 margin-left: 0;
@@ -119,70 +259,84 @@
 <body>
     <div class="sidebar">
         <div class="brand">
-            <h4><i class="bi bi-robot"></i> Magic Bot</h4>
-            <small>Admin Panel</small>
+            <img src="{{ url_for('static', filename='GMC_Logo_general.png') }}" alt="Growth Mastery Consulting">
+            <small>Удирдлагын самбар</small>
         </div>
-        <nav class="nav flex-column">
-            <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
-                <i class="bi bi-speedometer2"></i> Dashboard
+
+        <div class="sidebar-nav">
+            <div class="nav-section">Үндсэн цэс</div>
+            <nav class="nav flex-column">
+                <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
+                    <i class="bi bi-speedometer2"></i> Хяналтын самбар
+                </a>
+                <a class="nav-link {% if request.endpoint == 'leads' %}active{% endif %}" href="{{ url_for('leads') }}">
+                    <i class="bi bi-person-plus"></i> Харилцагчид
+                </a>
+                <a class="nav-link {% if request.endpoint == 'issues' %}active{% endif %}" href="{{ url_for('issues') }}">
+                    <i class="bi bi-exclamation-circle"></i> Асуудлууд
+                </a>
+                <a class="nav-link {% if request.endpoint == 'logs' %}active{% endif %}" href="{{ url_for('logs') }}">
+                    <i class="bi bi-chat-left-text"></i> Мессежийн түүх
+                </a>
+
+                <div class="nav-section">Агуулга</div>
+                <a class="nav-link {% if request.endpoint == 'courses' %}active{% endif %}" href="{{ url_for('courses') }}">
+                    <i class="bi bi-calendar-event"></i> Сургалтууд
+                </a>
+                <a class="nav-link {% if request.endpoint == 'faq' %}active{% endif %}" href="{{ url_for('faq') }}">
+                    <i class="bi bi-question-circle"></i> Түгээмэл асуулт
+                </a>
+                <a class="nav-link {% if request.endpoint == 'training' %}active{% endif %}" href="{{ url_for('training') }}">
+                    <i class="bi bi-cpu"></i> AI Сургалт
+                </a>
+
+                <div class="nav-section">Тохиргоо</div>
+                <a class="nav-link {% if request.endpoint == 'team' %}active{% endif %}" href="{{ url_for('team') }}">
+                    <i class="bi bi-people"></i> Баг
+                </a>
+                <a class="nav-link {% if request.endpoint == 'business_lines' %}active{% endif %}" href="{{ url_for('business_lines') }}">
+                    <i class="bi bi-diagram-3"></i> Бизнесийн чиглэл
+                </a>
+                <a class="nav-link {% if request.endpoint == 'handoff_keywords' %}active{% endif %}" href="{{ url_for('handoff_keywords') }}">
+                    <i class="bi bi-tags"></i> Дамжуулах түлхүүр үгс
+                </a>
+                <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="{{ url_for('settings') }}">
+                    <i class="bi bi-gear"></i> Тохиргоо
+                </a>
+                <a class="nav-link {% if request.endpoint == 'admins' %}active{% endif %}" href="{{ url_for('admins') }}">
+                    <i class="bi bi-shield-lock"></i> Админ хэрэглэгчид
+                </a>
+                <a class="nav-link {% if request.endpoint == 'docs' %}active{% endif %}" href="{{ url_for('docs') }}">
+                    <i class="bi bi-file-text"></i> Баримт бичиг
+                </a>
+            </nav>
+        </div>
+
+        <div class="sidebar-footer">
+            <a href="{{ url_for('logout') }}" class="logout-link">
+                <i class="bi bi-box-arrow-right"></i> Гарах
             </a>
-            <a class="nav-link {% if request.endpoint == 'leads' %}active{% endif %}" href="{{ url_for('leads') }}">
-                <i class="bi bi-people"></i> Leads
-            </a>
-            <a class="nav-link {% if request.endpoint == 'issues' %}active{% endif %}" href="{{ url_for('issues') }}">
-                <i class="bi bi-exclamation-circle"></i> Issues
-            </a>
-            <a class="nav-link {% if request.endpoint == 'logs' %}active{% endif %}" href="{{ url_for('logs') }}">
-                <i class="bi bi-chat-left-text"></i> Message Logs
-            </a>
-            <a class="nav-link {% if request.endpoint == 'courses' %}active{% endif %}" href="{{ url_for('courses') }}">
-                <i class="bi bi-book"></i> Courses
-            </a>
-            <a class="nav-link {% if request.endpoint == 'faq' %}active{% endif %}" href="{{ url_for('faq') }}">
-                <i class="bi bi-question-circle"></i> FAQ
-            </a>
-            <a class="nav-link {% if request.endpoint == 'training' %}active{% endif %}" href="{{ url_for('training') }}">
-                <i class="bi bi-mortarboard"></i> Training
-            </a>
-            <a class="nav-link {% if request.endpoint == 'team' %}active{% endif %}" href="{{ url_for('team') }}">
-                <i class="bi bi-people-fill"></i> Team
-            </a>
-            <a class="nav-link {% if request.endpoint == 'business_lines' %}active{% endif %}" href="{{ url_for('business_lines') }}">
-                <i class="bi bi-diagram-3"></i> Business Lines
-            </a>
-            <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="{{ url_for('settings') }}">
-                <i class="bi bi-gear"></i> Settings
-            </a>
-            <a class="nav-link {% if request.endpoint == 'admins' %}active{% endif %}" href="{{ url_for('admins') }}">
-                <i class="bi bi-shield-lock"></i> Admins
-            </a>
-            <a class="nav-link {% if request.endpoint == 'docs' %}active{% endif %}" href="{{ url_for('docs') }}">
-                <i class="bi bi-book"></i> Docs
-            </a>
-            <hr style="border-color: rgba(255,255,255,0.2); margin: 20px 0;">
-            <a class="nav-link" href="{{ url_for('logout') }}">
-                <i class="bi bi-box-arrow-right"></i> Logout
-            </a>
-        </nav>
+            <div class="credit">
+                Developed by<br>
+                <a href="https://growthmastery.mn" target="_blank" rel="noopener">Growth Mastery Consulting</a><br>
+                growthmastery.mn
+            </div>
+        </div>
     </div>
 
     <div class="main-content">
-        <div class="navbar-top">
-            <div class="container-fluid">
-                <div class="row align-items-center py-3">
-                    <div class="col">
-                        <h5 class="mb-0">{% block page_title %}Dashboard{% endblock %}</h5>
-                    </div>
-                    <div class="col-auto">
-                        <span class="text-muted">
-                            <i class="bi bi-person-circle"></i> {{ current_user.username }}
-                        </span>
-                    </div>
-                </div>
+        <div class="topbar">
+            <h5 class="page-title">{% block page_title %}Хяналтын самбар{% endblock %}</h5>
+            <div class="user-badge">
+                <i class="bi bi-person-circle"></i>
+                <span>{{ current_user.username }}</span>
+                {% if current_user.role == 'super_admin' %}
+                    <span class="badge" style="background:var(--brand); font-size:0.65rem;">Super Admin</span>
+                {% endif %}
             </div>
         </div>
 
-        <div class="container-fluid">
+        <div class="content-area">
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for category, message in messages %}
@@ -202,10 +356,7 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 
     <script>
-    // Inject the CSRF token into every non-GET fetch automatically so each
-    // admin POST/PUT/DELETE is accepted by Flask-WTF without every fetch
-    // call needing to know about CSRF. GETs are exempted by Flask-WTF and
-    // skipped here too. Same-origin only — no token sent to external hosts.
+    // Inject CSRF token into every non-GET fetch automatically (same-origin only).
     (function () {
         const meta = document.querySelector('meta[name="csrf-token"]');
         const token = meta ? meta.content : '';
@@ -216,8 +367,6 @@
             const method = (init.method || (typeof input === 'object' && input.method) || 'GET').toUpperCase();
             if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
                 const url = typeof input === 'string' ? input : (input && input.url) || '';
-                // Only attach to same-origin requests. Relative URLs are
-                // same-origin by definition; absolute ones must match.
                 const sameOrigin = !url.match(/^https?:\/\//i) ||
                                    url.indexOf(location.origin) === 0;
                 if (sameOrigin) {
@@ -235,10 +384,6 @@
     {% if current_user.is_authenticated %}
     <div id="handoffToastContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1080;"></div>
     <script>
-    // Polls for new handoff issues every 15s and plays a beep + toast on
-    // first detection. Beep uses Web Audio API so we don't need a sound file
-    // hosted somewhere. Storage key tracks the latest issue id we've already
-    // notified about per browser, so the alert fires once per new issue.
     (function () {
         const POLL_URL = '{{ url_for("handoff_poll") }}';
         const POLL_MS = 15000;
@@ -247,11 +392,7 @@
         let audioCtx = null;
         function beep() {
             try {
-                if (!audioCtx) {
-                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                }
-                // Browsers suspend AudioContext until a user gesture; trying to
-                // resume is a no-op if it's already running.
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 audioCtx.resume && audioCtx.resume();
                 const osc = audioCtx.createOscillator();
                 const gain = audioCtx.createGain();
@@ -263,21 +404,21 @@
                 osc.connect(gain).connect(audioCtx.destination);
                 osc.start();
                 osc.stop(audioCtx.currentTime + 0.5);
-            } catch (e) {
-                // Sound is best-effort; the toast still appears.
-            }
+            } catch (e) {}
         }
 
         function showToast(count) {
             const container = document.getElementById('handoffToastContainer');
             if (!container) return;
             const el = document.createElement('div');
-            el.className = 'toast align-items-center text-white bg-danger border-0 show';
+            el.className = 'toast align-items-center text-white border-0 show';
+            el.style.background = 'var(--brand)';
             el.role = 'alert';
             el.innerHTML = `
                 <div class="d-flex">
                     <div class="toast-body">
-                        🤝 Шинэ handoff хүсэлт — нийт ${count} нээлттэй. <a href="{{ url_for('issues') }}" class="text-white text-decoration-underline">Үзэх</a>
+                        🤝 Шинэ handoff хүсэлт — нийт ${count} нээлттэй.
+                        <a href="{{ url_for('issues') }}" class="text-white text-decoration-underline">Үзэх</a>
                     </div>
                     <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Хаах"></button>
                 </div>`;
@@ -293,8 +434,6 @@
                     const lastSeen = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
                     if (data.latest_id > lastSeen) {
                         if (lastSeen > 0) {
-                            // Only alert when there's a genuinely NEW one — not
-                            // on first page load (avoids replaying old alerts).
                             if (data.sound_enabled) beep();
                             showToast(data.open_count);
                         }
@@ -304,7 +443,6 @@
                 .catch(() => {});
         }
 
-        // Skip on the login page (handled by is_authenticated guard above).
         pollOnce();
         setInterval(pollOnce, POLL_MS);
     })();

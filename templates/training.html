@@ -1,10 +1,16 @@
 {% extends "base.html" %}
 
-{% block title %}Training - Magic Bot Admin{% endblock %}
+{% block title %}AI Сургалт - Magic Bot Admin{% endblock %}
 
-{% block page_title %}Ботын сургалт{% endblock %}
+{% block page_title %}AI Сургалт{% endblock %}
 
 {% block content %}
+{% if current_user.role != 'super_admin' %}
+<div class="alert alert-warning d-flex align-items-center gap-2">
+    <i class="bi bi-lock-fill"></i>
+    <span>Ботын дүр болон суурь агуулгыг зөвхөн <strong>Super Admin</strong> засах эрхтэй. Доорх талбарууд унших горимд байна.</span>
+</div>
+{% endif %}
 <div class="row">
     <div class="col-lg-9">
         <form method="POST" action="{{ url_for('training') }}">
@@ -19,7 +25,8 @@
                         "Та ... туслах. ... хариулна." гэх мэт.
                     </p>
                     <textarea name="bot_persona" class="form-control font-monospace" rows="6"
-                              placeholder="Хоосон үлдээвэл анхдагч утга ашиглагдана.">{{ persona_value }}</textarea>
+                              placeholder="Хоосон үлдээвэл анхдагч утга ашиглагдана."
+                              {% if current_user.role != 'super_admin' %}readonly{% endif %}>{{ persona_value }}</textarea>
                     {% if not persona_value %}
                     <details class="mt-2">
                         <summary class="text-muted small" style="cursor: pointer;">
@@ -42,7 +49,8 @@
                         тэгвэл хуучин агуулгыг устгахгүй, олон удирдлагатай зэрэгцэн ажиллах боломжтой.
                     </p>
                     <textarea name="training_content" class="form-control font-monospace" rows="14"
-                              placeholder="Хоосон үлдээвэл анхдагч утга ашиглагдана.">{{ training_value }}</textarea>
+                              placeholder="Хоосон үлдээвэл анхдагч утга ашиглагдана."
+                              {% if current_user.role != 'super_admin' %}readonly{% endif %}>{{ training_value }}</textarea>
                     {% if not training_value %}
                     <details class="mt-2">
                         <summary class="text-muted small" style="cursor: pointer;">
@@ -55,9 +63,15 @@
             </div>
 
             <div class="mb-4">
+                {% if current_user.role == 'super_admin' %}
                 <button type="submit" class="btn btn-primary">
                     <i class="bi bi-check-circle"></i> Persona болон суурь агуулга хадгалах
                 </button>
+                {% else %}
+                <button type="button" class="btn btn-primary" disabled title="Зөвхөн Super Admin хадгалах эрхтэй">
+                    <i class="bi bi-lock"></i> Хадгалах (Super Admin шаардлагатай)
+                </button>
+                {% endif %}
                 <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
                     Цуцлах
                 </a>

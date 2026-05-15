@@ -27,6 +27,10 @@
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-people"></i> Утсаа үлдээсэн лидүүд</span>
                 <div>
+                    <button type="button" class="btn btn-sm btn-light" id="classifyBtn"
+                            title="AI ашиглан харилцааг ангилах">
+                        <i class="bi bi-magic"></i> Ангилах
+                    </button>
                     <button type="button" class="btn btn-sm btn-light" id="backfillBtn"
                             title="Facebook-аас нэрийг дахин татах (Unknown гэсэн бүх хэрэглэгчид)">
                         <i class="bi bi-arrow-clockwise"></i> Нэр шинэчлэх
@@ -46,6 +50,7 @@
                                 <th>Утас</th>
                                 <th>Төлөв</th>
                                 <th>Үе шат</th>
+                                <th>Сонирхол</th>
                                 <th>Бүртгэгдсэн</th>
                                 <th>Мессеж</th>
                             </tr>
@@ -73,12 +78,26 @@
                                     {% endif %}
                                 </td>
                                 <td><span class="badge bg-light text-muted border">{{ lead.funnel_stage or 'curious' }}</span></td>
+                                <td>
+                                    {% set topic = lead.conversation_topic %}
+                                    {% if topic == 'general' %}
+                                        <span class="badge bg-info">Ерөнхий</span>
+                                    {% elif topic == 'not_related' %}
+                                        <span class="badge bg-secondary">Холбоогүй</span>
+                                    {% elif topic == 'other_request' %}
+                                        <span class="badge bg-warning text-dark">Бусад</span>
+                                    {% elif topic %}
+                                        <span class="badge" style="background:var(--brand);">{{ topic }}</span>
+                                    {% else %}
+                                        <span class="text-muted small">—</span>
+                                    {% endif %}
+                                </td>
                                 <td><small>{{ lead.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
                                 <td><span class="badge bg-secondary">{{ confirmed_msg_counts.get(lead.id, 0) }}</span></td>
                             </tr>
                             {% else %}
                             <tr>
-                                <td colspan="6" class="text-center text-muted py-4">
+                                <td colspan="7" class="text-center text-muted py-4">
                                     Одоогоор утсаа үлдээсэн лид алга. Халуун сонирхогчдыг "Халуун сонирхогч" хэсгээс хар.
                                 </td>
                             </tr>
@@ -107,6 +126,7 @@
                             <tr>
                                 <th>Нэр</th>
                                 <th>Үе шат</th>
+                                <th>Сонирхол</th>
                                 <th>Сүүлд бичсэн</th>
                                 <th>Сүүлийн мессеж</th>
                                 <th>Нийт</th>
@@ -128,6 +148,20 @@
                                         <span class="badge bg-secondary">{{ p.user.funnel_stage }}</span>
                                     {% endif %}
                                 </td>
+                                <td>
+                                    {% set topic = p.user.conversation_topic %}
+                                    {% if topic == 'general' %}
+                                        <span class="badge bg-info">Ерөнхий</span>
+                                    {% elif topic == 'not_related' %}
+                                        <span class="badge bg-secondary">Холбоогүй</span>
+                                    {% elif topic == 'other_request' %}
+                                        <span class="badge bg-warning text-dark">Бусад</span>
+                                    {% elif topic %}
+                                        <span class="badge" style="background:var(--brand);">{{ topic }}</span>
+                                    {% else %}
+                                        <span class="text-muted small">—</span>
+                                    {% endif %}
+                                </td>
                                 <td><small>{{ p.last_at.strftime('%Y-%m-%d %H:%M') if p.last_at else '—' }}</small></td>
                                 <td class="text-muted small" style="max-width: 380px;">
                                     {{ p.last_message[:160] }}{% if p.last_message|length > 160 %}…{% endif %}
@@ -136,7 +170,7 @@
                             </tr>
                             {% else %}
                             <tr>
-                                <td colspan="5" class="text-center text-muted py-4">
+                                <td colspan="6" class="text-center text-muted py-4">
                                     Одоогоор халуун сонирхогч алга. Үнэ асуусан буюу бүртгүүлэх хүсэлт илэрхийлсэн
                                     хүн гарвал энд гарч ирнэ.
                                 </td>
@@ -156,6 +190,25 @@ document.getElementById('searchInput').addEventListener('keyup', function () {
     document.querySelectorAll('#leadsList tr').forEach(row => {
         row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none';
     });
+});
+
+document.getElementById('classifyBtn').addEventListener('click', function () {
+    const btn = this;
+    btn.disabled = true;
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Ангилж байна...';
+    fetch('{{ url_for("classify_conversations_backfill") }}', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json'},
+    })
+    .then(r => r.json())
+    .then(d => {
+        alert(`Оролдсон: ${d.attempted}\nАнгилагдсан: ${d.classified}\n\nХуудсыг шинэчилж байна...`);
+        location.reload();
+    })
+    .catch(e => alert('Алдаа: ' + e))
+    .finally(() => { btn.disabled = false; btn.innerHTML = original; });
 });
 
 document.getElementById('backfillBtn').addEventListener('click', function () {

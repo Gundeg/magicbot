@@ -112,6 +112,37 @@
 
                     <hr>
 
+                    <h6>Ажлын цаг</h6>
+                    <p class="text-muted small mb-3">
+                        Off-hours (шөнийн) handoff үед Telegram-д 🌙 [OFF-HOURS] тэмдэглэгдэж,
+                        хэрэглэгчид ажлын цагт холбогдоно гэсэн хариулт явуулна.
+                        Цагийг Улаанбаатарын цагаар (UTC+8) оруулна.
+                    </p>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="officeHoursStart" class="form-label">Ажлын цаг эхлэх (цаг)</label>
+                            <input type="number" min="0" max="23" class="form-control" id="officeHoursStart"
+                                   value="{{ settings.get('office_hours_start', '8') }}">
+                            <div class="form-text">0–23, анхдагч: 8</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="officeHoursEnd" class="form-label">Ажлын цаг дуусах (цаг)</label>
+                            <input type="number" min="0" max="23" class="form-control" id="officeHoursEnd"
+                                   value="{{ settings.get('office_hours_end', '22') }}">
+                            <div class="form-text">0–23, анхдагч: 22</div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="hotProspectStages" class="form-label">Халуун харилцагчийн шат (funnel stages)</label>
+                        <input type="text" class="form-control" id="hotProspectStages"
+                               value="{{ settings.get('hot_prospect_stages', 'pricing,ready') }}"
+                               placeholder="pricing,ready">
+                        <div class="form-text">Таслалаар тусгаарлана. Анхдагч: pricing,ready</div>
+                    </div>
+
+                    <hr>
+
                     <h6>Auto-Comment Settings</h6>
 
                     <div class="mb-3">
@@ -258,6 +289,9 @@ document.getElementById('saveSettingsBtn').addEventListener('click', function() 
         mute_duration_hours: document.getElementById('muteDurationHours').value,
         telegram_chat_ids: document.getElementById('telegramChatIds').value,
         sound_alerts_enabled: document.getElementById('soundAlertsEnabled').checked ? 'on' : '',
+        office_hours_start: document.getElementById('officeHoursStart').value,
+        office_hours_end: document.getElementById('officeHoursEnd').value,
+        hot_prospect_stages: document.getElementById('hotProspectStages').value,
         training_comment: document.getElementById('trainingComment').value,
         celebration_comment: document.getElementById('celebrationComment').value,
         default_comment: document.getElementById('defaultComment').value
