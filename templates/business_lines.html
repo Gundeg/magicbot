@@ -36,7 +36,10 @@
                 </thead>
                 <tbody>
                     {% for b in lines %}
-                    <tr data-line='{{ {"id": b.id, "name": b.name, "description": b.description or "", "action": b.action, "contact_info": b.contact_info or ""} | tojson | e }}'>
+                    <tr data-line-id="{{ b.id }}"
+                        data-line='{{ {"id": b.id, "name": b.name, "description": b.description or "", "action": b.action, "contact_info": b.contact_info or ""} | tojson | e }}'
+                        data-active="{{ '1' if b.is_active else '0' }}"
+                        data-status-note="{{ (b.status_note or '') | e }}">
                         <td><strong>{{ b.name }}</strong></td>
                         <td class="text-muted small" style="max-width: 320px;">
                             {{ (b.description or "")[:160] }}{% if b.description and b.description|length > 160 %}…{% endif %}
@@ -53,15 +56,21 @@
                             {% if b.is_active %}
                                 <span class="badge bg-success">Идэвхтэй</span>
                             {% else %}
-                                <span class="badge bg-secondary">Идэвхгүй</span>
+                                <span class="badge bg-secondary">Түр зогссон</span>
+                                {% if b.status_note %}
+                                    <div class="text-muted small mt-1">{{ b.status_note }}</div>
+                                {% endif %}
                             {% endif %}
                         </td>
                         <td class="text-end">
                             <button type="button" class="btn btn-sm btn-warning edit-line" data-id="{{ b.id }}" title="Засах" aria-label="Засах">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary toggle-line" data-id="{{ b.id }}" title="Идэвх солих" aria-label="Идэвх солих">
-                                <i class="bi bi-toggle2-on"></i>
+                            <button type="button" class="btn btn-sm {{ 'btn-outline-secondary' if b.is_active else 'btn-success' }} toggle-line"
+                                    data-id="{{ b.id }}"
+                                    data-active="{{ '1' if b.is_active else '0' }}"
+                                    title="{{ 'Түр зогсоох' if b.is_active else 'Идэвхжүүлэх' }}" aria-label="Идэвх солих">
+                                <i class="bi {{ 'bi-pause-circle' if b.is_active else 'bi-play-circle' }}"></i>
                             </button>
                             <button type="button" class="btn btn-sm btn-danger delete-line" data-id="{{ b.id }}" title="Устгах" aria-label="Устгах">
                                 <i class="bi bi-trash"></i>
@@ -77,6 +86,33 @@
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- Toggle (pause/activate) modal -->
+<div class="modal fade" id="toggleLineModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="toggleLineTitle">Үйлчилгээний төлөв өөрчлөх</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="toggleLineId">
+                <p id="toggleLineMsg"></p>
+                <div class="mb-3">
+                    <label for="toggleLineNote" class="form-label">
+                        Тэмдэглэл <small class="text-muted">(AI-д харагдана — яагаад зогсоосон, хэзээ нээгдэх гэх мэт)</small>
+                    </label>
+                    <input type="text" class="form-control" id="toggleLineNote"
+                           placeholder="Жишээ: Одоогоор захиалга хүлээж авахгүй байна, 7-р сараас дахин нээнэ">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Цуцлах</button>
+                <button type="button" class="btn btn-primary" id="confirmToggleLineBtn">Тийм, өөрчлөх</button>
+            </div>
         </div>
     </div>
 </div>
@@ -174,9 +210,24 @@ document.querySelectorAll('.edit-line').forEach(btn => {
 
 document.querySelectorAll('.toggle-line').forEach(btn => {
     btn.addEventListener('click', () => {
-        postLine({action: 'toggle', id: btn.dataset.id}).then(r => {
-            if (r.success) location.reload();
-        });
+        const row = btn.closest('tr');
+        document.getElementById('toggleLineId').value = btn.dataset.id;
+        document.getElementById('toggleLineNote').value = row.dataset.statusNote || '';
+        const isActive = btn.dataset.active === '1';
+        document.getElementById('toggleLineTitle').textContent = isActive ? 'Үйлчилгээ түр зогсоох' : 'Үйлчилгээ идэвхжүүлэх';
+        document.getElementById('toggleLineMsg').textContent = isActive
+            ? 'Энэ үйлчилгээг түр зогсоох уу? AI бот хэрэглэгчид зогссон гэдгийг мэдэгдэнэ.'
+            : 'Энэ үйлчилгээг дахин идэвхжүүлэх үү?';
+        new bootstrap.Modal(document.getElementById('toggleLineModal')).show();
+    });
+});
+
+document.getElementById('confirmToggleLineBtn').addEventListener('click', () => {
+    const id = document.getElementById('toggleLineId').value;
+    const note = document.getElementById('toggleLineNote').value;
+    postLine({action: 'toggle', id: id, status_note: note}).then(r => {
+        if (r.success) location.reload();
+        else alert('Алдаа гарлаа');
     });
 });
 

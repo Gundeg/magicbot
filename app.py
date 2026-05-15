@@ -161,6 +161,8 @@ class FacebookUser(db.Model):
     # When set and > now(), the bot will not auto-reply to this user — a human
     # has been pinged and should take over. Cleared automatically once expired.
     bot_muted_until = db.Column(db.DateTime)
+    # AI-classified topic of the conversation (updated after every bot reply)
+    conversation_topic = db.Column(db.String(100))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -179,10 +181,14 @@ class Course(db.Model):
     name = db.Column(db.String(255), nullable=False)
     course_type = db.Column(db.String(100), nullable=False)  # '100% Online', 'Hybrid', etc.
     start_date = db.Column(db.DateTime, nullable=False)
+    end_date = db.Column(db.DateTime)
     time = db.Column(db.String(50), nullable=False)  # e.g., "10:00-13:00"
     price = db.Column(db.Float, nullable=False)
     description = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
+    status_note = db.Column(db.String(255))  # reason for pause / admin note visible to AI
+    is_recurring = db.Column(db.Boolean, default=False)
+    schedule_template = db.Column(db.Text)  # JSON: {"interval_weeks": 4, "day_of_week": 0}
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class FAQ(db.Model):
@@ -203,8 +209,12 @@ class AdminIssue(db.Model):
     assigned_to = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     resolved_at = db.Column(db.DateTime)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    updated_at = db.Column(db.DateTime)
+    notes = db.Column(db.Text)
     facebook_user = db.relationship('FacebookUser', backref=db.backref('admin_issues', lazy=True))
-    assigned_user = db.relationship('User', backref=db.backref('assigned_issues', lazy=True))
+    assigned_user = db.relationship('User', foreign_keys=[assigned_to], backref=db.backref('assigned_issues', lazy=True))
+    updated_by = db.relationship('User', foreign_keys=[updated_by_id], backref=db.backref('updated_issues', lazy=True))
 
 class PagePost(db.Model):
     """Facebook Page posts (for auto-commenting)"""
@@ -260,9 +270,20 @@ class BusinessLine(db.Model):
     action = db.Column(db.String(20), default='refer')  # 'answer' | 'refer'
     contact_info = db.Column(db.String(255))            # e.g. phone, email, dept
     is_active = db.Column(db.Boolean, default=True)
+    status_note = db.Column(db.String(255))  # reason for pause / admin note visible to AI
     sort_order = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class HandoffKeyword(db.Model):
+    """Keyword/phrase that triggers a human handoff. Replaces the hardcoded
+    HANDOFF_KEYWORDS_EXPLICIT and HANDOFF_KEYWORDS_FRUSTRATION lists."""
+    id = db.Column(db.Integer, primary_key=True)
+    keyword = db.Column(db.String(200), nullable=False)
+    keyword_type = db.Column(db.String(20), default='explicit')  # 'explicit' | 'frustration'
+    is_active = db.Column(db.Boolean, default=True)
+    note = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ===================== LOGIN MANAGER =====================
 
@@ -487,31 +508,65 @@ def ensure_schema():
     SQLite-style ALTER TABLE ADD COLUMN works on Postgres too, so this stays
     portable if the user later switches the SQLALCHEMY_DATABASE_URI.
     """
-    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy import inspect as sa_inspect, text
 
     inspector = sa_inspect(db.engine)
     if 'facebook_user' not in inspector.get_table_names():
         return  # create_all() will handle a brand-new DB
 
-    existing = {col['name'] for col in inspector.get_columns('facebook_user')}
-    additions = []
-    if 'funnel_stage' not in existing:
-        additions.append("ADD COLUMN funnel_stage VARCHAR(30) DEFAULT 'curious'")
-    if 'last_nudge_at' not in existing:
-        additions.append("ADD COLUMN last_nudge_at DATETIME")
-    if 'bot_muted_until' not in existing:
-        additions.append("ADD COLUMN bot_muted_until DATETIME")
+    def add_columns(table, additions):
+        existing = {col['name'] for col in inspector.get_columns(table)}
+        with db.engine.begin() as conn:
+            for col, clause in additions.items():
+                if col not in existing:
+                    try:
+                        conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {clause}")
+                        print(f"Schema migration: {table} ADD COLUMN {col}")
+                    except Exception as e:
+                        print(f"Schema migration skipped ({table}.{col}): {e}")
 
-    if not additions:
-        return
+    add_columns('facebook_user', {
+        'funnel_stage': "funnel_stage VARCHAR(30) DEFAULT 'curious'",
+        'last_nudge_at': 'last_nudge_at DATETIME',
+        'bot_muted_until': 'bot_muted_until DATETIME',
+        'conversation_topic': 'conversation_topic VARCHAR(100)',
+    })
 
-    with db.engine.begin() as conn:
-        for clause in additions:
+    add_columns('admin_issue', {
+        'updated_by_id': 'updated_by_id INTEGER REFERENCES user(id)',
+        'updated_at': 'updated_at DATETIME',
+        'notes': 'notes TEXT',
+    })
+
+    add_columns('course', {
+        'end_date': 'end_date DATETIME',
+        'is_recurring': 'is_recurring BOOLEAN DEFAULT 0',
+        'schedule_template': 'schedule_template TEXT',
+        'status_note': 'status_note VARCHAR(255)',
+    })
+
+    add_columns('business_line', {
+        'status_note': 'status_note VARCHAR(255)',
+    })
+
+    # Create handoff_keyword table if it doesn't exist (create_all handles new DBs,
+    # but existing DBs won't have it).
+    if 'handoff_keyword' not in inspector.get_table_names():
+        with db.engine.begin() as conn:
             try:
-                conn.exec_driver_sql(f"ALTER TABLE facebook_user {clause}")
-                print(f"Schema migration: facebook_user {clause}")
+                conn.exec_driver_sql(
+                    "CREATE TABLE handoff_keyword ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  keyword VARCHAR(200) NOT NULL,"
+                    "  keyword_type VARCHAR(20) DEFAULT 'explicit',"
+                    "  is_active BOOLEAN DEFAULT 1,"
+                    "  note VARCHAR(255),"
+                    "  created_at DATETIME"
+                    ")"
+                )
+                print("Schema migration: created handoff_keyword table")
             except Exception as e:
-                print(f"Schema migration skipped ({clause}): {e}")
+                print(f"Schema migration skipped (handoff_keyword table): {e}")
 
 
 # ===================== SESSION + FUNNEL CLASSIFIERS =====================
@@ -519,6 +574,70 @@ def ensure_schema():
 # Time thresholds for the four session states. Tunable per business need.
 SESSION_ACTIVE_WINDOW = timedelta(hours=2)   # within -> 'active'
 SESSION_GAP_WINDOW = timedelta(hours=24)     # active..this -> 'gap'; beyond -> 'returning'
+
+
+def classify_conversation(fb_user):
+    """Use gpt-4o-mini to classify what business line (or generic category)
+    a user's conversation is about, then persist to facebook_user.conversation_topic.
+
+    Categories:
+      - Any active BusinessLine name (e.g. "Magic Finance App", "Consulting")
+      - 'general'        — generic training-center questions
+      - 'not_related'    — off-topic, unrelated
+      - 'other_request'  — operational requests (VAT reg, certification follow-ups, etc.)
+
+    Silently skips on any error so it never interrupts message delivery.
+    """
+    try:
+        recent_messages = (
+            Message.query
+            .filter_by(facebook_user_id=fb_user.id, sender='user')
+            .order_by(Message.created_at.desc())
+            .limit(15)
+            .all()
+        )
+        if not recent_messages:
+            return
+
+        business_lines = [
+            bl.name for bl in
+            BusinessLine.query.filter_by(is_active=True).order_by(BusinessLine.sort_order).all()
+        ]
+
+        conversation_text = '\n'.join(
+            m.content for m in reversed(recent_messages)
+        )
+
+        category_list = business_lines + ['general', 'not_related', 'other_request']
+        categories_str = ', '.join(f'"{c}"' for c in category_list)
+
+        prompt = (
+            f"You are classifying a Messenger conversation for a Mongolian training/consulting center.\n"
+            f"Available categories: {categories_str}\n\n"
+            f"Business line names like {', '.join(repr(b) for b in business_lines)} represent specific services offered.\n"
+            f'"general" = generic inquiries about the training center (schedule, location, enrollment process, etc.)\n'
+            f'"not_related" = clearly off-topic messages unrelated to the company\'s services\n'
+            f'"other_request" = operational requests (e.g. VAT registration, certification follow-up, pitch scheduling)\n\n'
+            f"Recent user messages:\n{conversation_text}\n\n"
+            f"Respond with ONLY the single most relevant category name from the list above. "
+            f"No explanation, no punctuation, just the category string."
+        )
+
+        result = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=60,
+        )
+
+        raw = result.choices[0].message.content.strip().strip('"').strip("'")
+        # Validate against known categories (case-insensitive match)
+        matched = next((c for c in category_list if c.lower() == raw.lower()), None)
+        if matched:
+            fb_user.conversation_topic = matched
+            db.session.commit()
+    except Exception as e:
+        print(f"classify_conversation error for user {fb_user.id}: {e}")
 
 
 def classify_session(last_msg_at):
@@ -690,14 +809,17 @@ def _format_team_members():
 
 
 def _format_business_lines():
-    """Return (answer_block, refer_block) — two sections so the prompt can
-    instruct the bot differently for each action."""
-    lines = (BusinessLine.query
-             .filter_by(is_active=True)
-             .order_by(BusinessLine.sort_order.asc(), BusinessLine.id.asc())
-             .all())
-    answer, refer = [], []
-    for b in lines:
+    """Return (answer_block, refer_block, paused_block) — active lines split by
+    action, plus a block for paused services so the bot knows not to sell them."""
+    all_lines = (BusinessLine.query
+                 .order_by(BusinessLine.sort_order.asc(), BusinessLine.id.asc())
+                 .all())
+    answer, refer, paused = [], [], []
+    for b in all_lines:
+        if not b.is_active:
+            note = f" ({b.status_note})" if b.status_note else " (түр зогссон)"
+            paused.append(f"- {b.name}{note}")
+            continue
         desc = b.description or ''
         contact = f" (Холбоо барих: {b.contact_info})" if b.contact_info else ''
         entry = f"- {b.name}: {desc}{contact}"
@@ -705,7 +827,7 @@ def _format_business_lines():
             answer.append(entry)
         else:
             refer.append(entry)
-    return "\n".join(answer), "\n".join(refer)
+    return "\n".join(answer), "\n".join(refer), "\n".join(paused)
 
 
 def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name=''):
@@ -721,9 +843,21 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
         for c in courses
     ])
 
+    inactive_courses = Course.query.filter_by(is_active=False).all()
+    if inactive_courses:
+        paused_lines = []
+        for c in inactive_courses:
+            note = f" ({c.status_note})" if c.status_note else " (түр зогссон)"
+            paused_lines.append(f"- {c.name}{note}")
+        courses_text += (
+            "\n\nТҮР ЗОГССОН СУРГАЛТУУД (одоогоор бүртгэл хаалттай; "
+            "хэрэглэгч асуувал зогссон гэдгийг тодорхой хэлж, эргэж нээгдэх "
+            "талаар мэдэгдэнэ гэж хэлж болно):\n" + "\n".join(paused_lines)
+        )
+
     snippets_text = _format_training_snippets()
     team_text = _format_team_members()
-    answer_lines, refer_lines = _format_business_lines()
+    answer_lines, refer_lines, paused_services = _format_business_lines()
 
     registration_block = (
         f"БҮРТГЭЛИЙН ЛИНК:\n{GOOGLE_FORM_URL}\n" if GOOGLE_FORM_URL else ""
@@ -767,6 +901,13 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
                 "дугаараа үлдээгээрэй, бид удахгүй холбогдоно\" гэж "
                 "найрсагаар чиглүүл:\n"
                 f"{refer_lines}\n"
+            )
+        if paused_services:
+            biz_section += (
+                "Доорх үйлчилгээнүүд ОДООГООР ТҮР ЗОГССОН байна. "
+                "Хэрэглэгч эдгээрийн талаар асуувал зогссон гэдгийг шулуун хэлж, "
+                "дахин нээгдэх үед мэдэгдэж болох эсэхийг тодруулна уу:\n"
+                f"{paused_services}\n"
             )
 
     system_prompt = f"""{persona}
@@ -982,28 +1123,15 @@ def nudge_task():
 # ===================== HUMAN HANDOFF =====================
 
 # Keyword sets per sensitivity tier. Conservative is the launch default; admins
-# can raise sensitivity from /admin/settings when they're short-staffed or on
-# vacation. Substring match, lowercase. Stems are deliberately short so that
-# Mongolian agglutinative suffixes don't defeat them — 'ажилтан' catches
-# ажилтантай / ажилтанд / ажилтны / ажилтанаас / ажилтны / ажилтанаа etc.
-HANDOFF_KEYWORDS_EXPLICIT = [
-    # Mongolian noun stems — saying any of these in chat almost always
-    # signals "I want a human", not a casual reference.
-    'ажилтан',       # ажилтан/тантай/тны/анд/наас/нтай
-    'оператор',
-    'менежер',
-    'админтай',      # talk to admin
-    'жинхэнэ хүн',   # a real person
-    'хүнтэй',        # with a person — "хүнтэй ярья", "хүнтэй холбогдоё"
-    'хүн рүү',       # to a person
-    'хүн руу',
-    'хүний хариу',   # human response
-    'хүнээр',        # by a person
-    # English fallbacks
+# Default seeds — only used for initial DB population, NOT for runtime matching.
+# Runtime matching reads from the handoff_keyword table so admins can edit/add/toggle.
+_DEFAULT_HANDOFF_KEYWORDS_EXPLICIT = [
+    'ажилтан', 'оператор', 'менежер', 'админтай', 'жинхэнэ хүн',
+    'хүнтэй', 'хүн рүү', 'хүн руу', 'хүний хариу', 'хүнээр',
     'live agent', 'real agent', 'real person', 'human agent',
     'speak to human', 'talk to human', 'operator please',
 ]
-HANDOFF_KEYWORDS_FRUSTRATION = [
+_DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION = [
     'болохгүй байна', 'ойлгохгүй', 'ойлгомжгүй', 'муухай', 'үнэхээр муу',
     'гомдол', 'буруу хариу', 'хариулж чадахгүй', 'юу яриад байгаа',
     'хэрэггүй бот', 'утгагүй', 'ойлгосонгүй',
@@ -1013,9 +1141,34 @@ HANDOFF_USER_REPLY = (
     "Таны асуултыг манай ажилтан хариуцаж авлаа. Удахгүй холбогдох болно. "
     "Түр хүлээгээрэй 🙏"
 )
+HANDOFF_USER_REPLY_OFF_HOURS = (
+    "Таны мессежийг хүлээн авлаа. Одоогоор ажлын цаг биш байна. "
+    "Манай ажилтан маргааш ажлын цагт ({start}:00 – {end}:00) тантай холбогдох болно. "
+    "Уучлаарай, тав тухтай амраарай 🌙"
+)
 
 
-def get_handoff_sensitivity():
+def _is_off_hours():
+    """Return True when current UTC hour falls in the night quiet window.
+    Office hours stored as 'office_hours_start' and 'office_hours_end' (int, default 8–22)."""
+    try:
+        start = int(get_setting('office_hours_start', '8') or '8')
+        end = int(get_setting('office_hours_end', '22') or '22')
+    except ValueError:
+        start, end = 8, 22
+    # Convert to Ulaanbaatar time (UTC+8). Simple offset, no DST.
+    ub_hour = (datetime.utcnow().hour + 8) % 24
+    if start <= end:
+        return not (start <= ub_hour < end)
+    # Overnight range (end < start) — off-hours is between end and start.
+    return end <= ub_hour < start
+
+
+def trigger_handoff(fb_user, reason, user_message):
+    """Run the full handoff flow: mute the bot for the configured window,
+    create an AdminIssue, ping admins via Telegram, send the user a polite
+    waiting message. Safe to call inside the webhook handler."""
+    hours = get_mute_duration_hours()
     """conservative | balanced | aggressive — read from settings, default conservative."""
     value = (get_setting('handoff_sensitivity', 'conservative') or '').strip().lower()
     return value if value in ('conservative', 'balanced', 'aggressive') else 'conservative'
@@ -1070,7 +1223,17 @@ def should_handoff(message_text, fb_user):
     text = message_text.lower()
     sensitivity = get_handoff_sensitivity()
 
-    for kw in HANDOFF_KEYWORDS_EXPLICIT:
+    # Read keywords from DB (admin-editable), fall back to nothing if table empty.
+    explicit_kws = [
+        k.keyword.lower() for k in
+        HandoffKeyword.query.filter_by(keyword_type='explicit', is_active=True).all()
+    ]
+    frustration_kws = [
+        k.keyword.lower() for k in
+        HandoffKeyword.query.filter_by(keyword_type='frustration', is_active=True).all()
+    ]
+
+    for kw in explicit_kws:
         if kw in text:
             return True, f"explicit:{kw}"
 
@@ -1078,13 +1241,11 @@ def should_handoff(message_text, fb_user):
         return True, 'business_line_refer'
 
     if sensitivity in ('balanced', 'aggressive'):
-        for kw in HANDOFF_KEYWORDS_FRUSTRATION:
+        for kw in frustration_kws:
             if kw in text:
                 return True, f"frustration:{kw}"
 
     if sensitivity == 'aggressive':
-        # Same exact message 3+ times in the last hour from this user — they're
-        # clearly stuck and the bot isn't getting through.
         cutoff = datetime.utcnow() - timedelta(hours=1)
         recent = (Message.query
                   .filter_by(facebook_user_id=fb_user.id, sender='user')
@@ -1093,7 +1254,7 @@ def should_handoff(message_text, fb_user):
                   .limit(5)
                   .all())
         same = [m for m in recent if (m.content or '').strip().lower() == text.strip()]
-        if len(same) >= 2:  # plus the current one = 3
+        if len(same) >= 2:
             return True, 'repeated_question'
 
     return False, ''
@@ -1135,10 +1296,12 @@ def trigger_handoff(fb_user, reason, user_message):
     if hours > 0:
         fb_user.bot_muted_until = datetime.utcnow() + timedelta(hours=hours)
 
+    off_hours = _is_off_hours()
+
     issue = AdminIssue(
         facebook_user_id=fb_user.id,
         issue_type='handoff',
-        content=f"[{reason}] {user_message}"[:4000],
+        content=f"[{reason}]{'[OFF-HOURS]' if off_hours else ''} {user_message}"[:4000],
         status='open',
     )
     db.session.add(issue)
@@ -1148,20 +1311,30 @@ def trigger_handoff(fb_user, reason, user_message):
     # instead of waiting out the 2-second TTL.
     _invalidate_handoff_poll_cache()
 
-    # User-visible message — short, polite, not robotic.
-    send_facebook_message(fb_user.facebook_id, HANDOFF_USER_REPLY)
+    # User-visible message — off-hours gets a different, honest reply.
+    if off_hours:
+        try:
+            oh_start = int(get_setting('office_hours_start', '8') or '8')
+            oh_end = int(get_setting('office_hours_end', '22') or '22')
+        except ValueError:
+            oh_start, oh_end = 8, 22
+        user_reply = HANDOFF_USER_REPLY_OFF_HOURS.format(start=oh_start, end=oh_end)
+    else:
+        user_reply = HANDOFF_USER_REPLY
+    send_facebook_message(fb_user.facebook_id, user_reply)
     db.session.add(Message(
         facebook_user_id=fb_user.id,
         sender='bot',
-        content=HANDOFF_USER_REPLY,
+        content=user_reply,
     ))
     db.session.commit()
 
     # Admin notification via Telegram (no-op if not configured).
     display_name = fb_user.name or fb_user.facebook_id
     phone_part = f"\n📞 {fb_user.phone}" if fb_user.phone else ''
+    off_hours_tag = "🌙 [OFF-HOURS] " if off_hours else ""
     tg_text = (
-        f"🤝 Шинэ handoff хүсэлт\n"
+        f"{off_hours_tag}🤝 Шинэ handoff хүсэлт\n"
         f"👤 {display_name}{phone_part}\n"
         f"📝 Шалтгаан: {reason}\n"
         f"💬 Мессеж: {user_message[:500]}\n\n"
@@ -1238,19 +1411,43 @@ def logout():
 @login_required
 @admin_required
 def dashboard():
+    # Hot prospects: funnel stages are configurable via settings
+    hot_stages_raw = get_setting('hot_prospect_stages', 'pricing,ready') or 'pricing,ready'
+    hot_stages = [s.strip() for s in hot_stages_raw.split(',') if s.strip()]
+
     leads_count = FacebookUser.query.filter_by(is_lead=True).count()
     hot_prospects_count = (FacebookUser.query
                            .filter_by(is_lead=False)
-                           .filter(FacebookUser.funnel_stage.in_(['pricing', 'ready']))
+                           .filter(FacebookUser.funnel_stage.in_(hot_stages))
                            .count())
     open_issues = AdminIssue.query.filter_by(status='open').count()
     total_messages = Message.query.count()
 
+    recent_issues = (AdminIssue.query
+                     .options(joinedload(AdminIssue.facebook_user))
+                     .order_by(AdminIssue.created_at.desc())
+                     .limit(5).all())
+    recent_leads = (FacebookUser.query
+                    .filter_by(is_lead=True)
+                    .order_by(FacebookUser.created_at.desc())
+                    .limit(5).all())
+
+    # Topic breakdown: count users per conversation_topic
+    topic_rows = (
+        db.session.query(FacebookUser.conversation_topic, db.func.count(FacebookUser.id))
+        .group_by(FacebookUser.conversation_topic)
+        .all()
+    )
+    topic_breakdown = {(t or 'unclassified'): c for t, c in topic_rows}
+
     return render_template('dashboard.html',
-                         leads_count=leads_count,
-                         hot_prospects_count=hot_prospects_count,
-                         open_issues=open_issues,
-                         total_messages=total_messages)
+                           leads_count=leads_count,
+                           hot_prospects_count=hot_prospects_count,
+                           open_issues=open_issues,
+                           total_messages=total_messages,
+                           recent_issues=recent_issues,
+                           recent_leads=recent_leads,
+                           topic_breakdown=topic_breakdown)
 
 @app.route('/admin/courses', methods=['GET', 'POST'])
 @login_required
@@ -1259,39 +1456,57 @@ def courses():
     if request.method == 'POST':
         data = request.get_json()
         action = data.get('action')
-        
+
         if action == 'add':
+            end_raw = data.get('end_date')
             course = Course(
                 name=data.get('name'),
                 course_type=data.get('course_type'),
                 start_date=datetime.fromisoformat(data.get('start_date')),
+                end_date=datetime.fromisoformat(end_raw) if end_raw else None,
                 time=data.get('time'),
                 price=float(data.get('price')),
-                description=data.get('description')
+                description=data.get('description'),
+                is_recurring=bool(data.get('is_recurring')),
             )
             db.session.add(course)
             db.session.commit()
             return jsonify({'success': True, 'id': course.id})
-        
+
         elif action == 'edit':
             course = Course.query.get(data.get('id'))
             if course:
+                end_raw = data.get('end_date')
                 course.name = data.get('name')
                 course.course_type = data.get('course_type')
                 course.start_date = datetime.fromisoformat(data.get('start_date'))
+                course.end_date = datetime.fromisoformat(end_raw) if end_raw else None
                 course.time = data.get('time')
                 course.price = float(data.get('price'))
                 course.description = data.get('description')
+                course.is_recurring = bool(data.get('is_recurring'))
                 db.session.commit()
                 return jsonify({'success': True})
-        
+
+        elif action == 'toggle':
+            course = Course.query.get(data.get('id'))
+            if course:
+                course.is_active = not course.is_active
+                course.status_note = (data.get('status_note') or '').strip() or None
+                db.session.commit()
+                return jsonify({'success': True, 'is_active': course.is_active})
+
         elif action == 'delete':
             course = Course.query.get(data.get('id'))
             if course:
                 db.session.delete(course)
                 db.session.commit()
                 return jsonify({'success': True})
-    
+
+        elif action == 'refresh_dates':
+            updated = advance_recurring_courses()
+            return jsonify({'success': True, 'updated': updated})
+
     courses = Course.query.all()
     return render_template('courses.html', courses=courses)
 
@@ -1425,8 +1640,13 @@ def issues():
             issue = AdminIssue.query.get(data.get('id'))
             if issue:
                 issue.status = data.get('status')
+                issue.updated_by_id = current_user.id
+                issue.updated_at = datetime.utcnow()
                 if data.get('status') == 'resolved':
                     issue.resolved_at = datetime.utcnow()
+                notes = data.get('notes', '').strip()
+                if notes:
+                    issue.notes = notes
                 db.session.commit()
                 return jsonify({'success': True})
 
@@ -1553,6 +1773,40 @@ def backfill_names():
     })
 
 
+@app.route('/admin/api/classify-conversations', methods=['POST'])
+@login_required
+@admin_required
+def classify_conversations_backfill():
+    """Re-classify all users who have sent at least one message.
+
+    Processes up to 300 users per call (rate-limited by OpenAI latency).
+    Prioritise unclassified users first, then re-classify oldest.
+    """
+    users = (
+        FacebookUser.query
+        .join(Message, Message.facebook_user_id == FacebookUser.id)
+        .filter(Message.sender == 'user')
+        .group_by(FacebookUser.id)
+        .order_by(
+            # nulls (unclassified) first
+            FacebookUser.conversation_topic.is_(None).desc(),
+            FacebookUser.updated_at.asc(),
+        )
+        .limit(300)
+        .all()
+    )
+    classified = 0
+    for u in users:
+        before = u.conversation_topic
+        classify_conversation(u)
+        if u.conversation_topic and u.conversation_topic != before:
+            classified += 1
+    return jsonify({
+        'attempted': len(users),
+        'classified': classified,
+    })
+
+
 # Tiny in-memory TTL cache for the polling endpoint. With N admins × M open
 # tabs each polling every 15s, this trims most hits to a dict lookup. The
 # 2-second TTL is shorter than the client poll interval, so a new handoff
@@ -1638,8 +1892,12 @@ def training():
 
     Saving a blank value clears the DB row so the env-var / file fallback
     takes over again — that's the "reset to default" path.
+    Only super_admin can save persona and base training content.
     """
     if request.method == 'POST':
+        if current_user.role != 'super_admin':
+            flash('Бот персонал болон үндсэн сургалтын мэдээллийг зөвхөн супер админ засах боломжтой.', 'error')
+            return redirect(url_for('training'))
         new_training = request.form.get('training_content', '').strip()
         new_persona = request.form.get('bot_persona', '').strip()
 
@@ -1816,6 +2074,7 @@ def business_lines():
             line.description = (data.get('description') or '').strip() or None
             line.action = 'answer' if data.get('line_action') == 'answer' else 'refer'
             line.contact_info = (data.get('contact_info') or '').strip() or None
+            line.status_note = (data.get('status_note') or '').strip() or None
             if not line.name:
                 db.session.rollback()
                 return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
@@ -1827,6 +2086,7 @@ def business_lines():
             if not line:
                 return jsonify({'success': False}), 404
             line.is_active = not line.is_active
+            line.status_note = (data.get('status_note') or '').strip() or None
             db.session.commit()
             return jsonify({'success': True, 'is_active': line.is_active})
 
@@ -1846,7 +2106,57 @@ def business_lines():
     return render_template('business_lines.html', lines=lines)
 
 
-# ===================== DOCUMENTATION =====================
+# ===================== HANDOFF KEYWORDS =====================
+
+@app.route('/admin/handoff-keywords', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def handoff_keywords():
+    """Manage the keyword/phrase lists that trigger human handoff."""
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        action = data.get('action')
+
+        if action in ('add', 'edit'):
+            if action == 'add':
+                kw = HandoffKeyword()
+                db.session.add(kw)
+            else:
+                kw = HandoffKeyword.query.get(data.get('id'))
+                if not kw:
+                    return jsonify({'success': False}), 404
+            kw.keyword = (data.get('keyword') or '').strip().lower()
+            kw.keyword_type = 'frustration' if data.get('keyword_type') == 'frustration' else 'explicit'
+            kw.note = (data.get('note') or '').strip() or None
+            if not kw.keyword:
+                db.session.rollback()
+                return jsonify({'success': False, 'error': 'Keyword шаардлагатай.'}), 400
+            db.session.commit()
+            return jsonify({'success': True, 'id': kw.id})
+
+        if action == 'toggle':
+            kw = HandoffKeyword.query.get(data.get('id'))
+            if not kw:
+                return jsonify({'success': False}), 404
+            kw.is_active = not kw.is_active
+            db.session.commit()
+            return jsonify({'success': True, 'is_active': kw.is_active})
+
+        if action == 'delete':
+            kw = HandoffKeyword.query.get(data.get('id'))
+            if not kw:
+                return jsonify({'success': False}), 404
+            db.session.delete(kw)
+            db.session.commit()
+            return jsonify({'success': True})
+
+        return jsonify({'success': False, 'error': 'unknown action'}), 400
+
+    keywords = HandoffKeyword.query.order_by(
+        HandoffKeyword.keyword_type.asc(),
+        HandoffKeyword.keyword.asc(),
+    ).all()
+    return render_template('handoff_keywords.html', keywords=keywords)
 
 @app.route('/admin/docs')
 @login_required
@@ -2187,6 +2497,12 @@ def webhook():
 
                     # Send response via Facebook
                     send_facebook_message(sender_id, bot_response)
+
+                    # Classify conversation topic in background (non-blocking)
+                    try:
+                        classify_conversation(fb_user)
+                    except Exception:
+                        pass
                     
                     # Check if phone number was provided
                     phone_match = PHONE_RE.search(message_text)
@@ -2361,6 +2677,46 @@ def seed_courses_and_faqs():
     db.session.commit()
 
 
+def seed_handoff_keywords():
+    """Populate HandoffKeyword table from the default lists on first run. Idempotent."""
+    if HandoffKeyword.query.count() > 0:
+        return
+    for kw in _DEFAULT_HANDOFF_KEYWORDS_EXPLICIT:
+        db.session.add(HandoffKeyword(keyword=kw.lower(), keyword_type='explicit', is_active=True))
+    for kw in _DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION:
+        db.session.add(HandoffKeyword(keyword=kw.lower(), keyword_type='frustration', is_active=True))
+    db.session.commit()
+    print(f"Seeded {len(_DEFAULT_HANDOFF_KEYWORDS_EXPLICIT) + len(_DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION)} default handoff keywords.")
+
+
+def advance_recurring_courses():
+    """For each is_recurring Course past its end_date, set next start/end dates.
+    First Monday >= 4 weeks after current end_date.
+    Called at boot and via manual refresh button."""
+    now = datetime.utcnow()
+    updated = 0
+    for course in Course.query.filter_by(is_recurring=True, is_active=True).all():
+        ref_date = course.end_date or course.start_date
+        if not ref_date or ref_date > now:
+            continue
+        # First Monday >= 4 weeks after ref_date
+        candidate = ref_date + timedelta(weeks=4)
+        days_until_monday = (7 - candidate.weekday()) % 7
+        next_start = candidate + timedelta(days=days_until_monday)
+        # Preserve original duration if end_date was set
+        if course.end_date and course.start_date:
+            duration = course.end_date - course.start_date
+        else:
+            duration = timedelta(weeks=4)
+        course.start_date = next_start
+        course.end_date = next_start + duration
+        updated += 1
+    if updated:
+        db.session.commit()
+        print(f"Recurring courses: advanced {updated} course(s).")
+    return updated
+
+
 def init_db():
     """Initialize database tables, seed admin user + default Courses/FAQs.
 
@@ -2372,6 +2728,8 @@ def init_db():
         db.create_all()
         ensure_schema()
         seed_courses_and_faqs()
+        seed_handoff_keywords()
+        advance_recurring_courses()
 
         if not User.query.filter_by(username='admin').first():
             initial_password = os.environ.get('INITIAL_ADMIN_PASSWORD')
