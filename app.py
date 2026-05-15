@@ -840,6 +840,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
     courses = Course.query.filter_by(is_active=True).all()
     courses_text = "\n".join([
         f"- {c.name} ({c.course_type}): {int(c.price):,}₮, эхлэх: {c.start_date.strftime('%Y-%m-%d')}, цаг: {c.time}"
+        + (f"\n  Тайлбар: {c.description}" if c.description else "")
         for c in courses
     ])
 
