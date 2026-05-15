@@ -2737,59 +2737,6 @@ def _parse_product_payload(data, existing=None):
     }, links, None
 
 
-@app.route('/admin/products/__debug')
-@login_required
-@admin_required
-def products_debug():
-    """Temporary diagnostic — returns query results + any exception trace
-    as JSON so we can see what's blowing up the templated /admin/products
-    page in prod without needing Render shell access. Safe to delete once
-    products route is confirmed healthy."""
-    import traceback
-    out = {}
-    try:
-        out['product_count'] = Product.query.count()
-    except Exception as e:
-        out['product_count_error'] = repr(e)
-        out['trace'] = traceback.format_exc()
-        return jsonify(out)
-    try:
-        prods = Product.query.all()
-        out['products'] = [
-            {
-                'id': p.id,
-                'product_number': p.product_number,
-                'name': p.name,
-                'business_line_id': p.business_line_id,
-                'is_main_product': p.is_main_product,
-                'links_count': len(p.links or []),
-            }
-            for p in prods
-        ]
-    except Exception as e:
-        out['list_error'] = repr(e)
-        out['trace'] = traceback.format_exc()
-        return jsonify(out)
-    try:
-        out['lines_count'] = BusinessLine.query.count()
-    except Exception as e:
-        out['lines_error'] = repr(e)
-        out['trace'] = traceback.format_exc()
-        return jsonify(out)
-    try:
-        rendered = render_template(
-            'products.html',
-            products=prods,
-            business_lines=BusinessLine.query.all(),
-        )
-        out['render_ok'] = True
-        out['rendered_len'] = len(rendered)
-    except Exception as e:
-        out['render_error'] = repr(e)
-        out['trace'] = traceback.format_exc()
-    return jsonify(out)
-
-
 @app.route('/admin/products', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -2855,6 +2802,20 @@ def products():
                               Product.sort_order.asc(),
                               Product.id.asc())
                     .all())
+    # Pre-serialize each product's links to a plain dict list. Jinja2's dict
+    # literal can't contain a Python list comprehension, so building the
+    # data-product JSON inline in the template fails to parse.
+    for p in all_products:
+        p._links_json = [
+            {
+                'kind': l.kind,
+                'label': l.label or '',
+                'url': l.url,
+                'is_active': bool(l.is_active),
+                'sort_order': l.sort_order,
+            }
+            for l in p.links
+        ]
     lines = BusinessLine.query.order_by(BusinessLine.sort_order.asc(),
                                         BusinessLine.id.asc()).all()
     return render_template('products.html', products=all_products, business_lines=lines)

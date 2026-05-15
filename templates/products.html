@@ -44,7 +44,7 @@
                             "vendor": p.vendor or "",
                             "description": p.description or "",
                             "is_main_product": p.is_main_product,
-                            "links": [{"kind": l.kind, "label": l.label or "", "url": l.url, "is_active": l.is_active, "sort_order": l.sort_order} for l in p.links]
+                            "links": p._links_json
                         } | tojson | e }}'
                         data-status-note="{{ (p.status_note or '') | e }}"
                         data-active="{{ '1' if p.is_active else '0' }}">
