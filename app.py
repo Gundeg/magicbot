@@ -614,10 +614,13 @@ def classify_conversation(fb_user):
         prompt = (
             f"You are classifying a Messenger conversation for a Mongolian training/consulting center.\n"
             f"Available categories: {categories_str}\n\n"
-            f"Business line names like {', '.join(repr(b) for b in business_lines)} represent specific services offered.\n"
-            f'"general" = generic inquiries about the training center (schedule, location, enrollment process, etc.)\n'
-            f'"not_related" = clearly off-topic messages unrelated to the company\'s services\n'
-            f'"other_request" = operational requests (e.g. VAT registration, certification follow-up, pitch scheduling)\n\n'
+            f"Business line names like {', '.join(repr(b) for b in business_lines)} represent specific non-training services.\n"
+            f'"general" = ANY question about training courses: course names, pricing, schedules, start dates, duration, content, '
+            f'teaching format (online/classroom), enrollment, registration, or any other training-center topic\n'
+            f'"not_related" = clearly off-topic messages with no connection to the company or its services '
+            f'(e.g. jokes, random chat, completely unrelated questions)\n'
+            f'"other_request" = operational requests NOT about enrolling (e.g. VAT registration, certification follow-up, pitch scheduling)\n\n'
+            f"When in doubt between \"general\" and \"not_related\", choose \"general\".\n\n"
             f"Recent user messages:\n{conversation_text}\n\n"
             f"Respond with ONLY the single most relevant category name from the list above. "
             f"No explanation, no punctuation, just the category string."
