@@ -153,6 +153,47 @@
 
     <div class="col-lg-3">
         <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-eye"></i> AI харж буй prompt</span>
+                <button class="btn btn-sm btn-outline-secondary" id="previewPromptBtn"
+                        title="Бот яг одоо ямар системийн зааварчилгаатай ажиллаж байгааг харах">
+                    Үзэх
+                </button>
+            </div>
+            <div class="card-body small text-muted" id="previewPromptHelp">
+                Энэ товчийг дарж яг одоо ботод очиж буй бүхэл бүтэн системийн зааварчилгааг харна уу.
+                Persona, суурь агуулга, нэмэлт тайлбарууд, ангиуд, FAQ — бүгд нэгтгэгдсэн бодит хувилбар.
+                Алдаа, давхардал, хуучирсан мэдээллийг шалгахад тус болно.
+            </div>
+            <div class="card-body p-0" id="previewPromptWrap" style="display:none;">
+                <pre id="previewPromptOut"
+                     class="small mb-0 p-3"
+                     style="max-height: 60vh; overflow-y: auto; white-space: pre-wrap; background: #f7f7f9;"></pre>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-clipboard-check"></i> Нийцлийн шалгалт</span>
+                <button class="btn btn-sm btn-outline-secondary" id="lintBtn"
+                        title="FAQ, persona, snippet, training-ийн агуулгыг ангиуд болон үйлчилгээний бүртгэлтэй харьцуулж зөрчилтэй мэдээлэл олох">
+                    Ажиллуулах
+                </button>
+            </div>
+            <div class="card-body small text-muted" id="lintHelp">
+                FAQ, persona, нэмэлт тайлбар, суурь агуулгад дурдсан үнэ, утас, линк болон
+                идэвхтэй ангиудын огноог структурт байгаа Course / BusinessLine мэдээлэлтэй
+                харьцуулна. Зөрчилтэй (буюу олдоогүй) утга илэрвэл доор жагсаана.
+            </div>
+            <div class="card-body p-0" id="lintWrap" style="display:none;">
+                <ul class="list-group list-group-flush" id="lintList"></ul>
+                <div class="p-2 small text-muted" id="lintEmpty" style="display:none;">
+                    Шалгалт өнгөрсөн — зөрчилтэй зүйл олдсонгүй.
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
             <div class="card-header">
                 <i class="bi bi-info-circle"></i> Заавар
             </div>
@@ -230,6 +271,98 @@
 
 <script>
 const snippetUrl = '{{ url_for("training_snippets") }}';
+
+// AI prompt preview — pulls the live system prompt the bot is currently
+// receiving so admins can spot stale or conflicting data before a real
+// Messenger user does.
+(function () {
+    const btn = document.getElementById('previewPromptBtn');
+    if (!btn) return;
+    const wrap = document.getElementById('previewPromptWrap');
+    const help = document.getElementById('previewPromptHelp');
+    const out = document.getElementById('previewPromptOut');
+    btn.addEventListener('click', () => {
+        btn.disabled = true;
+        const original = btn.textContent;
+        btn.textContent = 'Уншиж байна...';
+        fetch('{{ url_for("training_preview") }}', { credentials: 'same-origin' })
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(data => {
+                out.textContent = data.prompt || '(хоосон)';
+                wrap.style.display = '';
+                if (help) help.style.display = 'none';
+                btn.textContent = 'Шинэчлэх';
+            })
+            .catch(err => {
+                alert('Алдаа: ' + err);
+                btn.textContent = original;
+            })
+            .finally(() => { btn.disabled = false; });
+    });
+})();
+
+// Consistency check — runs the heuristic linter and lists prices/phones/
+// URLs that appear in prose but don't match any structured Course or
+// BusinessLine field. Heuristic; false positives are fine.
+(function () {
+    const btn = document.getElementById('lintBtn');
+    if (!btn) return;
+    const wrap = document.getElementById('lintWrap');
+    const help = document.getElementById('lintHelp');
+    const list = document.getElementById('lintList');
+    const empty = document.getElementById('lintEmpty');
+
+    const SEVERITY = {
+        error:   { badge: 'bg-danger',          text: 'Алдаа' },
+        warning: { badge: 'bg-warning text-dark', text: 'Анхааруулга' },
+        info:    { badge: 'bg-secondary',       text: 'Мэдээлэл' },
+    };
+
+    function render(findings) {
+        list.innerHTML = '';
+        if (!findings.length) {
+            wrap.style.display = '';
+            empty.style.display = '';
+            return;
+        }
+        empty.style.display = 'none';
+        for (const f of findings) {
+            const sev = SEVERITY[f.severity] || SEVERITY.info;
+            const li = document.createElement('li');
+            li.className = 'list-group-item';
+            li.innerHTML = `
+                <div class="d-flex justify-content-between gap-2 align-items-start">
+                    <div>
+                        <span class="badge ${sev.badge}" style="font-size:0.7rem;">${sev.text}</span>
+                        <strong class="ms-1">${f.source_kind}${f.source_id ? ' #' + f.source_id : ''}</strong>
+                        <span class="text-muted small ms-1">${f.label}</span>
+                        <div class="small mt-1">${f.detail}</div>
+                    </div>
+                    <code class="text-muted small">${f.kind}</code>
+                </div>`;
+            list.appendChild(li);
+        }
+        wrap.style.display = '';
+    }
+
+    btn.addEventListener('click', () => {
+        btn.disabled = true;
+        const original = btn.textContent;
+        btn.textContent = 'Шалгаж байна...';
+        fetch('{{ url_for("training_lint") }}', { credentials: 'same-origin' })
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(data => {
+                render(data.findings || []);
+                if (help) help.style.display = 'none';
+                btn.textContent = 'Дахин ажиллуулах';
+            })
+            .catch(err => {
+                alert('Алдаа: ' + err);
+                btn.textContent = original;
+            })
+            .finally(() => { btn.disabled = false; });
+    });
+})();
 
 function postSnippet(payload) {
     return fetch(snippetUrl, {

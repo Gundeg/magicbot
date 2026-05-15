@@ -386,7 +386,8 @@
     <script>
     (function () {
         const POLL_URL = '{{ url_for("handoff_poll") }}';
-        const POLL_MS = 15000;
+        const BASE_POLL_MS = 15000;
+        const MAX_POLL_MS = 5 * 60 * 1000;  // back off up to 5 min on repeated failures
         const STORAGE_KEY = 'magicbot_last_seen_handoff_id';
 
         let audioCtx = null;
@@ -426,10 +427,34 @@
             setTimeout(() => { el.remove(); }, 10000);
         }
 
+        // Backoff state — pause polling when the tab is hidden (saves Render
+        // free-tier calls and keeps document_idle responsive for the user's
+        // active tab) and stretch the interval after failures so a flaky
+        // server doesn't get hammered.
+        let timer = null;
+        let consecutiveErrors = 0;
+        let stopped = false;
+
+        function currentDelay() {
+            if (consecutiveErrors === 0) return BASE_POLL_MS;
+            return Math.min(BASE_POLL_MS * Math.pow(2, consecutiveErrors), MAX_POLL_MS);
+        }
+
+        function schedule() {
+            if (stopped) return;
+            clearTimeout(timer);
+            timer = setTimeout(pollOnce, currentDelay());
+        }
+
         function pollOnce() {
+            if (document.hidden) {
+                // Don't poll a backgrounded tab; visibilitychange will resume.
+                return;
+            }
             fetch(POLL_URL, { credentials: 'same-origin' })
-                .then(r => r.ok ? r.json() : null)
+                .then(r => r.ok ? r.json() : Promise.reject(r.status))
                 .then(data => {
+                    consecutiveErrors = 0;
                     if (!data || !data.latest_id) return;
                     const lastSeen = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
                     if (data.latest_id > lastSeen) {
@@ -440,11 +465,24 @@
                         localStorage.setItem(STORAGE_KEY, String(data.latest_id));
                     }
                 })
-                .catch(() => {});
+                .catch(() => { consecutiveErrors++; })
+                .finally(schedule);
         }
 
-        pollOnce();
-        setInterval(pollOnce, POLL_MS);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                // Poll immediately when the tab comes back into focus.
+                clearTimeout(timer);
+                pollOnce();
+            }
+        });
+
+        // Defer the first poll to idle so it doesn't compete with page load.
+        if (window.requestIdleCallback) {
+            requestIdleCallback(pollOnce, { timeout: 2000 });
+        } else {
+            setTimeout(pollOnce, 1000);
+        }
     })();
     </script>
     {% endif %}

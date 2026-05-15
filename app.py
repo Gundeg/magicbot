@@ -178,13 +178,21 @@ class Message(db.Model):
 class Course(db.Model):
     """Training course"""
     id = db.Column(db.Integer, primary_key=True)
+    # Admin-assigned external course number (e.g. 1881). Unique per Course;
+    # the same human-readable name can repeat across different schedules,
+    # so this is the stable identifier admins use to disambiguate.
+    course_number = db.Column(db.Integer, unique=True)
     name = db.Column(db.String(255), nullable=False)
-    course_type = db.Column(db.String(100), nullable=False)  # '100% Online', 'Hybrid', etc.
-    start_date = db.Column(db.DateTime, nullable=False)
+    # Restricted to the four allowed types, enforced in the admin POST.
+    course_type = db.Column(db.String(100), nullable=False)
+    # Nullable for self-paced '100% Online' courses where there is no fixed start.
+    start_date = db.Column(db.DateTime)
     end_date = db.Column(db.DateTime)
     time = db.Column(db.String(50), nullable=False)  # e.g., "10:00-13:00"
     price = db.Column(db.Float, nullable=False)
     description = db.Column(db.Text)
+    # Total course duration in days, when fixed. Quoted by the bot when set.
+    duration_days = db.Column(db.Integer)
     is_active = db.Column(db.Boolean, default=True)
     status_note = db.Column(db.String(255))  # reason for pause / admin note visible to AI
     is_recurring = db.Column(db.Boolean, default=False)
@@ -269,6 +277,18 @@ class BusinessLine(db.Model):
     description = db.Column(db.Text)
     action = db.Column(db.String(20), default='refer')  # 'answer' | 'refer'
     contact_info = db.Column(db.String(255))            # e.g. phone, email, dept
+    # Per-service fields the bot quotes verbatim. Kept separate from
+    # `contact_info` so admins can update one number/URL/address without
+    # rewriting the description blob.
+    address = db.Column(db.Text)
+    signup_form_url = db.Column(db.String(500))
+    signup_phone = db.Column(db.String(100))
+    # Stats vary per line (training has 'students', software has 'users'),
+    # so each line carries its own three numbers instead of a single
+    # company-wide About Us block.
+    established_year = db.Column(db.Integer)
+    num_products_or_services = db.Column(db.Integer)
+    total_clients_or_users = db.Column(db.Integer)
     is_active = db.Column(db.Boolean, default=True)
     status_note = db.Column(db.String(255))  # reason for pause / admin note visible to AI
     sort_order = db.Column(db.Integer, default=0)
@@ -543,10 +563,20 @@ def ensure_schema():
         'is_recurring': 'is_recurring BOOLEAN DEFAULT 0',
         'schedule_template': 'schedule_template TEXT',
         'status_note': 'status_note VARCHAR(255)',
+        # Admin-assigned external code. Left nullable so existing rows don't
+        # block the migration; uniqueness is enforced by the admin POST.
+        'course_number': 'course_number INTEGER',
+        'duration_days': 'duration_days INTEGER',
     })
 
     add_columns('business_line', {
         'status_note': 'status_note VARCHAR(255)',
+        'address': 'address TEXT',
+        'signup_form_url': 'signup_form_url VARCHAR(500)',
+        'signup_phone': 'signup_phone VARCHAR(100)',
+        'established_year': 'established_year INTEGER',
+        'num_products_or_services': 'num_products_or_services INTEGER',
+        'total_clients_or_users': 'total_clients_or_users INTEGER',
     })
 
     # Create handoff_keyword table if it doesn't exist (create_all handles new DBs,
@@ -811,6 +841,37 @@ def _format_team_members():
     return "\n".join(lines)
 
 
+ALLOWED_COURSE_TYPES = ('100% Online', 'Hybrid', 'Online with Teacher', 'Classroom')
+SELF_PACED_COURSE_TYPE = '100% Online'
+
+
+def _format_business_line_entry(b):
+    """Single-line summary for a business line, with structured fields the
+    admin filled in (address, sign-up channels, stats) appended so the bot
+    can quote them without parsing the freeform description."""
+    parts = [f"- {b.name}"]
+    if b.description:
+        parts.append(f": {b.description}")
+    extras = []
+    if b.established_year:
+        extras.append(f"үүсгэн байгуулагдсан: {b.established_year}")
+    if b.num_products_or_services:
+        extras.append(f"бүтээгдэхүүн/үйлчилгээ: {b.num_products_or_services}")
+    if b.total_clients_or_users:
+        extras.append(f"харилцагч/хэрэглэгч: {b.total_clients_or_users:,}")
+    if b.address:
+        extras.append(f"хаяг: {b.address}")
+    if b.contact_info:
+        extras.append(f"холбоо барих: {b.contact_info}")
+    if b.signup_phone:
+        extras.append(f"бүртгэлийн утас: {b.signup_phone}")
+    if b.signup_form_url:
+        extras.append(f"бүртгэлийн линк: {b.signup_form_url}")
+    if extras:
+        parts.append("\n  (" + "; ".join(extras) + ")")
+    return "".join(parts)
+
+
 def _format_business_lines():
     """Return (answer_block, refer_block, paused_block) — active lines split by
     action, plus a block for paused services so the bot knows not to sell them."""
@@ -823,14 +884,75 @@ def _format_business_lines():
             note = f" ({b.status_note})" if b.status_note else " (түр зогссон)"
             paused.append(f"- {b.name}{note}")
             continue
-        desc = b.description or ''
-        contact = f" (Холбоо барих: {b.contact_info})" if b.contact_info else ''
-        entry = f"- {b.name}: {desc}{contact}"
+        entry = _format_business_line_entry(b)
         if (b.action or 'refer') == 'answer':
             answer.append(entry)
         else:
             refer.append(entry)
     return "\n".join(answer), "\n".join(refer), "\n".join(paused)
+
+
+def _format_course_entry(c, today_date):
+    """Single line for a course in the canonical catalog block. Self-paced
+    courses (100% Online) skip start/end dates; courses with a known
+    duration_days quote it; admins' status_note is appended verbatim."""
+    head = f"- [#{c.course_number}] " if c.course_number else "- "
+    head += f"{c.name} ({c.course_type}): {int(c.price):,}₮"
+
+    bits = [f"цаг: {c.time}"]
+    if c.course_type != SELF_PACED_COURSE_TYPE:
+        if c.start_date:
+            bits.append(f"эхлэх: {c.start_date.strftime('%Y-%m-%d')}")
+        if c.end_date:
+            bits.append(f"дуусах: {c.end_date.strftime('%Y-%m-%d')}")
+    else:
+        bits.append("эхлэх: бүртгүүлсэн өдрөөс")
+    if c.duration_days:
+        bits.append(f"үргэлжлэх хугацаа: {c.duration_days} хоног")
+    line = head + " | " + ", ".join(bits)
+    if c.description:
+        line += f"\n  Тайлбар: {c.description}"
+    if c.status_note:
+        line += f"\n  Тэмдэглэл: {c.status_note}"
+    return line
+
+
+def _format_courses_canonical():
+    """Build the canonical course catalog block. Filters out non-recurring
+    courses whose start_date is already in the past — they're stale and the
+    bot should not be quoting them as upcoming. Sorts ascending so the
+    nearest class is offered first."""
+    today = datetime.utcnow().date()
+    active = Course.query.filter_by(is_active=True).all()
+
+    def is_quotable(c):
+        if c.course_type == SELF_PACED_COURSE_TYPE:
+            return True  # self-paced has no start date to be stale against
+        if c.is_recurring:
+            return True  # the refresh_dates flow keeps these current
+        if not c.start_date:
+            return True
+        return c.start_date.date() >= today
+
+    def sort_key(c):
+        # Nearest upcoming start first; self-paced/no-date sort last.
+        if not c.start_date:
+            return (1, datetime.max)
+        return (0, c.start_date)
+
+    quotable = sorted([c for c in active if is_quotable(c)], key=sort_key)
+    inactive_or_stale = [c for c in active if not is_quotable(c)]
+
+    active_text = "\n".join(_format_course_entry(c, today) for c in quotable)
+
+    paused_or_stale = []
+    inactive = Course.query.filter_by(is_active=False).all()
+    for c in inactive + inactive_or_stale:
+        note = c.status_note or "түр зогссон"
+        tag = f"#{c.course_number} " if c.course_number else ""
+        paused_or_stale.append(f"- {tag}{c.name}: {note}")
+
+    return active_text, "\n".join(paused_or_stale)
 
 
 def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name=''):
@@ -840,24 +962,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
     faqs = FAQ.query.all()
     faq_text = "\n".join([f"Q: {faq.question}\nA: {faq.answer}" for faq in faqs])
 
-    courses = Course.query.filter_by(is_active=True).all()
-    courses_text = "\n".join([
-        f"- {c.name} ({c.course_type}): {int(c.price):,}₮, эхлэх: {c.start_date.strftime('%Y-%m-%d')}, цаг: {c.time}"
-        + (f"\n  Тайлбар: {c.description}" if c.description else "")
-        for c in courses
-    ])
-
-    inactive_courses = Course.query.filter_by(is_active=False).all()
-    if inactive_courses:
-        paused_lines = []
-        for c in inactive_courses:
-            note = f" ({c.status_note})" if c.status_note else " (түр зогссон)"
-            paused_lines.append(f"- {c.name}{note}")
-        courses_text += (
-            "\n\nТҮР ЗОГССОН СУРГАЛТУУД (одоогоор бүртгэл хаалттай; "
-            "хэрэглэгч асуувал зогссон гэдгийг тодорхой хэлж, эргэж нээгдэх "
-            "талаар мэдэгдэнэ гэж хэлж болно):\n" + "\n".join(paused_lines)
-        )
+    courses_text, paused_courses = _format_courses_canonical()
 
     snippets_text = _format_training_snippets()
     team_text = _format_team_members()
@@ -914,14 +1019,31 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
                 f"{paused_services}\n"
             )
 
+    allowed_types_line = ", ".join(f'"{t}"' for t in ALLOWED_COURSE_TYPES)
+    paused_courses_section = (
+        f"\nТҮР ЗОГССОН / ХУУЧИРСАН АНГИУД (бүртгэл нээлттэй биш; "
+        f"хэрэглэгч асуувал зогссон гэдгийг шулуун хэлж, эргэж нээгдэх үед "
+        f"мэдэгдэнэ гэж хэлж болно):\n{paused_courses}\n"
+        if paused_courses else ''
+    )
+
     system_prompt = f"""{persona}
 
-СУРГАЛТЫН ТӨВИЙН МЭДЭЭЛЭЛ:
+==========================
+ИДЭВХТЭЙ АНГИУДЫН АЛБАН ЁСНЫ ЖАГСААЛТ (CANONICAL — энэ жагсаалтаас л үнэн зөв):
+{courses_text}
+{paused_courses_section}
+ЭНЭ ЖАГСААЛТЫН ТУХАЙ ХАТУУ ДҮРЭМ:
+- Ангийн нэр, цаг, эхлэх/дуусах огноо, үнэ, үргэлжлэх хугацааны тухай асуулт ирвэл ЗӨВХӨН энэ жагсаалтаас хариул.
+- Жагсаалтад байхгүй цаг, үнэ, эсвэл огноо бүү зохио. Эргэлзвэл "Ажилтан танд эргэж лавлая" гэж хэлэн утас лав.
+- Ангийн төрөл нь дараах нэрсээс л байна: {allowed_types_line}.
+- Хэрэглэгч одоогийн ангийн цаг, огноо тохирохгүй гэвэл ЭНЭ ЖАГСААЛТААС өөр төрлийн (онлайн, оройн г.м.) эсвэл дараагийн нээгдсэн ангийг санал болго. Нэг анги л санал болгож үзээгүй мөртөө "өөр анги байхгүй" битгий хэл.
+- Анги тус бүрд [#NNNN] гэсэн дугаар бий бол хариултдаа дурдвал админд хяналт тавихад тус болно (хэрэглэгчид заавал биш).
+==========================
+
+СУРГАЛТЫН ТӨВИЙН ЕРӨНХИЙ МЭДЭЭЛЭЛ:
 {training}
 {snippets_section}{team_section}{biz_section}
-ИДЭВХТЭЙ АНГИУД:
-{courses_text}
-
 ТҮГЭЭМЭЛ АСУУЛТУУД:
 {faq_text}
 
@@ -1453,6 +1575,87 @@ def dashboard():
                            recent_leads=recent_leads,
                            topic_breakdown=topic_breakdown)
 
+def _parse_course_payload(data, existing=None):
+    """Validate + coerce the JSON payload from the course modal into model
+    fields. Returns (kwargs, error_message_or_None). Centralized so add/edit
+    share the same checks: course_type allow-list, unique course_number,
+    self-paced rule (no start/end date for 100% Online)."""
+    name = (data.get('name') or '').strip()
+    if not name:
+        return None, 'Сургалтын нэр шаардлагатай.'
+
+    course_type = (data.get('course_type') or '').strip()
+    if course_type not in ALLOWED_COURSE_TYPES:
+        return None, (
+            f'course_type "{course_type}" зөвшөөрөгдөөгүй. '
+            f'Дараахаас сонгоно уу: {", ".join(ALLOWED_COURSE_TYPES)}'
+        )
+
+    is_self_paced = course_type == SELF_PACED_COURSE_TYPE
+
+    raw_number = data.get('course_number')
+    if raw_number in (None, '', 'null'):
+        return None, (
+            'Курсын дугаар (course_number) шаардлагатай. Жишээ: 1881. '
+            'Адилхан нэртэй ангиудыг ялгахад ашиглана.'
+        )
+    try:
+        course_number = int(raw_number)
+    except (TypeError, ValueError):
+        return None, 'course_number бүхэл тоо байх ёстой.'
+    # Uniqueness check across all rows except the row we're editing.
+    clash = Course.query.filter_by(course_number=course_number).first()
+    if clash and (existing is None or clash.id != existing.id):
+        return None, f'#{course_number} дугаартай анги аль хэдийн бүртгэлтэй (id={clash.id}).'
+
+    raw_duration = data.get('duration_days')
+    duration_days = None
+    if raw_duration not in (None, '', 'null'):
+        try:
+            duration_days = int(raw_duration)
+            if duration_days < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return None, 'duration_days эерэг бүхэл тоо байх ёстой.'
+
+    if is_self_paced:
+        start_date = None
+        end_date = None
+    else:
+        start_raw = data.get('start_date')
+        if not start_raw:
+            return None, 'Эхлэх огноо шаардлагатай (зөвхөн 100% Online анги хоосон үлдээнэ).'
+        try:
+            start_date = datetime.fromisoformat(start_raw)
+        except ValueError:
+            return None, 'start_date YYYY-MM-DD форматтай байна.'
+        end_raw = data.get('end_date')
+        end_date = None
+        if end_raw:
+            try:
+                end_date = datetime.fromisoformat(end_raw)
+            except ValueError:
+                return None, 'end_date YYYY-MM-DD форматтай байна.'
+
+    try:
+        price = float(data.get('price') or 0)
+    except (TypeError, ValueError):
+        return None, 'price тоон утга байх ёстой.'
+
+    return {
+        'name': name,
+        'course_type': course_type,
+        'course_number': course_number,
+        'start_date': start_date,
+        'end_date': end_date,
+        'time': (data.get('time') or '').strip(),
+        'price': price,
+        'description': data.get('description'),
+        'duration_days': duration_days,
+        'is_recurring': bool(data.get('is_recurring')),
+    }, None
+
+
 @app.route('/admin/courses', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -1462,35 +1665,25 @@ def courses():
         action = data.get('action')
 
         if action == 'add':
-            end_raw = data.get('end_date')
-            course = Course(
-                name=data.get('name'),
-                course_type=data.get('course_type'),
-                start_date=datetime.fromisoformat(data.get('start_date')),
-                end_date=datetime.fromisoformat(end_raw) if end_raw else None,
-                time=data.get('time'),
-                price=float(data.get('price')),
-                description=data.get('description'),
-                is_recurring=bool(data.get('is_recurring')),
-            )
+            fields, err = _parse_course_payload(data)
+            if err:
+                return jsonify({'success': False, 'error': err}), 400
+            course = Course(**fields)
             db.session.add(course)
             db.session.commit()
             return jsonify({'success': True, 'id': course.id})
 
         elif action == 'edit':
             course = Course.query.get(data.get('id'))
-            if course:
-                end_raw = data.get('end_date')
-                course.name = data.get('name')
-                course.course_type = data.get('course_type')
-                course.start_date = datetime.fromisoformat(data.get('start_date'))
-                course.end_date = datetime.fromisoformat(end_raw) if end_raw else None
-                course.time = data.get('time')
-                course.price = float(data.get('price'))
-                course.description = data.get('description')
-                course.is_recurring = bool(data.get('is_recurring'))
-                db.session.commit()
-                return jsonify({'success': True})
+            if not course:
+                return jsonify({'success': False, 'error': 'Анги олдсонгүй.'}), 404
+            fields, err = _parse_course_payload(data, existing=course)
+            if err:
+                return jsonify({'success': False, 'error': err}), 400
+            for key, value in fields.items():
+                setattr(course, key, value)
+            db.session.commit()
+            return jsonify({'success': True})
 
         elif action == 'toggle':
             course = Course.query.get(data.get('id'))
@@ -1508,8 +1701,13 @@ def courses():
                 return jsonify({'success': True})
 
         elif action == 'refresh_dates':
-            updated = advance_recurring_courses()
-            return jsonify({'success': True, 'updated': updated})
+            advanced = advance_recurring_courses()
+            archived = archive_past_courses()
+            return jsonify({
+                'success': True,
+                'updated': advanced,
+                'archived': archived,
+            })
 
     courses = Course.query.all()
     return render_template('courses.html', courses=courses)
@@ -1936,6 +2134,175 @@ def training():
     )
 
 
+# ===================== CONSISTENCY LINTER =====================
+
+# Heuristic patterns. Loose on purpose — false positives are fine because
+# admins eyeball the report; false negatives (missed drift) are the actual
+# cost we're trying to reduce. Tighten later if the noise gets annoying.
+_PRICE_RE = re.compile(r'(\d{1,3}(?:[, ]\d{3})+|\d{4,})\s*₮')
+_PHONE_RE = re.compile(r'\b\d{4}[\s-]?\d{4}\b')
+_URL_RE = re.compile(r'https?://[^\s)"\'<>]+')
+_PRICE_THRESHOLD = 1000  # ignore tiny numbers like "100% Online — 100"
+
+
+def _normalize_phone(s):
+    return re.sub(r'[\s-]', '', s)
+
+
+def _normalize_int(s):
+    return int(re.sub(r'[^\d]', '', s))
+
+
+def lint_training_data():
+    """Cross-reference unstructured prose (FAQ answers, persona, training
+    intro, snippets) against the structured catalogs (Course, BusinessLine).
+
+    Flags prices/phones/URLs that show up in prose but don't match any
+    structured field — usually a sign the prose got out of sync with the
+    catalog. Returns a list of findings ordered worst-first."""
+    findings = []
+
+    # Expected sets pulled from structured rows.
+    course_prices = {int(c.price) for c in Course.query.all() if c.price}
+    biz_phones = set()
+    biz_urls = set()
+    biz_text_prices = set()  # numbers admins explicitly entered in biz line desc
+    for b in BusinessLine.query.all():
+        for field in (b.contact_info or '', b.signup_phone or ''):
+            for m in _PHONE_RE.finditer(field):
+                biz_phones.add(_normalize_phone(m.group()))
+        if b.signup_form_url:
+            biz_urls.add(b.signup_form_url.strip())
+        if b.description:
+            for m in _PRICE_RE.finditer(b.description):
+                try:
+                    biz_text_prices.add(_normalize_int(m.group(1)))
+                except ValueError:
+                    pass
+
+    expected_prices = course_prices | biz_text_prices
+
+    # Unstructured sources to scan.
+    sources = []
+    for faq in FAQ.query.all():
+        sources.append(('FAQ', faq.id, faq.question or '', faq.answer or ''))
+    sources.append(('Persona', 0, 'bot_persona', get_bot_persona()))
+    sources.append(('Training', 0, 'training_content', get_training_content()))
+    for s in TrainingSnippet.query.filter_by(is_active=True).all():
+        sources.append(('Snippet', s.id, s.title or '', s.body or ''))
+
+    for kind, sid, label, text in sources:
+        if not text:
+            continue
+        # Price drift
+        for m in _PRICE_RE.finditer(text):
+            try:
+                value = _normalize_int(m.group(1))
+            except ValueError:
+                continue
+            if value < _PRICE_THRESHOLD:
+                continue
+            if value not in expected_prices:
+                findings.append({
+                    'severity': 'warning',
+                    'kind': 'price_drift',
+                    'source_kind': kind,
+                    'source_id': sid,
+                    'label': label[:80],
+                    'detail': (
+                        f'"{m.group()}" гэсэн үнэ ангийн каталог болон '
+                        'үйлчилгээний тайлбарт олдсонгүй.'
+                    ),
+                })
+        # Phone drift
+        for m in _PHONE_RE.finditer(text):
+            ph_norm = _normalize_phone(m.group())
+            if ph_norm not in biz_phones:
+                findings.append({
+                    'severity': 'warning',
+                    'kind': 'phone_drift',
+                    'source_kind': kind,
+                    'source_id': sid,
+                    'label': label[:80],
+                    'detail': (
+                        f'"{m.group()}" дугаар үйлчилгээний contact_info / '
+                        'signup_phone-д бүртгэлтэй биш.'
+                    ),
+                })
+        # URL drift (mostly catches stray Google Form URLs left in prose)
+        for m in _URL_RE.finditer(text):
+            url = m.group().rstrip('.,);')
+            if url not in biz_urls:
+                findings.append({
+                    'severity': 'info',
+                    'kind': 'url_drift',
+                    'source_kind': kind,
+                    'source_id': sid,
+                    'label': label[:80],
+                    'detail': (
+                        f'{url} линк үйлчилгээний signup_form_url-д бүртгэлтэй биш.'
+                    ),
+                })
+
+    # Course-level cross-checks.
+    today = datetime.utcnow().date()
+    for c in Course.query.filter_by(is_active=True).all():
+        # Past-date active non-recurring non-self-paced.
+        if c.course_type != SELF_PACED_COURSE_TYPE and not c.is_recurring:
+            ref = c.end_date or c.start_date
+            if ref and ref.date() < today:
+                findings.append({
+                    'severity': 'error',
+                    'kind': 'stale_course',
+                    'source_kind': 'Course',
+                    'source_id': c.id,
+                    'label': c.name[:80],
+                    'detail': (
+                        f'Идэвхтэй боловч огноо ({ref.strftime("%Y-%m-%d")}) өнгөрсөн. '
+                        '"Огноо шинэчлэх / Архивлах" товчийг дарна уу.'
+                    ),
+                })
+        # Self-paced rows that still carry a stale start_date.
+        if c.course_type == SELF_PACED_COURSE_TYPE and (c.start_date or c.end_date):
+            findings.append({
+                'severity': 'warning',
+                'kind': 'self_paced_has_dates',
+                'source_kind': 'Course',
+                'source_id': c.id,
+                'label': c.name[:80],
+                'detail': '100% Online анги нь огноотой байх ёсгүй. Засаж дахин хадгална уу.',
+            })
+
+    severity_order = {'error': 0, 'warning': 1, 'info': 2}
+    findings.sort(key=lambda f: (severity_order.get(f['severity'], 9),
+                                  f['source_kind'], f['source_id']))
+    return findings
+
+
+@app.route('/admin/training/lint')
+@login_required
+@admin_required
+def training_lint():
+    """Run the heuristic consistency check and return findings."""
+    return jsonify({'findings': lint_training_data()})
+
+
+@app.route('/admin/training/preview')
+@login_required
+@admin_required
+def training_preview():
+    """Return the fully-assembled system prompt the AI sees right now.
+    Lets admins spot bad data (duplicate courses, contradictory FAQs,
+    stale snippets) without having to ping the Messenger bot for real."""
+    return jsonify({
+        'prompt': build_system_prompt(
+            session_state='new',
+            funnel_stage='curious',
+            user_first_name='',
+        ),
+    })
+
+
 # ===================== TRAINING SNIPPETS =====================
 
 @app.route('/admin/training/snippets', methods=['POST'])
@@ -2079,6 +2446,26 @@ def business_lines():
             line.action = 'answer' if data.get('line_action') == 'answer' else 'refer'
             line.contact_info = (data.get('contact_info') or '').strip() or None
             line.status_note = (data.get('status_note') or '').strip() or None
+            line.address = (data.get('address') or '').strip() or None
+            line.signup_form_url = (data.get('signup_form_url') or '').strip() or None
+            line.signup_phone = (data.get('signup_phone') or '').strip() or None
+
+            def _opt_int(field):
+                raw = data.get(field)
+                if raw in (None, '', 'null'):
+                    return None
+                try:
+                    return int(raw)
+                except (TypeError, ValueError):
+                    return 'invalid'
+
+            for field in ('established_year', 'num_products_or_services', 'total_clients_or_users'):
+                value = _opt_int(field)
+                if value == 'invalid':
+                    db.session.rollback()
+                    return jsonify({'success': False, 'error': f'{field} бүхэл тоо байх ёстой.'}), 400
+                setattr(line, field, value)
+
             if not line.name:
                 db.session.rollback()
                 return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
@@ -2691,6 +3078,36 @@ def seed_handoff_keywords():
         db.session.add(HandoffKeyword(keyword=kw.lower(), keyword_type='frustration', is_active=True))
     db.session.commit()
     print(f"Seeded {len(_DEFAULT_HANDOFF_KEYWORDS_EXPLICIT) + len(_DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION)} default handoff keywords.")
+
+
+def archive_past_courses():
+    """Flip non-recurring, non-self-paced active Courses whose end_date (or
+    start_date when no end is set) has already passed to is_active=False.
+
+    Run from the admin "Refresh dates" button so a one-click pass keeps the
+    bot from quoting last month's classroom session as if it were upcoming.
+    Returns how many courses were flipped."""
+    now = datetime.utcnow()
+    archived = 0
+    candidates = Course.query.filter_by(is_active=True, is_recurring=False).all()
+    for course in candidates:
+        if course.course_type == SELF_PACED_COURSE_TYPE:
+            continue
+        reference = course.end_date or course.start_date
+        if not reference:
+            continue
+        if reference < now:
+            course.is_active = False
+            if not course.status_note:
+                course.status_note = (
+                    f"Автомат архивлагдсан ({reference.strftime('%Y-%m-%d')}-ны "
+                    "огноо өнгөрсний дараа). Шинээр нээх бол огноог шинэчилнэ үү."
+                )
+            archived += 1
+    if archived:
+        db.session.commit()
+        print(f"Archived {archived} past course(s).")
+    return archived
 
 
 def advance_recurring_courses():

@@ -37,7 +37,19 @@
                 <tbody>
                     {% for b in lines %}
                     <tr data-line-id="{{ b.id }}"
-                        data-line='{{ {"id": b.id, "name": b.name, "description": b.description or "", "action": b.action, "contact_info": b.contact_info or ""} | tojson | e }}'
+                        data-line='{{ {
+                            "id": b.id,
+                            "name": b.name,
+                            "description": b.description or "",
+                            "action": b.action,
+                            "contact_info": b.contact_info or "",
+                            "address": b.address or "",
+                            "signup_form_url": b.signup_form_url or "",
+                            "signup_phone": b.signup_phone or "",
+                            "established_year": b.established_year,
+                            "num_products_or_services": b.num_products_or_services,
+                            "total_clients_or_users": b.total_clients_or_users
+                        } | tojson | e }}'
                         data-active="{{ '1' if b.is_active else '0' }}"
                         data-status-note="{{ (b.status_note or '') | e }}">
                         <td><strong>{{ b.name }}</strong></td>
@@ -151,6 +163,46 @@
                                    placeholder="Жишээ: Магик Финанс баг, 7700-9999">
                         </div>
                     </div>
+
+                    <hr>
+                    <p class="text-muted small mb-3">
+                        Бот эдгээр талбарыг харж тухайн үйлчилгээний дэлгэрэнгүй (хаяг, бүртгэлийн суваг,
+                        статистик) асуултанд шууд хариулна. Хоосон үлдээвэл бот тэр талбарыг дурдахгүй.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label" for="lineAddress">Хаяг</label>
+                        <input type="text" class="form-control" id="lineAddress"
+                               placeholder="Жишээ: БЗД 13-р хороолол, UB Tower Plus, 5 давхар, 509 тоот">
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label" for="lineSignupPhone">Бүртгэлийн утас</label>
+                            <input type="text" class="form-control" id="lineSignupPhone"
+                                   placeholder="Жишээ: 8860-0001">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label" for="lineSignupFormUrl">Бүртгэлийн линк</label>
+                            <input type="url" class="form-control" id="lineSignupFormUrl"
+                                   placeholder="https://...">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label" for="lineEstablishedYear">Үүсгэн байгуулагдсан он</label>
+                            <input type="number" class="form-control" id="lineEstablishedYear"
+                                   min="1900" max="2100" placeholder="2007">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label" for="lineNumProducts">Бүтээгдэхүүн / үйлчилгээний тоо</label>
+                            <input type="number" class="form-control" id="lineNumProducts"
+                                   min="0" placeholder="Жишээ: 90">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label" for="lineTotalClients">Нийт харилцагч / хэрэглэгч</label>
+                            <input type="number" class="form-control" id="lineTotalClients"
+                                   min="0" placeholder="Жишээ: 18000">
+                        </div>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -187,6 +239,12 @@ document.getElementById('saveLineBtn').addEventListener('click', () => {
         description: document.getElementById('lineDescription').value,
         line_action: document.getElementById('lineAction').value,
         contact_info: document.getElementById('lineContact').value,
+        address: document.getElementById('lineAddress').value,
+        signup_phone: document.getElementById('lineSignupPhone').value,
+        signup_form_url: document.getElementById('lineSignupFormUrl').value,
+        established_year: document.getElementById('lineEstablishedYear').value || null,
+        num_products_or_services: document.getElementById('lineNumProducts').value || null,
+        total_clients_or_users: document.getElementById('lineTotalClients').value || null,
     };
     postLine(payload).then(r => {
         if (r.success) location.reload();
@@ -203,6 +261,12 @@ document.querySelectorAll('.edit-line').forEach(btn => {
         document.getElementById('lineDescription').value = data.description;
         document.getElementById('lineAction').value = data.action;
         document.getElementById('lineContact').value = data.contact_info;
+        document.getElementById('lineAddress').value = data.address || '';
+        document.getElementById('lineSignupPhone').value = data.signup_phone || '';
+        document.getElementById('lineSignupFormUrl').value = data.signup_form_url || '';
+        document.getElementById('lineEstablishedYear').value = data.established_year || '';
+        document.getElementById('lineNumProducts').value = data.num_products_or_services || '';
+        document.getElementById('lineTotalClients').value = data.total_clients_or_users || '';
         document.getElementById('lineModalTitle').textContent = 'Үйлчилгээ засах';
         new bootstrap.Modal(document.getElementById('lineModal')).show();
     });
