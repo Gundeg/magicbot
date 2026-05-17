@@ -133,29 +133,35 @@ def _run_pending_migrations():
 
     Future schema changes go through Alembic (`flask db upgrade`); this
     function is the one-time bootstrap to get DBs onto the Alembic chain.
+
+    Fails soft: any error is logged but does NOT propagate. The reasoning
+    is that a crashloop on prod is strictly worse than a schema-mismatch
+    that the operator can debug from a running admin panel. Errors here
+    will show up clearly in `render logs` so the team can intervene.
     """
-    import sqlite3
     db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
     if not db_uri.startswith('sqlite:'):
-        # Postgres prod DBs would need a different runner; leave alone for
-        # now and let the operator apply Alembic migrations manually.
+        print('Phase 1 auto-bootstrap: non-sqlite DB URI, skipping (apply migrations manually).')
         return
-    # Resolve sqlite path. Flask-SQLAlchemy uses the instance folder by
-    # default for relative paths, so prefer the engine's actual file.
-    db_path = str(db.engine.url.database)
+    try:
+        db_path = str(db.engine.url.database)
+    except Exception as e:
+        print(f'!!! Phase 1 auto-bootstrap: could not resolve DB path ({e!s}); skipping.')
+        return
     if not db_path or not os.path.exists(db_path):
+        print(f'Phase 1 auto-bootstrap: DB not found at {db_path!r}, skipping (fresh install).')
         return
     try:
         from scripts.apply_phase_1_migration import apply_migration
         apply_migration(db_path)
-    except sqlite3.OperationalError as e:
-        # Most likely "table X already exists" on a partially-migrated DB
-        # that pre-dated this auto-bootstrap. Log loudly and continue —
-        # the next admin action will surface any real schema mismatch.
-        print(f'!!! Phase 1 auto-bootstrap raised {e!s}; continuing.')
     except Exception as e:
-        print(f'!!! Phase 1 auto-bootstrap failed unexpectedly: {e!s}')
-        raise
+        # Last-resort safety net — crashing init_db means 502 for every
+        # request. Log the traceback and keep going; the schema may be
+        # broken but admin pages will at least render so the operator
+        # can read the error and rerun the migration manually.
+        import traceback
+        print(f'!!! Phase 1 auto-bootstrap raised {type(e).__name__}: {e!s}')
+        traceback.print_exc()
 
 
 def init_db():
