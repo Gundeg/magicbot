@@ -123,6 +123,41 @@ import routes  # noqa: E402,F401
 MIN_ADMIN_PASSWORD_LENGTH = 12
 
 
+def _run_pending_migrations():
+    """Apply the Phase 1 admin-IA-reorg migration on first boot.
+
+    Render auto-deploys from master, so the first boot after the Phase 1
+    commit lands on a prod DB still in pre-Phase-1 shape. Rather than make
+    operators SSH in and run a script, this runs the same migration logic
+    automatically. The runner is idempotent — a second boot is a no-op.
+
+    Future schema changes go through Alembic (`flask db upgrade`); this
+    function is the one-time bootstrap to get DBs onto the Alembic chain.
+    """
+    import sqlite3
+    db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if not db_uri.startswith('sqlite:'):
+        # Postgres prod DBs would need a different runner; leave alone for
+        # now and let the operator apply Alembic migrations manually.
+        return
+    # Resolve sqlite path. Flask-SQLAlchemy uses the instance folder by
+    # default for relative paths, so prefer the engine's actual file.
+    db_path = str(db.engine.url.database)
+    if not db_path or not os.path.exists(db_path):
+        return
+    try:
+        from scripts.apply_phase_1_migration import apply_migration
+        apply_migration(db_path)
+    except sqlite3.OperationalError as e:
+        # Most likely "table X already exists" on a partially-migrated DB
+        # that pre-dated this auto-bootstrap. Log loudly and continue —
+        # the next admin action will surface any real schema mismatch.
+        print(f'!!! Phase 1 auto-bootstrap raised {e!s}; continuing.')
+    except Exception as e:
+        print(f'!!! Phase 1 auto-bootstrap failed unexpectedly: {e!s}')
+        raise
+
+
 def init_db():
     """Initialize database tables, seed admin user + default Courses/FAQs.
 
@@ -137,6 +172,7 @@ def init_db():
     with app.app_context():
         db.create_all()
         ensure_schema()
+        _run_pending_migrations()
         seed_courses_and_faqs()
         seed_handoff_keywords()
         seed_products()
