@@ -836,10 +836,41 @@ def _format_courses_canonical():
     return active_text, "\n".join(paused_or_stale)
 
 
+def _format_current_time_block():
+    """Render a 'CURRENT TIME' block for the system prompt so the LLM can
+    apply time-of-day rules in the persona (greetings, off-hours hints,
+    "what time is it?" answers) against a real value instead of guessing.
+
+    Server runs in UTC; Mongolia is UTC+8 with no DST, so we shift by 8.
+    The block also names which bucket the persona rules apply to so the
+    model doesn't have to map the hour itself."""
+    now_utc = datetime.utcnow()
+    ub_hour = (now_utc.hour + 8) % 24
+    ub_minute = now_utc.minute
+    days_mn = ('Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба', 'Ням')
+    weekday_mn = days_mn[now_utc.weekday()]
+    if 6 <= ub_hour < 12:
+        bucket = 'өглөө (06:00-12:00)'
+    elif 12 <= ub_hour < 17:
+        bucket = 'өдөр (12:00-17:00)'
+    elif 17 <= ub_hour < 23:
+        bucket = 'орой (17:00-23:00)'
+    else:
+        bucket = 'шөнө (23:00-06:00)'
+    return (
+        f"ОДООГИЙН ЦАГ (Улаанбаатарын цаг, UTC+8):\n"
+        f"  {weekday_mn} гариг, {ub_hour:02d}:{ub_minute:02d}\n"
+        f"  Цагийн ангилал: {bucket}\n"
+        f"  Энэ цагт тохирох мэндчилгээг персонал дахь дүрмийн дагуу сонгоно. "
+        f"Хэрэв хэрэглэгч 'одоо хэдэн цаг вэ?' гэж асуувал дээрх цагийг ашиглан хариулна.\n"
+    )
+
+
 def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name=''):
     """Build system prompt with training, FAQ, session-state and funnel context."""
     training = get_training_content()
     persona = get_bot_persona()
+    current_time_block = _format_current_time_block()
     faqs = FAQ.query.all()
     faq_text = "\n".join([f"Q: {faq.question}\nA: {faq.answer}" for faq in faqs])
 
@@ -910,6 +941,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
 
     system_prompt = f"""{persona}
 
+{current_time_block}
 ==========================
 ИДЭВХТЭЙ АНГИУДЫН АЛБАН ЁСНЫ ЖАГСААЛТ (CANONICAL — энэ жагсаалтаас л үнэн зөв):
 {courses_text}
