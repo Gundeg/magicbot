@@ -73,8 +73,25 @@ _DEFAULT_PERSONA = (
 )
 BOT_PERSONA = os.environ.get('BOT_PERSONA', '').strip() or _DEFAULT_PERSONA
 
-RATE_LIMIT_MAX = int(os.environ.get('RATE_LIMIT_MAX', '5'))
-RATE_LIMIT_WINDOW = timedelta(seconds=int(os.environ.get('RATE_LIMIT_WINDOW_SECONDS', '60')))
+# Parse defensively: an empty / non-numeric env value falls back to the
+# documented default. A value of 0 means "disable rate limiting" (NOT "deny
+# every message" — that was a real-world misconfig that bricked the bot).
+def _safe_int_env(name, default):
+    raw = (os.environ.get(name, '') or '').strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"WARNING: {name}={raw!r} is not an integer; using default {default}.")
+        return default
+
+
+RATE_LIMIT_MAX = _safe_int_env('RATE_LIMIT_MAX', 5)
+RATE_LIMIT_WINDOW = timedelta(seconds=_safe_int_env('RATE_LIMIT_WINDOW_SECONDS', 60))
+print(
+    f"Rate limit: {'DISABLED' if RATE_LIMIT_MAX <= 0 else f'{RATE_LIMIT_MAX} msg / {RATE_LIMIT_WINDOW.total_seconds():.0f}s per sender'}"
+)
 
 RATE_LIMIT_REPLY = (
     "Та маш олон мессеж бичиж байна. 1 минутын дараа дахин оролдоорой. 🙏"
@@ -112,7 +129,21 @@ _rate_state_lock = Lock()
 
 
 def check_rate_limit(sender_id):
-    """Return True if sender is within the limit; record the hit. False if over."""
+    """Return True if sender is within the limit; record the hit. False if over.
+
+    RATE_LIMIT_MAX <= 0 disables rate limiting entirely. The previous
+    implementation treated 0 as "block every message" — a real prod incident
+    where the bot replied to every first message with the throttle text.
+
+    When the limit fires, logs sender_id + current deque shape so a Render
+    log scan can distinguish:
+      - real abuse                  (one sender_id, many timestamps, all recent)
+      - FB webhook retries          (one sender_id, several timestamps within
+                                     a few seconds of each other)
+      - state contamination         (a sender_id we wouldn't expect to see)
+    """
+    if RATE_LIMIT_MAX <= 0:
+        return True
     now = datetime.utcnow()
     cutoff = now - RATE_LIMIT_WINDOW
     with _rate_state_lock:
@@ -120,6 +151,16 @@ def check_rate_limit(sender_id):
         while dq and dq[0] < cutoff:
             dq.popleft()
         if len(dq) >= RATE_LIMIT_MAX:
+            # Diagnostic: emit deque contents so we can tell webhook retries
+            # apart from genuine spam. Short deque, fine to dump inline.
+            ages = [
+                round((now - ts).total_seconds(), 1) for ts in dq
+            ]
+            print(
+                f"RATE LIMIT FIRED  sender_id={sender_id!r}  "
+                f"max={RATE_LIMIT_MAX}  window={RATE_LIMIT_WINDOW.total_seconds():.0f}s  "
+                f"hit_ages_sec={ages}  total_tracked_senders={len(_rate_state)}"
+            )
             return False
         dq.append(now)
         if len(_rate_state) > 5000:
