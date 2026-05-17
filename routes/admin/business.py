@@ -350,26 +350,29 @@ def _render_business_unit_detail(bu_id):
 
     # Pre-serialize each item's links so the JS modal can fill the link
     # editor without a second round-trip. Same shape across types.
-    # Defensive against missing `links` attribute / table.
+    # Defensive: wrap every access to item.links so a missing link table
+    # / wrong-shape link row never bubbles to the template. The template
+    # uses item._links_json + item._active_link_count exclusively (NOT
+    # item.links) so SQLAlchemy never lazy-loads the relationship here.
     for item in items:
         try:
-            links_seq = item.links or []
+            links_seq = list(item.links or [])
         except Exception:
             links_seq = []
-        item._links_json = [
-            {
-                'description': l.description,
-                'url': l.url,
-                'note': l.note or '',
-                'is_active': bool(l.is_active),
-                'sort_order': l.sort_order,
-            }
-            for l in links_seq
-        ]
-        if not hasattr(item, 'links') or item.links is None:
-            # Make sure the template's `item.links | selectattr('is_active')`
-            # works even if the relationship couldn't load.
-            item.links = []
+        serialized = []
+        for l in links_seq:
+            try:
+                serialized.append({
+                    'description': getattr(l, 'description', '') or '',
+                    'url': getattr(l, 'url', '') or '',
+                    'note': getattr(l, 'note', '') or '',
+                    'is_active': bool(getattr(l, 'is_active', True)),
+                    'sort_order': getattr(l, 'sort_order', 0) or 0,
+                })
+            except Exception:
+                continue
+        item._links_json = serialized
+        item._active_link_count = sum(1 for s in serialized if s['is_active'])
 
     try:
         return render_template(

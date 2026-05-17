@@ -99,7 +99,7 @@ def apply_migration(db_path):
     conn.execute("PRAGMA foreign_keys = ON")
     cur = conn.cursor()
 
-    # --- preflight: check alembic_version ---
+    # --- preflight: check alembic_version, then sanity-check schema ---
     HEAD = '0003_chat_question_clusters'
     cur.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='alembic_version'"
@@ -108,9 +108,34 @@ def apply_migration(db_path):
         v_row = cur.execute("SELECT version_num FROM alembic_version").fetchone()
         current_version = v_row[0] if v_row else None
         if current_version == HEAD:
-            print(f'DB already at {HEAD}. Nothing to do.')
-            return 0
-        print(f'alembic_version present but at {current_version}; running pending migrations to {HEAD}.')
+            # Sanity check: the version row claims we're at HEAD, but if a
+            # prior run stamped the version while a step silently failed,
+            # the schema may be lying. Check a couple of canary columns
+            # that MUST exist if Phase 1 fully ran. If they don't, force a
+            # re-run so the migration is genuinely idempotent under
+            # partial-failure conditions.
+            cur.execute("PRAGMA table_info(product_link)")
+            pl_cols = {row[1] for row in cur.fetchall()}
+            cur.execute("PRAGMA table_info(business_line)")
+            bl_cols = {row[1] for row in cur.fetchall()}
+            schema_ok = (
+                'description' in pl_cols
+                and 'product_type' in bl_cols
+                and 'signup_form_url' not in bl_cols  # dropped in Phase 1
+            )
+            if schema_ok:
+                print(f'DB already at {HEAD} and schema matches. Nothing to do.')
+                return 0
+            print(
+                f'!!! DB stamped at {HEAD} but schema sanity check FAILED '
+                f'(product_link.description in pl_cols: '
+                f'{"description" in pl_cols}, '
+                f'business_line.product_type in bl_cols: '
+                f'{"product_type" in bl_cols}). '
+                f'Re-running migration to repair.'
+            )
+        else:
+            print(f'alembic_version present at {current_version}; running pending migrations to {HEAD}.')
     else:
         # Create alembic_version table and stamp at baseline.
         cur.execute(
@@ -170,26 +195,59 @@ def apply_migration(db_path):
     print('Created course_link and service_link tables (idempotent).')
 
     # --- 4. product_link: kind/label -> description, add note ---
+    # This step is split into idempotent sub-steps so a partial earlier
+    # failure self-heals on rerun. The sub-steps:
+    #   4a. Ensure description column exists (NULL-able first).
+    #   4b. Ensure note column exists.
+    #   4c. If kind/label exist, backfill description from them.
+    #   4d. If kind/label exist, rebuild table to drop them + make
+    #       description NOT NULL.
+    #   4e. If table is already in target shape (no kind/label,
+    #       description exists), make sure description has no NULL rows
+    #       (would block a future NOT NULL constraint).
     cur.execute("PRAGMA table_info(product_link)")
     pl_cols = {row[1] for row in cur.fetchall()}
-    if 'kind' in pl_cols or 'label' in pl_cols:
-        if 'description' not in pl_cols:
-            cur.execute("ALTER TABLE product_link ADD COLUMN description VARCHAR(200)")
-        if 'note' not in pl_cols:
-            cur.execute("ALTER TABLE product_link ADD COLUMN note TEXT")
-        cur.execute(
-            "UPDATE product_link SET description = "
-            "CASE "
-            "  WHEN kind IS NOT NULL AND kind != '' "
-            "       AND label IS NOT NULL AND label != '' "
-            "    THEN '[' || kind || '] ' || label "
-            "  WHEN label IS NOT NULL AND label != '' THEN label "
-            "  WHEN kind IS NOT NULL AND kind != '' THEN kind "
-            "  ELSE 'Link' "
-            "END "
-            "WHERE description IS NULL OR description = ''"
-        )
-        # Rebuild product_link without `kind` and `label`, with description NOT NULL.
+    print(f'Step 4: product_link cols before: {sorted(pl_cols)}')
+
+    if 'description' not in pl_cols:
+        cur.execute("ALTER TABLE product_link ADD COLUMN description VARCHAR(200)")
+        print('Step 4a: added product_link.description (nullable).')
+        pl_cols.add('description')
+    if 'note' not in pl_cols:
+        cur.execute("ALTER TABLE product_link ADD COLUMN note TEXT")
+        print('Step 4b: added product_link.note.')
+        pl_cols.add('note')
+
+    has_kind = 'kind' in pl_cols
+    has_label = 'label' in pl_cols
+
+    if has_kind or has_label:
+        # 4c: backfill description from kind/label for any row that doesn't
+        # already have one. Composes "[kind] label" / "label" / "kind" /
+        # falls back to a literal "Link" so the NOT NULL constraint passes.
+        if has_kind and has_label:
+            sql = ("UPDATE product_link SET description = "
+                   "CASE "
+                   "  WHEN kind IS NOT NULL AND kind != '' "
+                   "       AND label IS NOT NULL AND label != '' "
+                   "    THEN '[' || kind || '] ' || label "
+                   "  WHEN label IS NOT NULL AND label != '' THEN label "
+                   "  WHEN kind IS NOT NULL AND kind != '' THEN kind "
+                   "  ELSE 'Link' "
+                   "END "
+                   "WHERE description IS NULL OR description = ''")
+        elif has_label:
+            sql = ("UPDATE product_link SET description = "
+                   "COALESCE(NULLIF(label, ''), 'Link') "
+                   "WHERE description IS NULL OR description = ''")
+        else:  # has_kind only
+            sql = ("UPDATE product_link SET description = "
+                   "COALESCE(NULLIF(kind, ''), 'Link') "
+                   "WHERE description IS NULL OR description = ''")
+        cur.execute(sql)
+        print(f'Step 4c: backfilled product_link.description from kind/label.')
+
+        # 4d: rebuild table to drop kind+label and add NOT NULL constraint.
         _rebuild_table(
             cur,
             'product_link',
@@ -208,9 +266,15 @@ def apply_migration(db_path):
             ),
             'id, product_id, description, url, note, is_active, sort_order, created_at',
         )
-        print('Rebuilt product_link with description/note (dropped kind, label).')
+        print('Step 4d: rebuilt product_link (dropped kind, label, NOT NULL description).')
     else:
-        print('product_link already migrated (no kind/label columns).')
+        # 4e: kind/label are already gone. Ensure no NULL descriptions
+        # remain so the model's NOT NULL constraint is satisfied.
+        cur.execute(
+            "UPDATE product_link SET description = 'Link' "
+            "WHERE description IS NULL OR description = ''"
+        )
+        print('Step 4e: backfilled any NULL product_link.description rows to "Link".')
 
     # --- 5. migrate software -> product, drop software ---
     cur.execute(

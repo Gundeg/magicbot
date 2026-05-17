@@ -129,7 +129,9 @@
                 </thead>
                 <tbody>
                     {% for item in items %}
-                    {% set active_links = item.links | selectattr('is_active') | list %}
+                    {# active link count is precomputed on the route side so
+                       we never touch item.links (which lazy-loads and can
+                       crash if the link table is in an unexpected state). #}
                     <tr data-item-id="{{ item.id }}"
                         data-item='{{ ({
                             "id": item.id,
@@ -189,7 +191,7 @@
                             <td class="small">{{ item.vendor or '—' }}</td>
                             <td>{% if item.is_main_product %}<span class="badge bg-warning text-dark">★ Гол</span>{% else %}—{% endif %}</td>
                         {% endif %}
-                        <td><span class="badge bg-light text-dark border" title="Идэвхтэй холбоос">{{ active_links|length }}</span></td>
+                        <td><span class="badge bg-light text-dark border" title="Идэвхтэй холбоос">{{ item._active_link_count }}</span></td>
                         <td>
                             {% if item.is_active %}
                                 <span class="badge bg-success">Идэвхтэй</span>

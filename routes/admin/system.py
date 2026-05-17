@@ -21,6 +21,80 @@ MIN_ADMIN_PASSWORD_LENGTH = 12
 
 # ===================== SETTINGS =====================
 
+# ===================== MANUAL DB MIGRATION TRIGGER =====================
+# Lets a logged-in admin re-run the pending-migrations script on demand
+# and see its output inline. Useful when the auto-bootstrap on boot ran
+# into a partial failure and the operator wants to repair the schema
+# without redeploying. Returns plain text with the script's stdout so
+# the result is readable in the browser without a template.
+
+@app.route('/admin/api/run-migration', methods=['POST', 'GET'])
+@login_required
+@admin_required
+def run_migration_now():
+    import io
+    import sys
+    import os
+    from flask import Response
+
+    db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if not db_uri.startswith('sqlite:'):
+        return Response(
+            f"DB URI is not sqlite ({db_uri[:40]}...), this endpoint only supports SQLite.\n",
+            mimetype='text/plain; charset=utf-8',
+        )
+
+    try:
+        db_path = str(db.engine.url.database)
+    except Exception as e:
+        return Response(
+            f"Failed to resolve DB path: {e}\n",
+            status=500, mimetype='text/plain; charset=utf-8',
+        )
+
+    if not db_path or not os.path.exists(db_path):
+        return Response(
+            f"DB file not found at {db_path!r}\n",
+            status=500, mimetype='text/plain; charset=utf-8',
+        )
+
+    # Capture stdout from the migration script so the admin can see what
+    # ran (or what failed) without checking Render logs.
+    buf = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = buf
+    error_text = ''
+    try:
+        from scripts.apply_phase_1_migration import apply_migration
+        rc = apply_migration(db_path)
+    except Exception as e:
+        import traceback
+        rc = -1
+        error_text = (
+            f"\n\n!!! Migration raised an exception !!!\n"
+            f"{type(e).__name__}: {e}\n\n"
+            f"{traceback.format_exc()}"
+        )
+    finally:
+        sys.stdout = old_stdout
+
+    log_admin_action(
+        'system.run_migration', 'system', None, db_path,
+        detail=f'Migration script triggered manually (rc={rc})'
+    )
+    body = (
+        f"=== Manual migration run on {db_path} ===\n"
+        f"Return code: {rc}\n\n"
+        f"--- Script output ---\n"
+        f"{buf.getvalue()}"
+        f"{error_text}"
+        f"\n--- End ---\n"
+    )
+    return Response(body, mimetype='text/plain; charset=utf-8')
+
+
+# ===================== SETTINGS =====================
+
 @app.route('/admin/settings', methods=['GET', 'POST'])
 @login_required
 @admin_required
