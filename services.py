@@ -911,16 +911,27 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
         biz_section = "\nКОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ:\n"
         if answer_lines:
             biz_section += (
-                "Доорх үйлчилгээний талаар асуувал ТОВЧ хариулж болно "
-                "(сонирхол хадгалж, дэлгэрэнгүйг ажилтнаас лавлахыг санал болго):\n"
+                "Доорх үйлчилгээ — ТОВЧ хариулж болно. Хэрэглэгч асуухад "
+                "доорх тайлбараас 1-2 өгүүлбэр бичээд, дэлгэрэнгүй үнэ, "
+                "цагийн хувиараа ажилтнаас тодруулахыг санал болгоно:\n"
                 f"{answer_lines}\n"
             )
         if refer_lines:
             biz_section += (
-                "Доорх үйлчилгээний талаар асуувал өөрөө хариулахгүй, "
-                "\"Энэ чиглэлийг манай тусгай ажилтан хариуцдаг. Утасны "
-                "дугаараа үлдээгээрэй, бид удахгүй холбогдоно\" гэж "
-                "найрсагаар чиглүүл:\n"
+                "Доорх үйлчилгээний талаар хэрэглэгч асуувал ДАРААХ ДЭС "
+                "ДАРААЛАЛЫГ БАРИМТАЛНА:\n"
+                "  1) Доорх жагсаалтаас тухайн үйлчилгээний тайлбарыг "
+                "ашиглан 1-2 богино өгүүлбэрээр \"Тийм ээ, бид энэ "
+                "үйлчилгээг үзүүлдэг — ...\" гэж баталгаажуулна.\n"
+                "  2) \"Сонирхож байна уу? Дэлгэрэнгүйг танд илгээх "
+                "үү?\" гэж тодруулна.\n"
+                "  3) Хэрэглэгч сонирхож байгаагаа илэрхийлбэл "
+                "БҮРТГЭЛИЙН ЛИНК-ийг өгөөд \"Эсвэл утасны дугаараа "
+                "үлдээвэл манай ажилтан танд эргэж холбогдоно\" гэж "
+                "нэм. Энэ хоёрын аль нэгийг хэрэглэгчид сонгох "
+                "боломж өг — заавал утас лавлахгүй.\n"
+                "  4) Үнэ, тусгай нөхцөлийн дэлгэрэнгүй асуулт ирвэл "
+                "ажилтан хариулна гэж зөвлөнө.\n"
                 f"{refer_lines}\n"
             )
         if paused_services:
@@ -966,14 +977,17 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
 {session_rule}
 1. Хариултыг товч (3 өгүүлбэрээс ихгүй) бөгөөд тодорхой бичнэ. Урт жагсаалт оруулахаас зайлсхий.
 2. Сургалтын давуу талыг хэт зар сурталчилгаа маягтай бус, итгэлтэй найз шиг зөвлөнө.
-3. Хэрэглэгч бүртгүүлэх хүсэлтэй болсон тохиолдолд л БҮРТГЭЛИЙН ЛИНК-ийг хариултдаа бичнэ. Үе шат хүрээгүй үед линкийг бүү тулга. Утасны дугаараа үлдээх хүсэлтийг ч найрсагаар нэмж асуу.
+3. БҮРТГЭЛИЙН ЛИНК + УТАС ЗЭРЭГ САНАЛ: Хэрэглэгч ажилтантай холбогдох (утас лав), бүртгүүлэх, эсвэл үйлчилгээний дэлгэрэнгүй сонирхож байгаа аль ч тохиолдолд ХОЁР ХУВИЛБАРЫГ ЗЭРЭГ ӨГ: (а) БҮРТГЭЛИЙН ЛИНК (доорх блокт байгаа бол) (б) "эсвэл утасны дугаараа үлдээгээрэй, ажилтан тантай эргэж холбогдоно". Заавал хоёуланг нь дурдаж, хэрэглэгчийг сонгох боломжтой болго.
 4. Хэрэглэгч утасны дугаар бичсэн бол баярлал илэрхийлж, "Манай ажилтан удахгүй тантай холбогдоно" гэж мэдэгд.
-5. Шийдэх боломжгүй буюу мэдэхгүй асуудал тулгарвал "Энэ асуудлыг манай ажилтан тантай эргэж холбогдож тодруулна" гэж хэлэх.
+5. Шийдэх боломжгүй буюу мэдэхгүй асуудал тулгарвал "Энэ асуудлыг манай ажилтан тантай эргэж холбогдож тодруулна" гэж хэлээд Дүрэм 3-ын дагуу хоёр сонголтыг өг.
 6. Эмодзи цөөн (1-2) хэрэглэж, илүү гар бичмэл маяг бүү аватарла.
 7. Өгүүлбэрүүдийн эхлэлийг сольж бай, "Сургалт..." гэх мэт ижил үгээр дандаа бүү эхэл.
 8. Сургалтаас өөр чиглэлийн (компанийн бусад үйлчилгээ) асуултанд дээрх "КОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ" хэсгийн дүрмийн дагуу хариулна. Жагсаалтад байхгүй чиглэл бол "Тантай ажилтан холбогдох уу?" гэж асууж дугаар лав.
 9. БҮТЭЭГДЭХҮҮНИЙ ДҮРЭМ: Бот бүтээгдэхүүн (Magic Finance, Microsoft license, Kaspersky г.м.)-ийн үнэ, санал хэлэхгүй. Худалдан авах, дэмжлэг (ticket), гарын авлага (manual), community, татах (download) гэх мэт асуулт ирэхэд тухайн бүтээгдэхүүний "Холбоосууд" жагсаалтаас хэрэглэгчийн санаатай таарах нэгийг сонгож, тэр линкийг өгөөд "манай ажилтан тантай холбогдож үнэ, нөхцөл нь дэлгэрэнгүй хэлэлцэнэ" гэж нэм. Жагсаалтад тохирох холбоос байхгүй бол үнэ зохиохгүйгээр ажилтантай холбогдох санал тавь.
-10. ҮЙЛЧИЛГЭЭГ ҮГҮЙСГЭХГҮЙ ДҮРЭМ (ХАМГИЙН ЧУХАЛ): Хэрэглэгч санаатай үйлчилгээний (жишээ нь "тайлан гаргах", "санхүүгийн зөвлөгөө", "аудит", "татварын тооцоо" гэх мэт) талаар асуувал, тэр үйлчилгээ дээрх жагсаалтад БАЙХГҮЙ ч "бид санал болгохгүй", "манай төвд байхгүй", "энэ үйлчилгээ байхгүй" гэж ХЭЗЭЭ Ч БҮҮ ХЭЛ. Manai company-н бүх үйлчилгээг бот мэддэггүй гэж үз. Үүний оронд: "Энэ талаар манай мэргэжлийн ажилтан танд дэлгэрэнгүй хариулна. Утасны дугаараа үлдээх үү?" гэж эелдгээр хэлж дугаар лав. Зөвхөн жагсаалтад тодорхой "ТҮР ЗОГССОН" гэж тэмдэглэгдсэн үйлчилгээний хувьд "одоогоор зогссон" гэж хэлж болно — бусад тохиолдолд бүх асуултыг ажилтанд чиглүүлнэ."""
+10. ҮЙЛЧИЛГЭЭГ ҮГҮЙСГЭХГҮЙ ДҮРЭМ:
+   (а) Хэрэглэгчийн асуусан үйлчилгээ дээрх "КОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ" жагсаалтад БАЙВАЛ — тэндхийн тайлбарыг ашиглан 1-2 өгүүлбэрээр баталгаажуул, дэс дарааллын дагуу үргэлжлүүл. ЗААВАЛ утас лавлахаас өмнө сонирхол тодруул.
+   (б) Хэрэглэгчийн асуусан үйлчилгээ жагсаалтад БАЙХГҮЙ бол "бид санал болгохгүй", "манай төвд байхгүй", "энэ үйлчилгээ байхгүй" гэж ХЭЗЭЭ Ч БҮҮ ХЭЛ. Үүний оронд: "Энэ талаар манай мэргэжлийн ажилтан танд дэлгэрэнгүй хариулна — утасны дугаараа үлдээх үү?" гэж эелдгээр хариул.
+   (в) "ТҮР ЗОГССОН" гэж тэмдэглэгдсэн үйлчилгээний хувьд "одоогоор зогссон" гэж шулуун хэл, дахин нээгдэх үед мэдэгдэж болохыг санал болго."""
     return system_prompt
 
 
@@ -1510,10 +1524,20 @@ def seed_products():
 
 
 _DEFAULT_HANDOFF_KEYWORDS_EXPLICIT = [
+    # Cyrillic
     'ажилтан', 'оператор', 'менежер', 'админтай', 'жинхэнэ хүн',
     'хүнтэй', 'хүн рүү', 'хүн руу', 'хүний хариу', 'хүнээр',
+    'хүнтэй яр', 'хүнтэй ярь', 'хүнтэй холб',
+    # Latin transliterations users commonly type from a phone without
+    # the Mongolian keyboard layout. Substrings work because the matcher
+    # does `if keyword in lower(message_text)`.
+    'azhiltan', 'azhilten', 'operator', 'menejer', 'admintai',
+    'hun-tei', 'huntei', 'hun ruu', 'hun-ruu', 'hunii hariu',
+    'huntei yar', 'huntei chatla', 'huntei chin chatla',
+    # English equivalents
     'live agent', 'real agent', 'real person', 'human agent',
-    'speak to human', 'talk to human', 'operator please',
+    'speak to human', 'talk to human', 'talk to a person',
+    'operator please', 'real human',
 ]
 _DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION = [
     'болохгүй байна', 'ойлгохгүй', 'ойлгомжгүй', 'муухай', 'үнэхээр муу',
@@ -1523,15 +1547,29 @@ _DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION = [
 
 
 def seed_handoff_keywords():
-    """Populate HandoffKeyword table from the default lists on first run. Idempotent."""
-    if HandoffKeyword.query.count() > 0:
-        return
+    """Ensure the default handoff keywords exist. Upsert by keyword text:
+    missing defaults are added with is_active=True; existing rows (whether
+    admin-customized or already-seeded) are left untouched. Lets us add
+    new defaults in code without resetting any admin tweaks on prod."""
+    inserted = 0
+    existing_keywords = {
+        k.lower() for k in db.session.query(HandoffKeyword.keyword).all()
+        for k in (k[0],)
+        if k
+    }
     for kw in _DEFAULT_HANDOFF_KEYWORDS_EXPLICIT:
-        db.session.add(HandoffKeyword(keyword=kw.lower(), keyword_type='explicit', is_active=True))
+        if kw.lower() not in existing_keywords:
+            db.session.add(HandoffKeyword(keyword=kw.lower(), keyword_type='explicit', is_active=True))
+            existing_keywords.add(kw.lower())
+            inserted += 1
     for kw in _DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION:
-        db.session.add(HandoffKeyword(keyword=kw.lower(), keyword_type='frustration', is_active=True))
-    db.session.commit()
-    print(f"Seeded {len(_DEFAULT_HANDOFF_KEYWORDS_EXPLICIT) + len(_DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION)} default handoff keywords.")
+        if kw.lower() not in existing_keywords:
+            db.session.add(HandoffKeyword(keyword=kw.lower(), keyword_type='frustration', is_active=True))
+            existing_keywords.add(kw.lower())
+            inserted += 1
+    if inserted:
+        db.session.commit()
+        print(f"Seeded {inserted} new default handoff keyword(s).")
 
 
 def seed_courses_and_faqs():
