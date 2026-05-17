@@ -1,0 +1,324 @@
+{% extends "base.html" %}
+
+{% block title %}Ажлын дараалал - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Ажлын дараалал (Inbox){% endblock %}
+
+{% block extra_css %}
+<style>
+    .inbox-group {
+        margin-bottom: 22px;
+    }
+    .inbox-group-head {
+        display: flex; align-items: center; gap: 10px;
+        margin-bottom: 8px;
+        font-size: 0.78rem; font-weight: 700;
+        letter-spacing: 0.06em; text-transform: uppercase;
+        color: #555;
+    }
+    .inbox-group-head .count-pill {
+        background: var(--brand);
+        color: white;
+        border-radius: 999px;
+        padding: 1px 9px;
+        font-size: 0.72rem;
+        font-weight: 600;
+    }
+    .inbox-group-head .count-pill.zero { background: #b8c5c5; }
+    .inbox-group-head .rule {
+        flex: 1; height: 1px; background: #e1e7e7;
+    }
+    .inbox-row {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 8px;
+        border-left: 4px solid transparent;
+    }
+    .inbox-row.warm    { border-left-color: #e65100; }
+    .inbox-row.urgent  { border-left-color: #dc3545; }
+    .inbox-row.muted   { border-left-color: #6c5ce7; }
+    .inbox-row .who {
+        flex: 0 0 180px;
+        min-width: 0;
+    }
+    .inbox-row .who strong {
+        display: block;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        font-size: 0.9rem;
+    }
+    .inbox-row .who .small {
+        color: #888; font-size: 0.72rem;
+    }
+    .inbox-row .what {
+        flex: 1; min-width: 0;
+        font-size: 0.85rem; color: #444;
+    }
+    .inbox-row .what .preview {
+        color: #666;
+        overflow: hidden; text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+    }
+    .inbox-row .when {
+        flex: 0 0 130px;
+        font-size: 0.75rem; color: #888;
+        text-align: right;
+    }
+    .inbox-row .actions {
+        flex: 0 0 auto;
+        display: flex; gap: 6px;
+    }
+    .empty-state {
+        background: white;
+        border-radius: 8px;
+        padding: 22px;
+        text-align: center;
+        color: #888;
+        font-size: 0.88rem;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .empty-state i {
+        font-size: 1.8rem;
+        opacity: 0.35;
+        display: block;
+        margin-bottom: 8px;
+    }
+    @media (max-width: 768px) {
+        .inbox-row { flex-wrap: wrap; }
+        .inbox-row .who { flex: 1 1 100%; }
+        .inbox-row .what { flex: 1 1 100%; }
+        .inbox-row .when { flex: 1 1 auto; text-align: left; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div id="inboxToastContainer" class="position-fixed bottom-0 end-0 p-3 toast-stack"></div>
+
+<div class="alert alert-light border d-flex gap-2 align-items-start py-2 mb-3 fs-85">
+    <i class="bi bi-inbox-fill mt-1 flex-shrink-0 text-brand"></i>
+    <div>
+        Энэ хуудас өнөөдөр <strong>таны хүн оролцох ёстой</strong> бүх зүйлийг нэг газар цуглуулна:
+        дугаар үлдээгээгүй ч сонирхолтой хэрэглэгчид, удаан хариу авч чадахгүй байгаа асуудлууд,
+        мөн handoff авсан явцтай яриа.
+    </div>
+</div>
+
+{# ── Hot prospects ───────────────────────────────────────────────── #}
+<div class="inbox-group">
+    <div class="inbox-group-head">
+        <i class="bi bi-fire text-warm"></i>
+        <span>Холбоо тогтоох харилцагч</span>
+        <span class="count-pill {{ 'zero' if not hot_prospects else '' }}">{{ hot_prospects|length }}</span>
+        <span class="rule"></span>
+    </div>
+    {% if hot_prospects %}
+        {% for u in hot_prospects %}
+        <div class="inbox-row warm" data-user-id="{{ u.id }}">
+            <div class="who">
+                <strong>{{ u.name or 'Unknown' }}</strong>
+                <span class="small">{{ u.funnel_stage or 'curious' }} · {{ u.conversation_topic or 'ангилаагүй' }}</span>
+            </div>
+            <div class="what">
+                <div class="preview">Үнэ/бүртгэлийн шатанд орсон ч утасны дугаар үлдээгээгүй.</div>
+            </div>
+            <div class="when">
+                Сүүлд: {{ u.updated_at.strftime('%m/%d %H:%M') }}
+            </div>
+            <div class="actions">
+                <button type="button" class="btn btn-sm btn-outline-primary contact-btn" data-id="{{ u.id }}" title="Холбогдсон гэж тэмдэглэх">
+                    <i class="bi bi-check2"></i> Холбогдсон
+                </button>
+                <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=u.id) }}" title="Яриаг бүхэлд нь үзэх">
+                    <i class="bi bi-eye"></i>
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <i class="bi bi-emoji-smile"></i>
+            Холбоо тогтоох харилцагч одоогоор алга. Шинэ халуун харилцагч гарангуут энд гарч ирнэ.
+        </div>
+    {% endif %}
+</div>
+
+{# ── Aging open issues ──────────────────────────────────────────── #}
+<div class="inbox-group">
+    <div class="inbox-group-head">
+        <i class="bi bi-hourglass-split text-danger"></i>
+        <span>{{ aging_hours }} цагаас илүү хариу аваагүй асуудлууд</span>
+        <span class="count-pill {{ 'zero' if not aging_issues else '' }}">{{ aging_issues|length }}</span>
+        <span class="rule"></span>
+    </div>
+    {% if aging_issues %}
+        {% for issue in aging_issues %}
+        {% set age_hours = ((now - issue.created_at).total_seconds() // 3600) | int %}
+        <div class="inbox-row urgent" data-issue-id="{{ issue.id }}">
+            <div class="who">
+                <strong>{{ issue.facebook_user.name or 'Unknown' }}</strong>
+                <span class="small">
+                    {% if issue.issue_type == 'unresolved_query' %}Шийдэгдээгүй
+                    {% elif issue.issue_type == 'complaint' %}Гомдол
+                    {% elif issue.issue_type == 'suggestion' %}Санал
+                    {% elif issue.issue_type == 'handoff' %}Handoff
+                    {% else %}{{ issue.issue_type }}{% endif %}
+                </span>
+            </div>
+            <div class="what">
+                <div class="preview">{{ issue.content[:160] }}</div>
+                {% if issue.notes %}
+                    <div class="text-muted small mt-1"><i class="bi bi-sticky"></i> {{ issue.notes[:80] }}</div>
+                {% endif %}
+            </div>
+            <div class="when">
+                {{ age_hours }} цаг өмнө<br>
+                <span class="text-muted">{{ issue.created_at.strftime('%m/%d %H:%M') }}</span>
+            </div>
+            <div class="actions">
+                <button type="button" class="btn btn-sm btn-outline-success resolve-btn" data-id="{{ issue.id }}" title="Шийдсэн гэж тэмдэглэх">
+                    <i class="bi bi-check2-circle"></i> Шийдэх
+                </button>
+                <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=issue.facebook_user.id) }}" title="Яриаг бүхэлд нь үзэх">
+                    <i class="bi bi-eye"></i>
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <i class="bi bi-check-circle"></i>
+            {{ aging_hours }} цагаас хуучин нээлттэй асуудал алга. Сайн ажиллаж байна.
+        </div>
+    {% endif %}
+</div>
+
+{# ── Muted bots ─────────────────────────────────────────────────── #}
+<div class="inbox-group">
+    <div class="inbox-group-head">
+        <i class="bi bi-volume-mute text-muted-purple"></i>
+        <span>Бот чимээгүй болгосон хэрэглэгчид (хүн орлоосон)</span>
+        <span class="count-pill {{ 'zero' if not muted_users else '' }}">{{ muted_users|length }}</span>
+        <span class="rule"></span>
+    </div>
+    {% if muted_users %}
+        {% for u in muted_users %}
+        {% set mins_left = ((u.bot_muted_until - now).total_seconds() / 60) | round(0, 'floor') | int %}
+        <div class="inbox-row muted" data-user-id="{{ u.id }}">
+            <div class="who">
+                <strong>{{ u.name or 'Unknown' }}</strong>
+                <span class="small">{{ u.phone or 'утасгүй' }}</span>
+            </div>
+            <div class="what">
+                <div class="preview">Бот хариулахаа зогсоосон. Хүн дамжуулах ёстой.</div>
+            </div>
+            <div class="when">
+                ~{{ mins_left }} мин үлдсэн<br>
+                <span class="text-muted">{{ u.bot_muted_until.strftime('%m/%d %H:%M') }}</span>
+            </div>
+            <div class="actions">
+                <button type="button" class="btn btn-sm btn-outline-success unmute-btn" data-id="{{ u.id }}" title="Ботыг асаах">
+                    <i class="bi bi-volume-up"></i> Bot асаах
+                </button>
+                <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=u.id) }}" title="Яриаг бүхэлд нь үзэх">
+                    <i class="bi bi-eye"></i>
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <i class="bi bi-robot"></i>
+            Чимээгүй болгосон бот алга. Бүх ярианд бот хариулж байна.
+        </div>
+    {% endif %}
+</div>
+
+<script>
+(function () {
+    const inboxUrl = '{{ url_for("inbox") }}';
+
+    function toast(msg, ok) {
+        const c = document.getElementById('inboxToastContainer');
+        const el = document.createElement('div');
+        el.className = 'toast align-items-center text-white border-0 show shadow mb-2';
+        el.style.background = ok ? 'var(--brand-dark)' : '#dc3545';
+        el.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">${msg}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Хаах"></button>
+            </div>`;
+        c.appendChild(el);
+        setTimeout(() => el.remove(), 4000);
+    }
+
+    function post(payload) {
+        return fetch(inboxUrl, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        }).then(r => r.json());
+    }
+
+    function fadeAndRemove(node) {
+        node.style.transition = 'opacity 0.3s, transform 0.3s';
+        node.style.opacity = '0';
+        node.style.transform = 'translateX(10px)';
+        setTimeout(() => node.remove(), 300);
+    }
+
+    document.querySelectorAll('.contact-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.disabled = true;
+            post({action: 'mark_contacted', user_id: btn.dataset.id}).then(r => {
+                if (r.success) {
+                    toast('Холбогдсон гэж тэмдэглэлээ.', true);
+                    fadeAndRemove(btn.closest('.inbox-row'));
+                } else {
+                    toast('Алдаа гарлаа.', false);
+                    btn.disabled = false;
+                }
+            });
+        });
+    });
+
+    document.querySelectorAll('.resolve-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.disabled = true;
+            post({action: 'resolve_issue', id: btn.dataset.id}).then(r => {
+                if (r.success) {
+                    toast('Асуудлыг шийдсэн гэж тэмдэглэлээ.', true);
+                    fadeAndRemove(btn.closest('.inbox-row'));
+                } else {
+                    toast('Алдаа гарлаа.', false);
+                    btn.disabled = false;
+                }
+            });
+        });
+    });
+
+    document.querySelectorAll('.unmute-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.disabled = true;
+            post({action: 'unmute', user_id: btn.dataset.id}).then(r => {
+                if (r.success) {
+                    toast('Ботыг асааллаа.', true);
+                    fadeAndRemove(btn.closest('.inbox-row'));
+                } else {
+                    toast('Алдаа гарлаа.', false);
+                    btn.disabled = false;
+                }
+            });
+        });
+    });
+})();
+</script>
+
+{% endblock %}

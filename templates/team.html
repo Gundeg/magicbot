@@ -8,7 +8,7 @@
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-people-fill"></i> Багш / Ажилтны жагсаалт</span>
-        <button class="btn btn-sm btn-light" id="addMemberBtn" data-bs-toggle="modal" data-bs-target="#memberModal">
+        <button type="button" class="btn btn-sm btn-light" id="addMemberBtn" data-bs-toggle="modal" data-bs-target="#memberModal">
             <i class="bi bi-plus-circle"></i> Гишүүн нэмэх
         </button>
     </div>
@@ -35,7 +35,7 @@
                         <td><strong>{{ m.name }}</strong></td>
                         <td>{{ m.role or "—" }}</td>
                         <td>{{ m.specialty or "—" }}</td>
-                        <td class="text-muted small" style="max-width: 320px;">
+                        <td class="text-muted small col-max-320">
                             {{ (m.bio or "")[:160] }}{% if m.bio and m.bio|length > 160 %}…{% endif %}
                         </td>
                         <td>
@@ -81,19 +81,19 @@
                 <form id="memberForm">
                     <input type="hidden" id="memberId" value="" title="memberId">
                     <div class="mb-3">
-                        <label class="form-label">Нэр <span class="text-danger">*</span></label>
+                        <label class="form-label" for="memberName">Нэр <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="memberName" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Албан тушаал</label>
+                        <label class="form-label" for="memberRole">Албан тушаал</label>
                         <input type="text" class="form-control" id="memberRole" placeholder="Жишээ: Ахлах багш, Хариуцагч, Зөвлөх">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Мэргэшил</label>
+                        <label class="form-label" for="memberSpecialty">Мэргэшил</label>
                         <input type="text" class="form-control" id="memberSpecialty" placeholder="Жишээ: Татварын тайлан, Magic Finance программ">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Тайлбар</label>
+                        <label class="form-label" for="memberBio">Тайлбар</label>
                         <textarea class="form-control" id="memberBio" rows="4"
                                   placeholder="Туршлага, амжилт, онцлог. Богино (1-2 өгүүлбэр) байх нь хамгийн сайн."></textarea>
                     </div>

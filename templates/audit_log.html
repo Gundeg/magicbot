@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block title %}Үйлдлийн түүх - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Үйлдлийн түүх (Audit log){% endblock %}
+
+{% block extra_css %}
+<style>
+    .audit-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+        padding: 12px 14px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        margin-bottom: 6px;
+    }
+    .audit-row .when {
+        flex: 0 0 130px;
+        font-size: 0.75rem;
+        color: #888;
+    }
+    .audit-row .when strong {
+        color: #444;
+        display: block;
+        font-size: 0.82rem;
+    }
+    .audit-row .what {
+        flex: 1;
+        min-width: 0;
+    }
+    .audit-row .what .action {
+        font-size: 0.88rem;
+        font-weight: 600;
+        color: #1a1a2e;
+    }
+    .audit-row .what .detail {
+        color: #555;
+        font-size: 0.82rem;
+        margin-top: 2px;
+    }
+    .audit-row .what .entity {
+        color: var(--brand);
+        font-weight: 600;
+    }
+    .audit-row .who {
+        flex: 0 0 130px;
+        text-align: right;
+        font-size: 0.78rem;
+        color: #666;
+    }
+    .audit-row .who i {
+        color: #999;
+    }
+    .action-pill {
+        display: inline-block;
+        padding: 1px 8px;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-right: 6px;
+    }
+    .action-pill.danger { background: #fdecea; color: #c0392b; }
+    .action-pill.warn   { background: #fff3e0; color: #e65100; }
+    .action-pill.info   { background: var(--brand-muted); color: var(--brand-dark); }
+    .action-pill.muted  { background: #eef2f4; color: #555; }
+    @media (max-width: 768px) {
+        .audit-row { flex-wrap: wrap; }
+        .audit-row .when, .audit-row .who { flex: 1 1 50%; text-align: left; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="alert alert-light border d-flex gap-2 align-items-start py-2 mb-3 fs-85">
+    <i class="bi bi-clock-history mt-1 flex-shrink-0 text-brand"></i>
+    <div>
+        Энэ хуудаст админуудын чухал үйлдлүүд цаг хугацааны дарааллаар бүртгэгдэнэ —
+        сургалт зогсоох, асуудал шийдэх, тохиргоо өөрчлөх, шинэ админ нэмэх гэх мэт.
+        Бүх админ нэвтэрсний дараа уншиж чадна; бичих нь автомат.
+    </div>
+</div>
+
+<div class="text-muted small mb-2">
+    Нийт {{ total }} бүртгэл. {{ offset + 1 }}–{{ offset + entries|length }} харагдаж байна.
+</div>
+
+{% if entries %}
+    {% for e in entries %}
+    {% set verb = e.action.split('.')[-1] %}
+    {% if verb in ('delete',) %}
+        {% set pill_class = 'danger' %}
+    {% elif verb in ('toggle', 'status_change', 'unmute', 'mark_contacted', 'reset_password', 'toggle_role') %}
+        {% set pill_class = 'warn' %}
+    {% elif verb in ('save', 'create', 'change_own_password') %}
+        {% set pill_class = 'info' %}
+    {% else %}
+        {% set pill_class = 'muted' %}
+    {% endif %}
+    <div class="audit-row">
+        <div class="when">
+            <strong>{{ e.created_at.strftime('%m-%d %H:%M') }}</strong>
+            <span class="text-muted">{{ e.created_at.strftime('%Y') }} UTC</span>
+        </div>
+        <div class="what">
+            <div class="action">
+                <span class="action-pill {{ pill_class }}">{{ e.action }}</span>
+                {% if e.entity_label %}<span class="entity">{{ e.entity_label }}</span>{% endif %}
+            </div>
+            {% if e.detail %}
+                <div class="detail">{{ e.detail }}</div>
+            {% endif %}
+        </div>
+        <div class="who">
+            <i class="bi bi-person-circle"></i>
+            {{ e.actor_username or '—' }}
+        </div>
+    </div>
+    {% endfor %}
+
+    <nav class="d-flex justify-content-between align-items-center mt-3">
+        <div>
+            {% if offset > 0 %}
+                <a class="btn btn-sm btn-light"
+                   href="{{ url_for('audit_log', offset=[offset - page_size, 0]|max) }}">
+                    <i class="bi bi-chevron-left"></i> Шинэ
+                </a>
+            {% endif %}
+        </div>
+        <div>
+            {% if has_more %}
+                <a class="btn btn-sm btn-light"
+                   href="{{ url_for('audit_log', offset=offset + page_size) }}">
+                    Хуучин <i class="bi bi-chevron-right"></i>
+                </a>
+            {% endif %}
+        </div>
+    </nav>
+{% else %}
+    <div class="card">
+        <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-clock-history empty-icon-block"></i>
+            Одоогоор бүртгэгдсэн үйлдэл алга. Сургалт зогсоох, асуудал шийдэх, тохиргоо солих
+            зэрэг үйлдэл хийгдсэний дараа энд гарч ирнэ.
+        </div>
+    </div>
+{% endif %}
+
+{% endblock %}

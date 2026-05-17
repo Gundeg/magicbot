@@ -58,13 +58,15 @@
                                     <button type="button"
                                             class="btn btn-sm btn-outline-secondary"
                                             data-bs-toggle="modal"
-                                            data-bs-target="#resetPwModal-{{ admin.id }}">
+                                            data-bs-target="#resetPwModal-{{ admin.id }}"
+                                            aria-label="{{ admin.username }} — нууц үг сэргээх">
                                         <i class="bi bi-key"></i>
                                     </button>
                                     <button type="button"
                                             class="btn btn-sm btn-outline-danger"
                                             data-bs-toggle="modal"
-                                            data-bs-target="#deleteModal-{{ admin.id }}">
+                                            data-bs-target="#deleteModal-{{ admin.id }}"
+                                            aria-label="{{ admin.username }} — устгах">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 {% else %}
@@ -87,16 +89,16 @@
                 <form method="POST" action="{{ url_for('create_admin') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
-                        <label class="form-label">Нэвтрэх нэр</label>
-                        <input type="text" name="username" class="form-control" required autocomplete="off">
+                        <label class="form-label" for="newAdminUsername">Нэвтрэх нэр</label>
+                        <input type="text" name="username" id="newAdminUsername" class="form-control" required autocomplete="off">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Имэйл</label>
-                        <input type="email" name="email" class="form-control" required autocomplete="off">
+                        <label class="form-label" for="newAdminEmail">Имэйл</label>
+                        <input type="email" name="email" id="newAdminEmail" class="form-control" required autocomplete="off">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Түр нууц үг</label>
-                        <input type="text" name="password" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
+                        <label class="form-label" for="newAdminPassword">Түр нууц үг</label>
+                        <input type="text" name="password" id="newAdminPassword" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
                         <div class="form-text">
                             Хамгийн багадаа {{ min_password_length }} тэмдэгт. Шинэ админд энэ нууц үгээ өгч, нэвтэрсний дараа өөрчлүүлнэ үү.
                         </div>
@@ -125,17 +127,17 @@
                 <form method="POST" action="{{ url_for('change_my_password') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
-                        <label class="form-label">Одоогийн нууц үг</label>
-                        <input type="password" name="current_password" class="form-control" required autocomplete="current-password">
+                        <label class="form-label" for="currentPassword">Одоогийн нууц үг</label>
+                        <input type="password" name="current_password" id="currentPassword" class="form-control" required autocomplete="current-password">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Шинэ нууц үг</label>
-                        <input type="password" name="new_password" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
+                        <label class="form-label" for="newPassword">Шинэ нууц үг</label>
+                        <input type="password" name="new_password" id="newPassword" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
                         <div class="form-text">Хамгийн багадаа {{ min_password_length }} тэмдэгт.</div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Шинэ нууц үг (давтан)</label>
-                        <input type="password" name="confirm_password" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
+                        <label class="form-label" for="confirmPassword">Шинэ нууц үг (давтан)</label>
+                        <input type="password" name="confirm_password" id="confirmPassword" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
                     </div>
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-check-circle"></i> Нууц үг солих
@@ -170,7 +172,7 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="modal-header">
                             <h5 class="modal-title">Админыг устгах уу?</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
                         </div>
                         <div class="modal-body">
                             <p><strong>{{ admin.username }}</strong> ({{ admin.email }}) хэрэглэгчийг бүрмөсөн устгах гэж байна.</p>
@@ -194,12 +196,12 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="modal-header">
                             <h5 class="modal-title">{{ admin.username }} - нууц үг сэргээх</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
                         </div>
                         <div class="modal-body">
                             <div class="mb-3">
-                                <label class="form-label">Шинэ нууц үг</label>
-                                <input type="text" name="new_password" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
+                                <label class="form-label" for="resetPw-{{ admin.id }}">Шинэ нууц үг</label>
+                                <input type="text" name="new_password" id="resetPw-{{ admin.id }}" class="form-control" required minlength="{{ min_password_length }}" autocomplete="new-password">
                                 <div class="form-text">
                                     Хамгийн багадаа {{ min_password_length }} тэмдэгт. Шинэ нууц үгийг хуулж аваад тухайн хэрэглэгчид дамжуулна уу.
                                 </div>

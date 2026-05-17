@@ -4,15 +4,25 @@
 
 {% block page_title %}Сургалтуудын удирдлага{% endblock %}
 
+{% block breadcrumb %}
+<div class="breadcrumb-bar">
+    <a href="{{ url_for('business_lines') }}"><i class="bi bi-diagram-3"></i> Бизнесийн нэгжүүд</a>
+    <i class="bi bi-chevron-right mx-1"></i>
+    <span class="text-dark fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i>Magic Choice</span>
+    <i class="bi bi-chevron-right mx-1"></i>
+    <span class="text-dark fw-semibold">Сургалтууд</span>
+</div>
+{% endblock %}
+
 {% block content %}
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-calendar-event"></i> Сургалтуудын жагсаалт</span>
         <div class="d-flex gap-2">
-            <button class="btn btn-sm btn-outline-light" id="refreshDatesBtn" title="Давтагдах сургалтуудын огноог шинэчлэх">
+            <button type="button" class="btn btn-sm btn-outline-light" id="refreshDatesBtn" title="Давтагдах сургалтуудын огноог шинэчлэх">
                 <i class="bi bi-arrow-clockwise"></i> Огноо шинэчлэх
             </button>
-            <button class="btn btn-sm btn-light" id="addCourseBtn" data-bs-toggle="modal" data-bs-target="#courseModal">
+            <button type="button" class="btn btn-sm btn-light" id="addCourseBtn" data-bs-toggle="modal" data-bs-target="#courseModal">
                 <i class="bi bi-plus-circle"></i> Сургалт нэмэх
             </button>
         </div>
@@ -70,17 +80,19 @@
                             {% endif %}
                         </td>
                         <td>
-                            <button class="btn btn-sm btn-warning edit-course" data-id="{{ course.id }}"
-                                    data-bs-toggle="modal" data-bs-target="#courseModal">
+                            <button type="button" class="btn btn-sm btn-warning edit-course" data-id="{{ course.id }}"
+                                    data-bs-toggle="modal" data-bs-target="#courseModal"
+                                    aria-label="Сургалт засах">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <button class="btn btn-sm {{ 'btn-outline-secondary' if course.is_active else 'btn-success' }} toggle-course"
+                            <button type="button" class="btn btn-sm {{ 'btn-outline-secondary' if course.is_active else 'btn-success' }} toggle-course"
                                     data-id="{{ course.id }}"
                                     data-active="{{ '1' if course.is_active else '0' }}"
                                     title="{{ 'Түр зогсоох' if course.is_active else 'Идэвхжүүлэх' }}">
                                 <i class="bi {{ 'bi-pause-circle' if course.is_active else 'bi-play-circle' }}"></i>
                             </button>
-                            <button class="btn btn-sm btn-danger delete-course" data-id="{{ course.id }}">
+                            <button type="button" class="btn btn-sm btn-danger delete-course" data-id="{{ course.id }}"
+                                    aria-label="Сургалт устгах">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </td>
@@ -98,11 +110,11 @@
 
 <!-- Add/Edit Course Modal -->
 <div class="modal fade" id="courseModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="courseModalTitle">Сургалт нэмэх</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
             </div>
             <div class="modal-body">
                 <form id="courseForm">
@@ -172,14 +184,14 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="toggleCourseTitle">Сургалтын төлөв өөрчлөх</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="toggleCourseId">
                 <p id="toggleCourseMsg"></p>
                 <div class="mb-3">
                     <label for="toggleCourseNote" class="form-label">
-                        Тэмдэглэл <small class="text-muted">(AI-д харагдана — яагаад зогсоосон, хэзээ нээгдэх гэх мэт)</small>
+                        Тэмдэглэл <small class="text-muted">(заавал биш — AI-д харагдана, яагаад зогсоосон гэх мэт)</small>
                     </label>
                     <input type="text" class="form-control" id="toggleCourseNote"
                            placeholder="Жишээ: Сурагч дүүрэн, дараагийн ээлж 6-р сарын 15-нд эхэлнэ">
@@ -290,14 +302,29 @@ document.getElementById('courseModal').addEventListener('hidden.bs.modal', funct
 
 document.querySelectorAll('.toggle-course').forEach(btn => {
     btn.addEventListener('click', function() {
-        const row = document.querySelector(`tr[data-course-id="${this.dataset.id}"]`);
-        document.getElementById('toggleCourseId').value = this.dataset.id;
-        document.getElementById('toggleCourseNote').value = row.dataset.statusNote || '';
+        const id = this.dataset.id;
         const isActive = this.dataset.active === '1';
-        document.getElementById('toggleCourseTitle').textContent = isActive ? 'Сургалт түр зогсоох' : 'Сургалт идэвхжүүлэх';
-        document.getElementById('toggleCourseMsg').textContent = isActive
-            ? 'Энэ сургалтыг түр зогсоох уу? AI бот хэрэглэгчид зогссон гэдгийг мэдэгдэнэ.'
-            : 'Энэ сургалтыг дахин идэвхжүүлэх үү?';
+        // Re-activating an inactive course is low-risk and has no story to tell —
+        // skip the modal and clear any stale pause-note in one click.
+        if (!isActive) {
+            fetch('{{ url_for("courses") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'toggle', id: id, status_note: ''})
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) location.reload();
+                else alert('Алдаа гарлаа');
+            });
+            return;
+        }
+        const row = document.querySelector(`tr[data-course-id="${id}"]`);
+        document.getElementById('toggleCourseId').value = id;
+        document.getElementById('toggleCourseNote').value = row.dataset.statusNote || '';
+        document.getElementById('toggleCourseTitle').textContent = 'Сургалт түр зогсоох';
+        document.getElementById('toggleCourseMsg').textContent =
+            'Энэ сургалтыг түр зогсоох уу? AI бот хэрэглэгчид зогссон гэдгийг мэдэгдэнэ.';
         new bootstrap.Modal(document.getElementById('toggleCourseModal')).show();
     });
 });

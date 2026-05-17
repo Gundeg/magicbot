@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block title %}Үйлчилгээнүүд - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Үйлчилгээнүүдийн удирдлага{% endblock %}
+
+{% block breadcrumb %}
+<div class="breadcrumb-bar">
+    <a href="{{ url_for('business_lines') }}"><i class="bi bi-diagram-3"></i> Бизнесийн нэгжүүд</a>
+    <i class="bi bi-chevron-right mx-1"></i>
+    <span class="text-dark fw-semibold"><i class="bi bi-clipboard2-check-fill me-1"></i>Magic Consulting Audit</span>
+    <i class="bi bi-chevron-right mx-1"></i>
+    <span class="text-dark fw-semibold">Үйлчилгээнүүд</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-file-earmark-text"></i> Аудит, CPA, мэргэшсэн зөвлөх үйлчилгээнүүд</span>
+        <button type="button" class="btn btn-sm btn-light" id="addServiceBtn" data-bs-toggle="modal" data-bs-target="#serviceModal">
+            <i class="bi bi-plus-circle"></i> Үйлчилгээ нэмэх
+        </button>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-info d-flex gap-2 align-items-start py-2 mb-3 alert-brand-soft">
+            <i class="bi bi-info-circle-fill mt-1 flex-shrink-0"></i>
+            <div>
+                <strong>Magic Consulting Audit ХХК</strong>-ын санал болгож буй мэргэшсэн үйлчилгээнүүдийг энд бүртгэнэ —
+                санхүүгийн аудит, CPA дэмжлэг, татвар/тайлангийн зөвлөгөө гэх мэт. Үнэ нь захиалга бүрд тооцоологддог
+                бол хоосон үлдээж болно.
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Нэр</th>
+                        <th>Тайлбар</th>
+                        <th>Хугацаа</th>
+                        <th>Үнэ (₮)</th>
+                        <th>Төлөв</th>
+                        <th class="text-end">Үйлдэл</th>
+                    </tr>
+                </thead>
+                <tbody id="servicesList">
+                    {% for s in items %}
+                    <tr data-id="{{ s.id }}"
+                        data-name="{{ s.name | e }}"
+                        data-description="{{ (s.description or '') | e }}"
+                        data-duration="{{ (s.duration or '') | e }}"
+                        data-price="{{ s.price | int if s.price else '' }}"
+                        data-status-note="{{ (s.status_note or '') | e }}"
+                        data-active="{{ '1' if s.is_active else '0' }}">
+                        <td><strong>{{ s.name }}</strong></td>
+                        <td class="text-muted small col-max-320">
+                            {{ (s.description or '')[:140] }}{% if s.description and s.description|length > 140 %}…{% endif %}
+                        </td>
+                        <td class="small">{{ s.duration or '—' }}</td>
+                        <td>{{ "{:,.0f}".format(s.price) if s.price else '—' }}</td>
+                        <td>
+                            {% if s.is_active %}
+                                <span class="badge bg-success">Идэвхтэй</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Түр зогссон</span>
+                                {% if s.status_note %}
+                                    <div class="text-muted small mt-1">{{ s.status_note }}</div>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-sm btn-warning edit-service" data-id="{{ s.id }}" title="Засах">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm {{ 'btn-outline-secondary' if s.is_active else 'btn-success' }} toggle-service"
+                                    data-id="{{ s.id }}"
+                                    data-active="{{ '1' if s.is_active else '0' }}"
+                                    title="{{ 'Түр зогсоох' if s.is_active else 'Идэвхжүүлэх' }}">
+                                <i class="bi {{ 'bi-pause-circle' if s.is_active else 'bi-play-circle' }}"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-danger delete-service" data-id="{{ s.id }}" title="Устгах">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-5">
+                            <i class="bi bi-file-earmark-plus empty-icon"></i>
+                            <div class="mt-2">Одоогоор үйлчилгээ бүртгэгдээгүй байна.</div>
+                            <div class="small mt-1">Дээрх "Үйлчилгээ нэмэх" товчоор эхний үйлчилгээгээ нэмнэ үү.</div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Service modal -->
+<div class="modal fade" id="serviceModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="serviceModalTitle">Үйлчилгээ нэмэх</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
+            </div>
+            <div class="modal-body">
+                <form id="serviceForm">
+                    <input type="hidden" id="serviceId" value="">
+                    <div class="mb-3">
+                        <label class="form-label" for="serviceName">Нэр <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="serviceName"
+                               placeholder="Жишээ: Санхүүгийн аудит" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="serviceDescription">Тайлбар</label>
+                        <textarea class="form-control" id="serviceDescription" rows="3"
+                                  placeholder="Юу багтсан, хэнд зориулагдсан, хэрхэн явагдах..."></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-7 mb-3">
+                            <label class="form-label" for="serviceDuration">Хугацаа</label>
+                            <input type="text" class="form-control" id="serviceDuration"
+                                   placeholder="Жишээ: 1-2 долоо хоног, тогтмол сар бүр">
+                        </div>
+                        <div class="col-md-5 mb-3">
+                            <label class="form-label" for="servicePrice">Үнэ (₮) <small class="text-muted">— заавал биш</small></label>
+                            <input type="number" class="form-control" id="servicePrice"
+                                   placeholder="Захиалгын дагуу тооцох бол хоосон">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Цуцлах</button>
+                <button type="button" class="btn btn-primary" id="saveServiceBtn">Хадгалах</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toggle modal -->
+<div class="modal fade" id="toggleServiceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="toggleServiceTitle">Үйлчилгээний төлөв өөрчлөх</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="toggleServiceId">
+                <p id="toggleServiceMsg"></p>
+                <div class="mb-3">
+                    <label class="form-label" for="toggleServiceNote">
+                        Тэмдэглэл <small class="text-muted">(заавал биш — AI-д харагдана)</small>
+                    </label>
+                    <input type="text" class="form-control" id="toggleServiceNote"
+                           placeholder="Жишээ: Аудитын баг ачаалалтай, 6-р сараас үргэлжилнэ">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Цуцлах</button>
+                <button type="button" class="btn btn-primary" id="confirmToggleServiceBtn">Тийм, өөрчлөх</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const serviceUrl = '{{ url_for("services") }}';
+
+function postService(payload) {
+    return fetch(serviceUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    }).then(r => r.json());
+}
+
+document.getElementById('addServiceBtn').addEventListener('click', () => {
+    document.getElementById('serviceForm').reset();
+    document.getElementById('serviceId').value = '';
+    document.getElementById('serviceModalTitle').textContent = 'Үйлчилгээ нэмэх';
+});
+
+document.getElementById('saveServiceBtn').addEventListener('click', () => {
+    const id = document.getElementById('serviceId').value;
+    const payload = {
+        action: id ? 'edit' : 'add',
+        id: id,
+        name: document.getElementById('serviceName').value,
+        description: document.getElementById('serviceDescription').value,
+        duration: document.getElementById('serviceDuration').value,
+        price: document.getElementById('servicePrice').value,
+    };
+    postService(payload).then(r => {
+        if (r.success) location.reload();
+        else alert(r.error || 'Алдаа гарлаа.');
+    });
+});
+
+document.querySelectorAll('.edit-service').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const row = document.querySelector(`tr[data-id="${btn.dataset.id}"]`);
+        document.getElementById('serviceId').value = btn.dataset.id;
+        document.getElementById('serviceName').value = row.dataset.name;
+        document.getElementById('serviceDescription').value = row.dataset.description;
+        document.getElementById('serviceDuration').value = row.dataset.duration;
+        document.getElementById('servicePrice').value = row.dataset.price;
+        document.getElementById('serviceModalTitle').textContent = 'Үйлчилгээ засах';
+        new bootstrap.Modal(document.getElementById('serviceModal')).show();
+    });
+});
+
+document.querySelectorAll('.toggle-service').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const isActive = btn.dataset.active === '1';
+        if (!isActive) {
+            postService({action: 'toggle', id: id, status_note: ''}).then(r => {
+                if (r.success) location.reload();
+                else alert('Алдаа гарлаа');
+            });
+            return;
+        }
+        const row = document.querySelector(`tr[data-id="${id}"]`);
+        document.getElementById('toggleServiceId').value = id;
+        document.getElementById('toggleServiceNote').value = row.dataset.statusNote || '';
+        document.getElementById('toggleServiceTitle').textContent = 'Үйлчилгээ түр зогсоох';
+        document.getElementById('toggleServiceMsg').textContent =
+            'Энэ үйлчилгээг түр зогсоох уу? AI бот хэрэглэгчид зогссон гэдгийг мэдэгдэнэ.';
+        new bootstrap.Modal(document.getElementById('toggleServiceModal')).show();
+    });
+});
+
+document.getElementById('confirmToggleServiceBtn').addEventListener('click', () => {
+    const id = document.getElementById('toggleServiceId').value;
+    const note = document.getElementById('toggleServiceNote').value;
+    postService({action: 'toggle', id: id, status_note: note}).then(r => {
+        if (r.success) location.reload();
+        else alert('Алдаа гарлаа');
+    });
+});
+
+document.querySelectorAll('.delete-service').forEach(btn => {
+    btn.addEventListener('click', () => {
+        if (!confirm('Энэ үйлчилгээг устгах уу?')) return;
+        postService({action: 'delete', id: btn.dataset.id}).then(r => {
+            if (r.success) location.reload();
+        });
+    });
+});
+
+document.getElementById('serviceModal').addEventListener('hidden.bs.modal', () => {
+    document.getElementById('serviceForm').reset();
+    document.getElementById('serviceId').value = '';
+    document.getElementById('serviceModalTitle').textContent = 'Үйлчилгээ нэмэх';
+});
+</script>
+{% endblock %}

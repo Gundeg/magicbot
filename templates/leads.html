@@ -41,7 +41,8 @@
                 </div>
             </div>
             <div class="card-body">
-                <input type="text" class="form-control mb-3" id="searchInput" placeholder="Нэр эсвэл утсаар хайх...">
+                <input type="text" class="form-control mb-3" id="searchInput"
+                       placeholder="Нэр эсвэл утсаар хайх..." aria-label="Лидийг нэр эсвэл утсаар хайх">
                 <div class="table-responsive">
                     <table class="table table-hover">
                         <thead>
@@ -53,6 +54,7 @@
                                 <th>Сонирхол</th>
                                 <th>Бүртгэгдсэн</th>
                                 <th>Мессеж</th>
+                                <th><span class="visually-hidden">Үйлдэл</span></th>
                             </tr>
                         </thead>
                         <tbody id="leadsList">
@@ -87,17 +89,22 @@
                                     {% elif topic == 'other_request' %}
                                         <span class="badge bg-warning text-dark">Бусад</span>
                                     {% elif topic %}
-                                        <span class="badge" style="background:var(--brand);">{{ topic }}</span>
+                                        <span class="badge bg-brand">{{ topic }}</span>
                                     {% else %}
                                         <span class="text-muted small">—</span>
                                     {% endif %}
                                 </td>
                                 <td><small>{{ lead.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
                                 <td><span class="badge bg-secondary">{{ confirmed_msg_counts.get(lead.id, 0) }}</span></td>
+                                <td>
+                                    <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=lead.id) }}" title="Ярианы түүх">
+                                        <i class="bi bi-chat-square-dots"></i>
+                                    </a>
+                                </td>
                             </tr>
                             {% else %}
                             <tr>
-                                <td colspan="7" class="text-center text-muted py-4">
+                                <td colspan="8" class="text-center text-muted py-4">
                                     Одоогоор утсаа үлдээсэн лид алга. Халуун сонирхогчдыг "Халуун сонирхогч" хэсгээс хар.
                                 </td>
                             </tr>
@@ -130,6 +137,7 @@
                                 <th>Сүүлд бичсэн</th>
                                 <th>Сүүлийн мессеж</th>
                                 <th>Нийт</th>
+                                <th><span class="visually-hidden">Үйлдэл</span></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -157,20 +165,25 @@
                                     {% elif topic == 'other_request' %}
                                         <span class="badge bg-warning text-dark">Бусад</span>
                                     {% elif topic %}
-                                        <span class="badge" style="background:var(--brand);">{{ topic }}</span>
+                                        <span class="badge bg-brand">{{ topic }}</span>
                                     {% else %}
                                         <span class="text-muted small">—</span>
                                     {% endif %}
                                 </td>
                                 <td><small>{{ p.last_at.strftime('%Y-%m-%d %H:%M') if p.last_at else '—' }}</small></td>
-                                <td class="text-muted small" style="max-width: 380px;">
+                                <td class="text-muted small col-max-380">
                                     {{ p.last_message[:160] }}{% if p.last_message|length > 160 %}…{% endif %}
                                 </td>
                                 <td><span class="badge bg-secondary">{{ p.message_count }}</span></td>
+                                <td>
+                                    <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=p.user.id) }}" title="Ярианы түүх">
+                                        <i class="bi bi-chat-square-dots"></i>
+                                    </a>
+                                </td>
                             </tr>
                             {% else %}
                             <tr>
-                                <td colspan="6" class="text-center text-muted py-4">
+                                <td colspan="7" class="text-center text-muted py-4">
                                     Одоогоор халуун сонирхогч алга. Үнэ асуусан буюу бүртгүүлэх хүсэлт илэрхийлсэн
                                     хүн гарвал энд гарч ирнэ.
                                 </td>

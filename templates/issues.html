@@ -5,6 +5,10 @@
 {% block page_title %}Асуудлууд{% endblock %}
 
 {% block content %}
+{# Undo toasts for inline status changes anchor here. Positioned bottom-center
+   so it doesn't collide with the top-right handoff toast from base.html. #}
+<div id="statusToastContainer" class="position-fixed bottom-0 start-50 translate-middle-x p-3 toast-stack"></div>
+
 {% if muted_users %}
 <div class="card border-warning mb-3">
     <div class="card-header bg-warning text-dark">
@@ -61,7 +65,7 @@
     <div class="card-body">
         <div class="row mb-3 g-2">
             <div class="col-md-4">
-                <select class="form-select" id="typeFilter">
+                <select class="form-select" id="typeFilter" aria-label="Асуудлын төрлөөр шүүх">
                     <option value="">Бүх төрөл</option>
                     <option value="unresolved_query">Шийдэгдээгүй асуулт</option>
                     <option value="complaint">Гомдол</option>
@@ -69,7 +73,7 @@
                 </select>
             </div>
             <div class="col-md-4">
-                <select class="form-select" id="statusFilter">
+                <select class="form-select" id="statusFilter" aria-label="Асуудлын төлвөөр шүүх">
                     <option value="">Бүх төлөв</option>
                     <option value="open">Нээлттэй</option>
                     <option value="in_progress">Хийгдэж байна</option>
@@ -115,14 +119,15 @@
                             <strong>{{ issue.facebook_user.name or 'Unknown' }}</strong>
                             <div class="text-muted small">{{ issue.facebook_user.phone or '—' }}</div>
                         </td>
-                        <td style="max-width: 200px;">
+                        <td class="col-max-200">
                             <div class="text-truncate" title="{{ issue.content }}">{{ issue.content[:60] }}{% if issue.content|length > 60 %}...{% endif %}</div>
                             {% if issue.notes %}
                                 <div class="text-muted small"><i class="bi bi-sticky"></i> {{ issue.notes[:50] }}</div>
                             {% endif %}
                         </td>
                         <td>
-                            <select class="form-select form-select-sm status-select" data-id="{{ issue.id }}" style="min-width: 130px;">
+                            <select class="form-select form-select-sm status-select min-w-130" data-id="{{ issue.id }}"
+                                    aria-label="Асуудлын төлөв солих">
                                 <option value="open" {% if issue.status == 'open' %}selected{% endif %}>Нээлттэй</option>
                                 <option value="in_progress" {% if issue.status == 'in_progress' %}selected{% endif %}>Хийгдэж байна</option>
                                 <option value="resolved" {% if issue.status == 'resolved' %}selected{% endif %}>Шийдсэн</option>
@@ -137,11 +142,16 @@
                                 —
                             {% endif %}
                         </td>
-                        <td>
-                            <button class="btn btn-sm btn-outline-secondary view-issue" data-id="{{ issue.id }}"
+                        <td class="text-nowrap">
+                            <button type="button" class="btn btn-sm btn-outline-secondary view-issue" data-id="{{ issue.id }}"
                                     data-bs-toggle="modal" data-bs-target="#issueModal" title="Дэлгэрэнгүй">
                                 <i class="bi bi-eye"></i>
                             </button>
+                            <a class="btn btn-sm btn-light"
+                               href="{{ url_for('conversation', user_id=issue.facebook_user.id) }}"
+                               title="Ярианы түүх">
+                                <i class="bi bi-chat-square-dots"></i>
+                            </a>
                         </td>
                     </tr>
                     {% else %}
@@ -157,11 +167,11 @@
 
 <!-- Issue Details Modal -->
 <div class="modal fade" id="issueModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Асуудлын дэлгэрэнгүй</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
             </div>
             <div class="modal-body">
                 <div class="row mb-3">
@@ -188,7 +198,7 @@
                 <strong>Агуулга:</strong>
                 <p id="issueContent" class="bg-light p-3 rounded mt-1"></p>
                 <div class="mb-3">
-                    <label class="form-label fw-semibold">Тэмдэглэл (Notes)</label>
+                    <label class="form-label fw-semibold" for="issueNotes">Тэмдэглэл (Notes)</label>
                     <textarea class="form-control" id="issueNotes" rows="3" placeholder="Хэрхэн шийдсэн, хэн холбогдсон гэх мэт..."></textarea>
                 </div>
                 <input type="hidden" id="modalIssueId">
@@ -223,21 +233,88 @@ document.querySelectorAll('.unmute-btn').forEach(btn => {
     });
 });
 
-document.querySelectorAll('.status-select').forEach(select => {
-    select.addEventListener('change', function() {
-        const issueId = this.dataset.id;
-        const newStatus = this.value;
-        fetch('{{ url_for("issues") }}', {
+// Inline status changes were saving instantly with no recourse. Now each change
+// remembers the prior value, optimistically saves, and surfaces a brief Undo
+// toast — a misclick stays recoverable for a few seconds.
+(function setupStatusSelect() {
+    const STATUS_LABELS = {
+        open: 'Нээлттэй',
+        in_progress: 'Хийгдэж байна',
+        resolved: 'Шийдсэн',
+    };
+    // Capture the rendered value before the user changes it so we can roll back.
+    document.querySelectorAll('.status-select').forEach(select => {
+        select.dataset.previousValue = select.value;
+    });
+
+    function persistStatus(issueId, status) {
+        return fetch('{{ url_for("issues") }}', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({action: 'update_status', id: issueId, status: newStatus})
-        })
-        .then(r => r.json())
-        .then(result => {
-            if (!result.success) alert('Алдаа гарлаа.');
+            body: JSON.stringify({action: 'update_status', id: issueId, status: status})
+        }).then(r => r.json());
+    }
+
+    function showUndoToast(select, oldStatus, newStatus) {
+        const container = document.getElementById('statusToastContainer');
+        if (!container) return;
+        const toast = document.createElement('div');
+        toast.className = 'toast align-items-center text-white show shadow border-0 mb-2';
+        toast.style.background = 'var(--brand-dark)';
+        toast.setAttribute('role', 'status');
+        toast.innerHTML = `
+            <div class="d-flex align-items-center">
+                <div class="toast-body flex-grow-1">
+                    Төлөв: <strong>${STATUS_LABELS[newStatus] || newStatus}</strong> болгож хадгаллаа.
+                </div>
+                <button type="button" class="btn btn-sm btn-light me-2 undo-btn">
+                    <i class="bi bi-arrow-counterclockwise"></i> Буцаах
+                </button>
+                <button type="button" class="btn-close btn-close-white me-2" data-bs-dismiss="toast" aria-label="Хаах"></button>
+            </div>`;
+        container.appendChild(toast);
+
+        const timer = setTimeout(() => { toast.remove(); }, 6000);
+
+        toast.querySelector('.undo-btn').addEventListener('click', () => {
+            clearTimeout(timer);
+            toast.remove();
+            persistStatus(select.dataset.id, oldStatus).then(result => {
+                if (result.success) {
+                    select.value = oldStatus;
+                    select.dataset.previousValue = oldStatus;
+                    // Pull the row's status data-attr back in sync so the
+                    // status filter on this page keeps working correctly.
+                    const row = select.closest('tr');
+                    if (row) row.dataset.status = oldStatus;
+                } else {
+                    alert('Буцаахад алдаа гарлаа.');
+                }
+            });
+        });
+    }
+
+    document.querySelectorAll('.status-select').forEach(select => {
+        select.addEventListener('change', function () {
+            const issueId = this.dataset.id;
+            const newStatus = this.value;
+            const oldStatus = this.dataset.previousValue;
+            if (newStatus === oldStatus) return;
+
+            persistStatus(issueId, newStatus).then(result => {
+                if (!result.success) {
+                    alert('Алдаа гарлаа.');
+                    this.value = oldStatus;
+                    return;
+                }
+                this.dataset.previousValue = newStatus;
+                const row = this.closest('tr');
+                if (row) row.dataset.status = newStatus;
+                showUndoToast(this, oldStatus, newStatus);
+            });
         });
     });
-});
+})();
 
 document.querySelectorAll('.view-issue').forEach(btn => {
     btn.addEventListener('click', function() {

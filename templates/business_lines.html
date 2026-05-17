@@ -1,26 +1,37 @@
 {% extends "base.html" %}
 
-{% block title %}Business Lines - Magic Bot Admin{% endblock %}
+{% block title %}Бизнесийн нэгжүүд - Magic Bot Admin{% endblock %}
 
-{% block page_title %}Бусад үйлчилгээ{% endblock %}
+{% block page_title %}Бизнесийн нэгжүүд{% endblock %}
+
+{% block breadcrumb %}
+<div class="breadcrumb-bar">
+    <span class="text-dark fw-semibold"><i class="bi bi-diagram-3 me-1"></i>Бизнесийн нэгжүүд</span>
+    <span class="ms-2 text-muted small">— {{ tenant_legal_name }}-ын бүх бизнесийн нэгжүүд</span>
+</div>
+{% endblock %}
 
 {% block content %}
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-diagram-3"></i> Компанийн бусад үйл ажиллагаа</span>
+        <span><i class="bi bi-diagram-3"></i> {{ tenant_short_name or tenant_legal_name }} — Бизнесийн нэгжүүд</span>
         <button type="button" class="btn btn-sm btn-light" id="addLineBtn" data-bs-toggle="modal" data-bs-target="#lineModal">
-            <i class="bi bi-plus-circle"></i> Үйлчилгээ нэмэх
+            <i class="bi bi-plus-circle"></i> Нэгж нэмэх
         </button>
     </div>
     <div class="card-body">
-        <p class="text-muted small mb-3">
-            Facebook хуудас бол компанийг сурталчилдаг ч, бот зөвхөн сургалтын хариулт өгөх ёсгүй.
-            Энд нэмсэн үйлчилгээний тухай асуувал бот доорх дүрмийн дагуу хариулна:
-        </p>
-        <ul class="text-muted small mb-3">
-            <li><span class="badge bg-info">Хариулах</span> — товч мэдээлэл өгөөд, дэлгэрэнгүйг ажилтнаас лавлахыг санал болгоно.</li>
-            <li><span class="badge bg-warning text-dark">Чиглүүлэх</span> — өөрөө хариулахгүй, утасны дугаар авч ажилтанд дамжуулна.</li>
-        </ul>
+        <div class="alert alert-info d-flex gap-2 align-items-start py-2 mb-3 alert-brand-soft">
+            <i class="bi bi-info-circle-fill mt-1 flex-shrink-0"></i>
+            <div>
+                <strong>Бизнесийн нэгжүүд:</strong> Энэ хуудас <strong>Magic Group</strong>-ын гурван бизнесийн нэгжийг удирдана.
+                3 охин компани: <strong>Magic Choice</strong> (сургалтын төв), <strong>Magic Consulting Audit ХХК</strong> (аудит, CPA), <strong>Magic Cloud ХХК</strong> (програм хангамжийн лиценз).
+                Бот энд бүртгэгдсэн нэгжийн дагуу хэрэглэгчийн асуултанд доор заасан дүрмийн дагуу хариулна.
+            </div>
+        </div>
+        <div class="d-flex gap-3 mb-3">
+            <span class="small"><span class="badge bg-info">Хариулах</span> — товч мэдээлэл өгөөд, дэлгэрэнгүйг ажилтнаас лавлахыг санал болгоно.</span>
+            <span class="small"><span class="badge bg-warning text-dark">Чиглүүлэх</span> — өөрөө хариулахгүй, утасны дугаар авч ажилтанд дамжуулна.</span>
+        </div>
 
         <div class="table-responsive">
             <table class="table table-hover align-middle">
@@ -41,7 +52,7 @@
                         data-active="{{ '1' if b.is_active else '0' }}"
                         data-status-note="{{ (b.status_note or '') | e }}">
                         <td><strong>{{ b.name }}</strong></td>
-                        <td class="text-muted small" style="max-width: 320px;">
+                        <td class="text-muted small col-max-320">
                             {{ (b.description or "")[:160] }}{% if b.description and b.description|length > 160 %}…{% endif %}
                         </td>
                         <td>
@@ -80,7 +91,7 @@
                     {% else %}
                     <tr>
                         <td colspan="6" class="text-center text-muted py-4">
-                            Одоогоор бусад үйлчилгээ нэмэгдээгүй. Жишээ нь "Magic Finance программ", "Санхүүгийн зөвлөгөө", "Тайлан гаргах үйлчилгээ" гэх мэт.
+                            Одоогоор бизнесийн нэгж нэмэгдээгүй. <strong>Magic Choice</strong> (сургалтын төв), <strong>Magic Consulting Audit ХХК</strong> (аудит, CPA), <strong>Magic Cloud ХХК</strong> (програм лиценз) гэх нэгжүүдийг нэмнэ үү.
                         </td>
                     </tr>
                     {% endfor %}
@@ -103,7 +114,7 @@
                 <p id="toggleLineMsg"></p>
                 <div class="mb-3">
                     <label for="toggleLineNote" class="form-label">
-                        Тэмдэглэл <small class="text-muted">(AI-д харагдана — яагаад зогсоосон, хэзээ нээгдэх гэх мэт)</small>
+                        Тэмдэглэл <small class="text-muted">(заавал биш — AI-д харагдана, яагаад зогсоосон гэх мэт)</small>
                     </label>
                     <input type="text" class="form-control" id="toggleLineNote"
                            placeholder="Жишээ: Одоогоор захиалга хүлээж авахгүй байна, 7-р сараас дахин нээнэ">
@@ -118,7 +129,7 @@
 </div>
 
 <div class="modal fade" id="lineModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="lineModalTitle">Үйлчилгээ нэмэх</h5>
@@ -130,7 +141,7 @@
                     <div class="mb-3">
                         <label class="form-label" for="lineName">Үйлчилгээний нэр <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="lineName"
-                               placeholder="Жишээ: Magic Finance программ" required>
+                               placeholder="Жишээ: Magic Consulting Audit ХХК" required>
                     </div>
                     <div class="mb-3">
                         <label class="form-label" for="lineDescription">Тайлбар</label>
@@ -210,14 +221,23 @@ document.querySelectorAll('.edit-line').forEach(btn => {
 
 document.querySelectorAll('.toggle-line').forEach(btn => {
     btn.addEventListener('click', () => {
-        const row = btn.closest('tr');
-        document.getElementById('toggleLineId').value = btn.dataset.id;
-        document.getElementById('toggleLineNote').value = row.dataset.statusNote || '';
+        const id = btn.dataset.id;
         const isActive = btn.dataset.active === '1';
-        document.getElementById('toggleLineTitle').textContent = isActive ? 'Үйлчилгээ түр зогсоох' : 'Үйлчилгээ идэвхжүүлэх';
-        document.getElementById('toggleLineMsg').textContent = isActive
-            ? 'Энэ үйлчилгээг түр зогсоох уу? AI бот хэрэглэгчид зогссон гэдгийг мэдэгдэнэ.'
-            : 'Энэ үйлчилгээг дахин идэвхжүүлэх үү?';
+        // Re-activating: skip the modal — there's nothing to explain when turning
+        // something back on. Also clears the stale pause-note in the same call.
+        if (!isActive) {
+            postLine({action: 'toggle', id: id, status_note: ''}).then(r => {
+                if (r.success) location.reload();
+                else alert('Алдаа гарлаа');
+            });
+            return;
+        }
+        const row = btn.closest('tr');
+        document.getElementById('toggleLineId').value = id;
+        document.getElementById('toggleLineNote').value = row.dataset.statusNote || '';
+        document.getElementById('toggleLineTitle').textContent = 'Үйлчилгээ түр зогсоох';
+        document.getElementById('toggleLineMsg').textContent =
+            'Энэ үйлчилгээг түр зогсоох уу? AI бот хэрэглэгчид зогссон гэдгийг мэдэгдэнэ.';
         new bootstrap.Modal(document.getElementById('toggleLineModal')).show();
     });
 });

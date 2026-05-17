@@ -12,17 +12,18 @@
     <div class="card-body">
         <div class="row mb-3">
             <div class="col-md-4">
-                <input type="text" class="form-control" id="searchInput" placeholder="Search messages...">
+                <input type="text" class="form-control" id="searchInput"
+                       placeholder="Search messages..." aria-label="Мессеж хайх">
             </div>
             <div class="col-md-4">
-                <select class="form-control" id="senderFilter">
+                <select class="form-control" id="senderFilter" aria-label="Илгээгчээр шүүх">
                     <option value="">All Messages</option>
                     <option value="user">User Messages</option>
                     <option value="bot">Bot Responses</option>
                 </select>
             </div>
             <div class="col-md-4">
-                <button class="btn btn-primary w-100" id="exportBtn">
+                <button type="button" class="btn btn-primary w-100" id="exportBtn">
                     <i class="bi bi-download"></i> Export Logs
                 </button>
             </div>
@@ -45,7 +46,12 @@
                             <small>{{ message.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</small>
                         </td>
                         <td>
-                            <small>{{ message.facebook_user.name or 'Unknown' }}</small>
+                            <small>
+                                <a href="{{ url_for('conversation', user_id=message.facebook_user.id) }}"
+                                   title="Ярианы түүх">
+                                    {{ message.facebook_user.name or 'Unknown' }}
+                                </a>
+                            </small>
                         </td>
                         <td>
                             {% if message.sender == 'user' %}
@@ -57,7 +63,7 @@
                         <td>
                             <small>{{ message.content[:80] }}{% if message.content|length > 80 %}...{% endif %}</small>
                             <br>
-                            <small class="text-muted" style="cursor: pointer;" onclick="showFullMessage({{ message.content|tojson }})">
+                            <small class="text-muted cursor-pointer" onclick="showFullMessage({{ message.content|tojson }})">
                                 <i class="bi bi-eye"></i> View full
                             </small>
                         </td>
@@ -70,6 +76,25 @@
                 </tbody>
             </table>
         </div>
+
+        <nav class="d-flex justify-content-between align-items-center mt-2">
+            <div>
+                {% if not is_first_page %}
+                    <a class="btn btn-sm btn-light" href="{{ url_for('logs') }}">
+                        <i class="bi bi-chevron-double-left"></i> Эхэндээ
+                    </a>
+                {% endif %}
+            </div>
+            <div>
+                {% if has_more and next_cursor %}
+                    <a class="btn btn-sm btn-light" href="{{ url_for('logs', before=next_cursor) }}">
+                        Хуучин <i class="bi bi-chevron-right"></i>
+                    </a>
+                {% else %}
+                    <span class="text-muted small">Бүх мессеж дууссан.</span>
+                {% endif %}
+            </div>
+        </nav>
     </div>
 </div>
 
@@ -79,10 +104,10 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Full Message</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
             </div>
             <div class="modal-body">
-                <p id="fullMessageContent" style="white-space: pre-wrap; word-break: break-word;"></p>
+                <p id="fullMessageContent" class="preserve-ws"></p>
             </div>
         </div>
     </div>

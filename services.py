@@ -1,0 +1,1312 @@
+"""Domain services: Facebook Messenger API, OpenAI helpers, rate limit,
+funnel/session classifiers, settings getters, AI prompt builder, schema
+migration, seed routines, background tasks, handoff flow, and audit logging.
+
+Route modules import functions from here; they should not poke at Facebook
+or OpenAI directly.
+"""
+import hmac
+import hashlib
+import json
+import os
+import re
+import time
+from collections import defaultdict, deque
+from datetime import datetime, timedelta
+from pathlib import Path
+from threading import Lock
+
+import requests
+from flask import current_app
+from flask_login import current_user
+from openai import OpenAI
+from sqlalchemy.exc import IntegrityError
+
+from extensions import db
+from models import (
+    AdminIssue, AuditEntry, BusinessLine, Course, FacebookUser, FAQ,
+    GeneralSetting, HandoffKeyword, Message, PagePost, TeamMember,
+    TrainingSnippet, User,
+)
+
+
+# ===================== CONSTANTS / CONFIG =====================
+
+PHONE_RE = re.compile(r'(?:\+?976[\s-]?)?[89]\d{7}')
+
+# OpenAI client. Reads OPENAI_API_KEY from env at import time — the .env file
+# is loaded before this module is first imported by app.py.
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+
+# Facebook credentials (read once at import).
+FACEBOOK_PAGE_ID = os.environ.get('FACEBOOK_PAGE_ID', '')
+FACEBOOK_ACCESS_TOKEN = os.environ.get('FACEBOOK_ACCESS_TOKEN', '')
+if not FACEBOOK_ACCESS_TOKEN:
+    raise RuntimeError("FACEBOOK_ACCESS_TOKEN environment variable is required")
+FACEBOOK_APP_SECRET = os.environ.get('FACEBOOK_APP_SECRET', '')
+if not FACEBOOK_APP_SECRET:
+    print(
+        "WARNING: FACEBOOK_APP_SECRET not set — accepting all webhook payloads "
+        "unverified. Live-mode deploys MUST set this or Facebook traffic can be "
+        "forged."
+    )
+GOOGLE_FORM_URL = os.environ.get('GOOGLE_FORM_URL', '')
+
+# Training content fallback chain: env → file → tiny default. The DB row in
+# GeneralSetting('training_content') takes precedence at runtime; see
+# get_training_content().
+TRAINING_PATH = Path(__file__).parent / 'pasted_content.txt'
+_env_training = os.environ.get('TRAINING_CONTENT', '').strip()
+if _env_training:
+    TRAINING_CONTENT = _env_training
+else:
+    try:
+        TRAINING_CONTENT = TRAINING_PATH.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        TRAINING_CONTENT = "Манай сургалтын төв нь 2007 оноос хойш үйл ажиллагаа явуулж байгаа."
+
+_DEFAULT_PERSONA = (
+    "Та Мэжик Санхүүгийн Группын Facebook чат туслах. Сэтгэл судлалын "
+    "ойлголттой, маркетингийн ур чадвартай, нягтлан бодох сургалтын зөвлөх. "
+    "Үргэлж монгол хэлээр, амьд хүн шиг ойлгомжтой, дотночоор хариулна. "
+    "Англи үг бичихгүй (тусгай нэр, программын нэрийг эс тооцох)."
+)
+BOT_PERSONA = os.environ.get('BOT_PERSONA', '').strip() or _DEFAULT_PERSONA
+
+RATE_LIMIT_MAX = int(os.environ.get('RATE_LIMIT_MAX', '5'))
+RATE_LIMIT_WINDOW = timedelta(seconds=int(os.environ.get('RATE_LIMIT_WINDOW_SECONDS', '60')))
+
+RATE_LIMIT_REPLY = (
+    "Та маш олон мессеж бичиж байна. 1 минутын дараа дахин оролдоорой. 🙏"
+)
+
+SESSION_ACTIVE_WINDOW = timedelta(hours=2)
+SESSION_GAP_WINDOW = timedelta(hours=24)
+
+
+# ===================== WEBHOOK SECURITY + RATE LIMIT =====================
+
+def verify_facebook_signature(raw_body, header_value):
+    """Validate X-Hub-Signature-256 against HMAC-SHA256(raw_body, app_secret).
+
+    If FACEBOOK_APP_SECRET is unset we skip verification with a warning so dev
+    deploys don't break before the secret is wired. On Live Mode you MUST set
+    the secret — Facebook will sign every payload and an unsigned request
+    means an attacker is forging Messenger traffic.
+    """
+    if not FACEBOOK_APP_SECRET:
+        return True
+    if not header_value or not header_value.startswith('sha256='):
+        return False
+    expected = hmac.new(
+        FACEBOOK_APP_SECRET.encode('utf-8'),
+        raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    received = header_value.split('=', 1)[1].strip()
+    return hmac.compare_digest(expected, received)
+
+
+_rate_state = defaultdict(deque)
+_rate_state_lock = Lock()
+
+
+def check_rate_limit(sender_id):
+    """Return True if sender is within the limit; record the hit. False if over."""
+    now = datetime.utcnow()
+    cutoff = now - RATE_LIMIT_WINDOW
+    with _rate_state_lock:
+        dq = _rate_state[sender_id]
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        if len(dq) >= RATE_LIMIT_MAX:
+            return False
+        dq.append(now)
+        if len(_rate_state) > 5000:
+            for sid in [k for k, v in _rate_state.items() if not v]:
+                del _rate_state[sid]
+        return True
+
+
+# ===================== FACEBOOK API HELPERS =====================
+
+def send_facebook_message(recipient_id, message_text):
+    """Send a message via Facebook Messenger API"""
+    url = f"https://graph.facebook.com/v18.0/me/messages"
+    headers = {"Content-Type": "application/json"}
+    params = {"access_token": FACEBOOK_ACCESS_TOKEN}
+    data = {
+        "recipient": {"id": recipient_id},
+        "message": {"text": message_text}
+    }
+    try:
+        response = requests.post(url, json=data, headers=headers, params=params)
+        if response.status_code != 200:
+            body = response.text[:500] if response.text else '<empty>'
+            print(
+                f"Send API FAILED recipient={recipient_id} "
+                f"status={response.status_code} body={body}"
+            )
+            return False
+        return True
+    except Exception as e:
+        print(f"Error sending message to recipient={recipient_id}: {e}")
+        return False
+
+
+def get_facebook_user_info(facebook_id):
+    """Get user info from Facebook's User Profile API. Returns {} on any failure."""
+    url = f"https://graph.facebook.com/v18.0/{facebook_id}"
+    params = {"fields": "name,first_name,last_name", "access_token": FACEBOOK_ACCESS_TOKEN}
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        if response.status_code == 200:
+            data = response.json() or {}
+            if not data.get('name'):
+                print(
+                    f"FB user profile: 200 OK but missing name for psid={facebook_id} "
+                    f"body={str(data)[:200]}"
+                )
+            return data
+        print(
+            f"FB user profile failed psid={facebook_id} status={response.status_code} "
+            f"body={response.text[:300]}"
+        )
+        return {}
+    except Exception as e:
+        print(f"FB user profile exception psid={facebook_id}: {e}")
+        return {}
+
+
+def refresh_facebook_user_name(fb_user):
+    """Re-fetch the display name and persist if non-empty. Returns the new name or ''."""
+    info = get_facebook_user_info(fb_user.facebook_id)
+    name = (info.get('name') or '').strip()
+    if not name:
+        return ''
+    fb_user.name = name
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Refresh name commit failed for psid={fb_user.facebook_id}: {e}")
+        return ''
+    return name
+
+
+def get_recent_messages():
+    """Poll for recent messages from Facebook Messenger"""
+    url = f"https://graph.facebook.com/v18.0/{FACEBOOK_PAGE_ID}/conversations"
+    params = {
+        "fields": "id,senders,participants,former_participants,wallpaper,snippet,updated_time,message_count,unread_count,subject,can_reply,former_participants,info,link,name,email,page_name,wallpaper,former_participants",
+        "access_token": FACEBOOK_ACCESS_TOKEN
+    }
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json().get('data', [])
+        return []
+    except Exception as e:
+        print(f"Error getting messages: {e}")
+        return []
+
+
+def get_page_posts():
+    """Poll for recent posts from Facebook Page"""
+    url = f"https://graph.facebook.com/v18.0/{FACEBOOK_PAGE_ID}/feed"
+    params = {
+        "fields": "id,message,created_time,type,story",
+        "limit": 10,
+        "access_token": FACEBOOK_ACCESS_TOKEN
+    }
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json().get('data', [])
+        return []
+    except Exception as e:
+        print(f"Error getting posts: {e}")
+        return []
+
+
+def post_comment_on_page(post_id, comment_text):
+    """Post a comment on a Facebook Page post"""
+    url = f"https://graph.facebook.com/v18.0/{post_id}/comments"
+    params = {"access_token": FACEBOOK_ACCESS_TOKEN}
+    data = {"message": comment_text}
+    try:
+        response = requests.post(url, json=data, params=params)
+        return response.status_code == 201
+    except Exception as e:
+        print(f"Error posting comment: {e}")
+        return False
+
+
+# ===================== SCHEMA MIGRATION =====================
+
+def ensure_schema():
+    """Idempotent schema migration for columns added after the first deploy.
+
+    SQLite-style ALTER TABLE ADD COLUMN works on Postgres too, so this stays
+    portable if the user later switches the SQLALCHEMY_DATABASE_URI.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(db.engine)
+    if 'facebook_user' not in inspector.get_table_names():
+        return  # create_all() will handle a brand-new DB
+
+    def add_columns(table, additions):
+        existing = {col['name'] for col in inspector.get_columns(table)}
+        with db.engine.begin() as conn:
+            for col, clause in additions.items():
+                if col not in existing:
+                    try:
+                        conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {clause}")
+                        print(f"Schema migration: {table} ADD COLUMN {col}")
+                    except Exception as e:
+                        print(f"Schema migration skipped ({table}.{col}): {e}")
+
+    add_columns('facebook_user', {
+        'funnel_stage': "funnel_stage VARCHAR(30) DEFAULT 'curious'",
+        'last_nudge_at': 'last_nudge_at DATETIME',
+        'bot_muted_until': 'bot_muted_until DATETIME',
+        'conversation_topic': 'conversation_topic VARCHAR(100)',
+    })
+
+    add_columns('admin_issue', {
+        'updated_by_id': 'updated_by_id INTEGER REFERENCES user(id)',
+        'updated_at': 'updated_at DATETIME',
+        'notes': 'notes TEXT',
+    })
+
+    add_columns('course', {
+        'end_date': 'end_date DATETIME',
+        'is_recurring': 'is_recurring BOOLEAN DEFAULT 0',
+        'schedule_template': 'schedule_template TEXT',
+        'status_note': 'status_note VARCHAR(255)',
+    })
+
+    add_columns('business_line', {
+        'status_note': 'status_note VARCHAR(255)',
+    })
+
+    if 'handoff_keyword' not in inspector.get_table_names():
+        with db.engine.begin() as conn:
+            try:
+                conn.exec_driver_sql(
+                    "CREATE TABLE handoff_keyword ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  keyword VARCHAR(200) NOT NULL,"
+                    "  keyword_type VARCHAR(20) DEFAULT 'explicit',"
+                    "  is_active BOOLEAN DEFAULT 1,"
+                    "  note VARCHAR(255),"
+                    "  created_at DATETIME"
+                    ")"
+                )
+                print("Schema migration: created handoff_keyword table")
+            except Exception as e:
+                print(f"Schema migration skipped (handoff_keyword table): {e}")
+
+
+# ===================== SESSION + FUNNEL CLASSIFIERS =====================
+
+def classify_conversation(fb_user):
+    """Use gpt-4o-mini to classify what business line (or generic category)
+    a user's conversation is about, then persist to facebook_user.conversation_topic."""
+    try:
+        recent_messages = (
+            Message.query
+            .filter_by(facebook_user_id=fb_user.id, sender='user')
+            .order_by(Message.created_at.desc())
+            .limit(15)
+            .all()
+        )
+        if not recent_messages:
+            return
+
+        business_lines = [
+            bl.name for bl in
+            BusinessLine.query.filter_by(is_active=True).order_by(BusinessLine.sort_order).all()
+        ]
+
+        conversation_text = '\n'.join(
+            m.content for m in reversed(recent_messages)
+        )
+
+        category_list = business_lines + ['general', 'not_related', 'other_request']
+        categories_str = ', '.join(f'"{c}"' for c in category_list)
+
+        prompt = (
+            f"You are classifying a Messenger conversation for a Mongolian training/consulting center.\n"
+            f"Available categories: {categories_str}\n\n"
+            f"Business line names like {', '.join(repr(b) for b in business_lines)} represent specific non-training services.\n"
+            f'"general" = ANY question about training courses: course names, pricing, schedules, start dates, duration, content, '
+            f'teaching format (online/classroom), enrollment, registration, or any other training-center topic\n'
+            f'"not_related" = clearly off-topic messages with no connection to the company or its services '
+            f'(e.g. jokes, random chat, completely unrelated questions)\n'
+            f'"other_request" = operational requests NOT about enrolling (e.g. VAT registration, certification follow-up, pitch scheduling)\n\n'
+            f"When in doubt between \"general\" and \"not_related\", choose \"general\".\n\n"
+            f"Recent user messages:\n{conversation_text}\n\n"
+            f"Respond with ONLY the single most relevant category name from the list above. "
+            f"No explanation, no punctuation, just the category string."
+        )
+
+        result = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=60,
+        )
+
+        raw = result.choices[0].message.content.strip().strip('"').strip("'")
+        matched = next((c for c in category_list if c.lower() == raw.lower()), None)
+        if matched:
+            fb_user.conversation_topic = matched
+            db.session.commit()
+    except Exception as e:
+        print(f"classify_conversation error for user {fb_user.id}: {e}")
+
+
+def classify_session(last_msg_at):
+    """Return 'new' | 'active' | 'gap' | 'returning' based on time since last_msg_at."""
+    if last_msg_at is None:
+        return 'new'
+    delta = datetime.utcnow() - last_msg_at
+    if delta < SESSION_ACTIVE_WINDOW:
+        return 'active'
+    if delta < SESSION_GAP_WINDOW:
+        return 'gap'
+    return 'returning'
+
+
+FUNNEL_KEYWORDS = {
+    'ready': [
+        'бүртгүүл', 'бүртгэх', 'бүртгээч', 'бүртгүүлье', 'элсэх', 'элсье',
+        'утасны дугаар', 'дугаараа', 'холбогд', 'эхэлмээр', 'оролцмоор',
+        'сонгомоор', 'хэзээ эхэлдэг', 'хэзээ эхэлж байгаа',
+    ],
+    'pricing': [
+        'үнэ', 'төлбөр', 'хэд', 'хэдэн төгрөг', 'хямдрал', 'хямд',
+        'хуваан төлөх', 'хуваан', 'pocketzero', 'хямдра', 'төлөх',
+        'хөнгөлөлт', 'дискаунт', 'хямдар',
+    ],
+    'exploring_courses': [
+        'хичээл', 'анги', 'хөтөлбөр', 'сургалт', 'долоо хоног',
+        'агуулга', 'юу заадаг', 'юу үздэг', 'танхим', 'онлайн',
+        'хосолсон', 'хэлбэр', 'цаг', 'хэдэн цагт', 'хуваарь',
+    ],
+}
+
+STAGE_RANK = {'curious': 0, 'exploring_courses': 1, 'pricing': 2, 'ready': 3}
+
+
+def detect_funnel_stage(message_text, current_stage='curious'):
+    """Classify the user's intent. Never regresses: only moves forward in the funnel."""
+    current = current_stage or 'curious'
+    if not message_text:
+        return current
+    text = message_text.lower()
+    for stage in ('ready', 'pricing', 'exploring_courses'):
+        if any(kw in text for kw in FUNNEL_KEYWORDS[stage]):
+            return stage if STAGE_RANK[stage] > STAGE_RANK.get(current, 0) else current
+    return current
+
+
+def first_name_of(full_name):
+    """Pull a clean first name from a Facebook display name, or '' if unknown."""
+    if not full_name or full_name.strip().lower() == 'unknown':
+        return ''
+    return full_name.strip().split()[0]
+
+
+SESSION_RULES = {
+    'new': (
+        '0. Энэ бол хэрэглэгчтэй анх удаа ярилцаж байгаа явдал. Богино, '
+        'дулаахан мэндчилгээгээр эхлээд (жишээ нь "Сайн байна уу!") шууд '
+        'тэдний асуултанд ороорой.'
+    ),
+    'active': (
+        '0. ЭНЭ БОЛ ҮРГЭЛЖИЛСЭН ЯРИА. Хэрэглэгчтэй сүүлийн хэдэн минутын дотор '
+        'ярилцаж байсан тул "Сайн байна уу", "Тавтай морил", өөрийгөө дахин '
+        'танилцуулах гэх мэтийг БҮҮ оруул. Өмнөх контекстийг санаж буй мэт '
+        'товч, ноорог байдлаар шууд асуултын хариулт руу ор.'
+    ),
+    'gap': (
+        '0. Хэрэглэгчтэй өнөөдөр аль хэдийн ярилцаад, цөөн цагийн дараа эргэж '
+        'ирлээ. Дахин мэндлэхгүйгээр шууд асуултанд найрсагаар хариул. Хэрэгтэй '
+        'үед "Үргэлжлүүлээд тусалъя" гэх мэт богино гүүр хэллэг л ашигла.'
+    ),
+    'returning': (
+        '0. Хэрэглэгч 1+ хоногийн дараа эргэн ирлээ. Богино, дулаахан '
+        'мэндчилгээгээр (жишээ нь "Сайн байна уу, эргэж ирсэнд таатай байна!") '
+        'эхэлж, өмнө ярьсан зүйлээ зөөлөн санагдуулаад, "Юу тодруулах хэрэгтэй '
+        'байна?" гэж асуу.'
+    ),
+}
+
+FUNNEL_RULES = {
+    'curious': (
+        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Сонирхож буй. Сургалтын үндсэн давуу талыг товч '
+        'танилцуулаад "Ямар чиглэлийн хичээл сонирхож байна?" гэх мэт нээлттэй '
+        'асуулт асуу. Үнэ, бүртгэлийн талаар хэт эрт бүү ярь.'
+    ),
+    'exploring_courses': (
+        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Сургалт сонгож буй. Тодорхой ангийн агуулга, '
+        '4 долоо хоногийн хөтөлбөр, цаг хуваарь, танхим/онлайн хэлбэрийг '
+        'тодруулж тайлбарла. Аль анги нь тэдэнд тохиромжтой байж болохыг нь '
+        'эелдгээр асуу.'
+    ),
+    'pricing': (
+        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Үнэ судалж буй. Дөрвөн ангийн үнэ, PocketZero-оор '
+        '4-6 хуваан хүүгүй төлөх боломж, Magic Finance программын 6 сарын '
+        'үнэгүй ашиглах эрхийг онцолж тайлбарла. Төсөвт нь тохирох '
+        'хувилбарыг санал болго.'
+    ),
+    'ready': (
+        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Бүртгүүлэхэд бэлэн. Богино урамшуулал ("Маш сайн '
+        'сонголт!") хийж, БҮРТГЭЛИЙН ЛИНК-ийг хариултдаа оруул. Утасны '
+        'дугаараа үлдээх хүсэлтийг найрсагаар нэмж асуу.'
+    ),
+}
+
+
+# ===================== SETTINGS GETTERS =====================
+
+def get_setting(key, default=''):
+    """Read a value from GeneralSetting. Returns default if missing or blank."""
+    row = GeneralSetting.query.filter_by(key=key).first()
+    if row and row.value and row.value.strip():
+        return row.value
+    return default
+
+
+def get_training_content():
+    """Bot's training corpus. Priority: DB row -> env var -> file -> tiny default."""
+    return get_setting('training_content', TRAINING_CONTENT)
+
+
+def get_bot_persona():
+    """Bot's persona line. Priority: DB row -> env var -> default."""
+    return get_setting('bot_persona', BOT_PERSONA)
+
+
+def get_handoff_sensitivity():
+    """conservative | balanced | aggressive — read from settings, default conservative.
+
+    NOTE: prior to the refactor this function's body had been accidentally
+    pasted inside `trigger_handoff`, causing every handoff to crash with
+    `NameError: get_handoff_sensitivity`. Restored to a real, callable function.
+    """
+    value = (get_setting('handoff_sensitivity', 'conservative') or '').strip().lower()
+    return value if value in ('conservative', 'balanced', 'aggressive') else 'conservative'
+
+
+def get_mute_duration_hours():
+    """How long the bot stays silent after a handoff is triggered."""
+    raw = (get_setting('mute_duration_hours', '2') or '2').strip()
+    try:
+        hours = int(raw)
+    except ValueError:
+        hours = 2
+    return max(0, min(hours, 168))  # clamp 0..7 days
+
+
+def get_telegram_chat_ids():
+    """Comma-separated chat IDs from settings. Returns [] when empty."""
+    raw = (get_setting('telegram_chat_ids', '') or '').strip()
+    if not raw:
+        return []
+    return [chunk.strip() for chunk in raw.replace(';', ',').split(',') if chunk.strip()]
+
+
+def get_sound_alerts_enabled():
+    return (get_setting('sound_alerts_enabled', 'on') or '').strip().lower() in ('on', 'true', '1', 'yes')
+
+
+# ===================== LLM PROMPT BUILDER =====================
+
+def _format_training_snippets():
+    """Build the additive-snippets section. High-priority snippets surface
+    first so the model weights them more heavily. Returns '' when there are
+    no active rows."""
+    snippets = (TrainingSnippet.query
+                .filter_by(is_active=True)
+                .order_by(
+                    db.case((TrainingSnippet.priority == 'high', 0), else_=1),
+                    TrainingSnippet.sort_order.asc(),
+                    TrainingSnippet.created_at.asc(),
+                )
+                .all())
+    if not snippets:
+        return ''
+    lines = []
+    for s in snippets:
+        tag = f" [{s.category}]" if s.category else ''
+        marker = '★ ' if s.priority == 'high' else ''
+        lines.append(f"{marker}{s.title}{tag}:\n{s.body}")
+    return "\n\n".join(lines)
+
+
+def _format_team_members():
+    members = (TeamMember.query
+               .filter_by(is_active=True)
+               .order_by(TeamMember.sort_order.asc(), TeamMember.id.asc())
+               .all())
+    if not members:
+        return ''
+    lines = []
+    for m in members:
+        parts = [m.name]
+        if m.role:
+            parts.append(f"({m.role})")
+        line = ' '.join(parts)
+        if m.specialty:
+            line += f" — мэргэшил: {m.specialty}"
+        if m.bio:
+            line += f". {m.bio}"
+        lines.append(f"- {line}")
+    return "\n".join(lines)
+
+
+def _format_business_lines():
+    """Return (answer_block, refer_block, paused_block) — active lines split by
+    action, plus a block for paused services so the bot knows not to sell them."""
+    all_lines = (BusinessLine.query
+                 .order_by(BusinessLine.sort_order.asc(), BusinessLine.id.asc())
+                 .all())
+    answer, refer, paused = [], [], []
+    for b in all_lines:
+        if not b.is_active:
+            note = f" ({b.status_note})" if b.status_note else " (түр зогссон)"
+            paused.append(f"- {b.name}{note}")
+            continue
+        desc = b.description or ''
+        contact = f" (Холбоо барих: {b.contact_info})" if b.contact_info else ''
+        entry = f"- {b.name}: {desc}{contact}"
+        if (b.action or 'refer') == 'answer':
+            answer.append(entry)
+        else:
+            refer.append(entry)
+    return "\n".join(answer), "\n".join(refer), "\n".join(paused)
+
+
+def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name=''):
+    """Build system prompt with training, FAQ, session-state and funnel context."""
+    training = get_training_content()
+    persona = get_bot_persona()
+    faqs = FAQ.query.all()
+    faq_text = "\n".join([f"Q: {faq.question}\nA: {faq.answer}" for faq in faqs])
+
+    courses = Course.query.filter_by(is_active=True).all()
+    courses_text = "\n".join([
+        f"- {c.name} ({c.course_type}): {int(c.price):,}₮, эхлэх: {c.start_date.strftime('%Y-%m-%d')}, цаг: {c.time}"
+        + (f"\n  Тайлбар: {c.description}" if c.description else "")
+        for c in courses
+    ])
+
+    inactive_courses = Course.query.filter_by(is_active=False).all()
+    if inactive_courses:
+        paused_lines = []
+        for c in inactive_courses:
+            note = f" ({c.status_note})" if c.status_note else " (түр зогссон)"
+            paused_lines.append(f"- {c.name}{note}")
+        courses_text += (
+            "\n\nТҮР ЗОГССОН СУРГАЛТУУД (одоогоор бүртгэл хаалттай; "
+            "хэрэглэгч асуувал зогссон гэдгийг тодорхой хэлж, эргэж нээгдэх "
+            "талаар мэдэгдэнэ гэж хэлж болно):\n" + "\n".join(paused_lines)
+        )
+
+    snippets_text = _format_training_snippets()
+    team_text = _format_team_members()
+    answer_lines, refer_lines, paused_services = _format_business_lines()
+
+    registration_block = (
+        f"БҮРТГЭЛИЙН ЛИНК:\n{GOOGLE_FORM_URL}\n" if GOOGLE_FORM_URL else ""
+    )
+
+    if user_first_name:
+        name_block = (
+            f"ХЭРЭГЛЭГЧИЙН НЭР: {user_first_name}\n"
+            f"Хариултдаа тохиромжтой үед нэрээр нь хандаж болно (жишээ нь "
+            f'"{user_first_name} аа,"). Гэхдээ нэрийг хэт олон бүү давт, '
+            "байгалийн ярианд тохируулж хэрэглэ.\n"
+        )
+    else:
+        name_block = ""
+
+    session_rule = SESSION_RULES.get(session_state, SESSION_RULES['new'])
+    funnel_rule = FUNNEL_RULES.get(funnel_stage, FUNNEL_RULES['curious'])
+
+    snippets_section = (
+        f"\nНЭМЭЛТ ТАЙЛБАР, ТОДРУУЛГА (★ = өндөр ач холбогдолтой):\n{snippets_text}\n"
+        if snippets_text else ''
+    )
+    team_section = (
+        f"\nМАНАЙ БАГ (хэрэглэгч багш/ажилтны талаар асуувал ашиглана):\n{team_text}\n"
+        if team_text else ''
+    )
+
+    biz_section = """
+MAGIC GROUP-ЫН БҮТЭЦ (бот энэ бүтцийг бүрэн мэдэж, харилцагчийг зохих чиглэлд хөтлөнө):
+
+Magic Group нь дараах 3 охин компанитай:
+
+1. MAGIC CHOICE — Санхүүгийн болон бизнесийн сургалтын төв
+   Бүтээгдэхүүн: Сургалт (4 хэлбэр)
+   • Танхимын сургалт (Classroom) — өглөөний болон оройн ангитай
+   • 100% Онлайн сургалт (Online) — тасралтгүй явагдана, хэзээ ч элсэж болно
+   • Хибрид сургалт (Hybrid) — 3 хоног танхим + 2 хоног онлайн
+   • Багштай онлайн сургалт (Online with teacher) — багштай цагаа тогтоож уулздаг
+   Бүртгэл, худалдан авалт: бүртгэлийн форм эсвэл утасны дугаар үлдээх замаар
+
+2. MAGIC CONSULTING AUDIT ХХК — Мэргэшсэн зөвлөх, аудит
+   Бүтээгдэхүүн: Мэргэшсэн үйлчилгээ
+   • Санхүүгийн аудит (Financial audit)
+   • CPA үйлчилгээ (нягтлан бодогчийн мэргэшсэн туслалцаа)
+   Холбогдох: утасны дугаар үлдээж, ажилтантай уулзалт товлоно
+
+3. MAGIC CLOUD ХХК — Програм хангамж, лиценз
+   Бүтээгдэхүүн: Програм хангамжийн лиценз
+   • Magic Finance — санхүүгийн програм хангамж
+   • Microsoft лиценз
+   • Kaspersky лиценз
+   Холбогдох: судалгаа хийж, захиалга өгнө
+
+БОТЫН УДИРДАМЖ: Харилцагчийн хэрэгцээг нарийн тодруулж, зохих компанид хөтлөнө.
+Асуулт товч, хариулт тодорхой. Дарамт бүү үзүүл — харилцагч өөрөө шийдвэр гаргадаг.
+"""
+
+    db_biz_section = ''
+    if answer_lines or refer_lines or paused_services:
+        db_biz_section = "\nАДМИН БҮРТГЭЛИЙН НЭМЭЛТ МЭДЭЭЛЭЛ (дээрх бүтцийн дэлгэрэнгүй, ажилтны тохиргоо):\n"
+        if answer_lines:
+            db_biz_section += (
+                "Доорх чиглэлийн талаар асуувал ТОВЧ хариулж болно "
+                "(дэлгэрэнгүйг ажилтнаас лавлахыг санал болго):\n"
+                f"{answer_lines}\n"
+            )
+        if refer_lines:
+            db_biz_section += (
+                "Доорх чиглэлийн талаар асуувал өөрөө хариулахгүй, "
+                "\"Манай тусгай ажилтан хариуцдаг. Утасны дугаараа үлдээгээрэй\" "
+                "гэж найрсагаар чиглүүл:\n"
+                f"{refer_lines}\n"
+            )
+        if paused_services:
+            db_biz_section += (
+                "Доорх үйлчилгээнүүд ОДООГООР ТҮР ЗОГССОН байна. "
+                "Хэрэглэгч асуувал зогссон гэдгийг шулуун хэлж, "
+                "дахин нээгдэх үед мэдэгдэнэ гэж хэлнэ үү:\n"
+                f"{paused_services}\n"
+            )
+    biz_section = biz_section + db_biz_section
+
+    system_prompt = f"""{persona}
+
+СУРГАЛТЫН ТӨВИЙН МЭДЭЭЛЭЛ:
+{training}
+{snippets_section}{team_section}{biz_section}
+ИДЭВХТЭЙ АНГИУД:
+{courses_text}
+
+ТҮГЭЭМЭЛ АСУУЛТУУД:
+{faq_text}
+
+{registration_block}{name_block}{funnel_rule}
+
+ЧУХАЛ ДҮРМҮҮД:
+{session_rule}
+1. Хариулт товч (3 өгүүлбэрт багтаа), тодорхой. Урт жагсаалт оруулахаас зайлсхий.
+2. ГҮЙЦЭТГЭЛИЙН ТӨВӨГ: Харилцагчийн ХЭРЭГЦЭЭГ тодруулах нарийн асуулт тавь. Зохих компани/бүтээгдэхүүнд хөтлөх шалтгаан боловсруулж, ФУУЛЛАА үгүй ФУУЛГҮЙ дүүргэх.
+3. Бүртгэлийн линк болон утасны дугаар авах хүсэлтийг хэрэглэгч бэлэн болсон үед л санал болго. Дарамт бүү үзүүл.
+4. Хэрэглэгч утасны дугаар бичвэл баярлал илэрхийлж, "Манай ажилтан удахгүй тантай холбогдоно" гэж мэдэгд.
+5. Шийдэх боломжгүй асуудал тулгарвал "Манай ажилтан тантай эргэж холбогдож тодруулна" гэж хэл.
+6. Эмодзи 1-2-оос хэтрүүлэхгүй, байгалийн ярианы маяг барь.
+7. Нэг л үгээр (жишээ нь "Сургалт...") ижил эхлэлтэй өгүүлбэр дараалуулахаас зайлсхий.
+8. Magic Choice (сургалт), Magic Consulting Audit (аудит/CPA), Magic Cloud (лиценз) — гурвуулаа ТЭГШ ЧУХАЛ. Нэгийг нь давуу эрхтэй гэж бүү харь. Жагсаалтад байхгүй чиглэл бол "Ажилтантай холбоно уу?" гэж асааж дугаар ав."""
+    return system_prompt
+
+
+def generate_bot_response(user_message, conversation_history,
+                          session_state='new', funnel_stage='curious',
+                          user_first_name=''):
+    """Generate bot response using OpenAI"""
+    try:
+        messages = [{
+            "role": "system",
+            "content": build_system_prompt(
+                session_state=session_state,
+                funnel_stage=funnel_stage,
+                user_first_name=user_first_name,
+            ),
+        }]
+        messages.extend(conversation_history)
+        messages.append({"role": "user", "content": user_message})
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=500
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Error generating response: {e}")
+        return "Уучлаарай, түр зуурын саатал гарсан байна. Хэдхэн минутын дараа дахин бичээрэй."
+
+
+def analyze_and_comment_on_post(post_content):
+    """Analyze post and generate appropriate comment"""
+    try:
+        analysis_prompt = f"""Энэ Facebook постыг анализ хийж, тохирох коммент бичнэ үү.
+
+ПОСТ КОНТЕНТ:
+{post_content}
+
+ДҮРМҮҮД:
+1. Сургалттай холбоотой: "Сургалтын мэдээллийг танд чатаар илгээсэн шүү, та чатаа шалгаарай"
+2. Баяр ёслол, шагнал: Баяр хүргэх коммент
+3. Бусад: тохирох, сонирхолтой коммент
+
+Монгол хэлээр л хариулна. Коммент текст л өгнө, бусад зүйл бичихгүй."""
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": analysis_prompt}],
+            temperature=0.7,
+            max_tokens=200
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Error analyzing post: {e}")
+        return None
+
+
+# ===================== HANDOFF FLOW =====================
+
+HANDOFF_USER_REPLY = (
+    "Таны асуултыг манай ажилтан хариуцаж авлаа. Удахгүй холбогдох болно. "
+    "Түр хүлээгээрэй 🙏"
+)
+HANDOFF_USER_REPLY_OFF_HOURS = (
+    "Таны мессежийг хүлээн авлаа. Одоогоор ажлын цаг биш байна. "
+    "Манай ажилтан маргааш ажлын цагт ({start}:00 – {end}:00) тантай холбогдох болно. "
+    "Уучлаарай, тав тухтай амраарай 🌙"
+)
+
+
+def _is_off_hours():
+    """Return True when current UTC hour falls in the night quiet window.
+    Office hours stored as 'office_hours_start' and 'office_hours_end' (int, default 8–22)."""
+    try:
+        start = int(get_setting('office_hours_start', '8') or '8')
+        end = int(get_setting('office_hours_end', '22') or '22')
+    except ValueError:
+        start, end = 8, 22
+    ub_hour = (datetime.utcnow().hour + 8) % 24
+    if start <= end:
+        return not (start <= ub_hour < end)
+    return end <= ub_hour < start
+
+
+def _matches_refer_business_line(text):
+    """True if the user message clearly names a business line flagged 'refer'."""
+    if not text:
+        return False
+    lower = text.lower()
+    refer_lines = (BusinessLine.query
+                   .filter_by(is_active=True, action='refer')
+                   .all())
+    for line in refer_lines:
+        if line.name and line.name.lower() in lower:
+            return True
+    return False
+
+
+def should_handoff(message_text, fb_user):
+    """Decide whether the bot should escalate to a human."""
+    if not message_text:
+        return False, ''
+    text = message_text.lower()
+    sensitivity = get_handoff_sensitivity()
+
+    explicit_kws = [
+        k.keyword.lower() for k in
+        HandoffKeyword.query.filter_by(keyword_type='explicit', is_active=True).all()
+    ]
+    frustration_kws = [
+        k.keyword.lower() for k in
+        HandoffKeyword.query.filter_by(keyword_type='frustration', is_active=True).all()
+    ]
+
+    for kw in explicit_kws:
+        if kw in text:
+            return True, f"explicit:{kw}"
+
+    if _matches_refer_business_line(message_text):
+        return True, 'business_line_refer'
+
+    if sensitivity in ('balanced', 'aggressive'):
+        for kw in frustration_kws:
+            if kw in text:
+                return True, f"frustration:{kw}"
+
+    if sensitivity == 'aggressive':
+        cutoff = datetime.utcnow() - timedelta(hours=1)
+        recent = (Message.query
+                  .filter_by(facebook_user_id=fb_user.id, sender='user')
+                  .filter(Message.created_at >= cutoff)
+                  .order_by(Message.created_at.desc())
+                  .limit(5)
+                  .all())
+        same = [m for m in recent if (m.content or '').strip().lower() == text.strip()]
+        if len(same) >= 2:
+            return True, 'repeated_question'
+
+    return False, ''
+
+
+def send_telegram_notification(text):
+    """Send a Telegram message to every configured chat ID. Silent no-op if
+    TELEGRAM_BOT_TOKEN is not set or no chat IDs are configured."""
+    token = os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()
+    chat_ids = get_telegram_chat_ids()
+    if not token or not chat_ids:
+        return 0
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    sent = 0
+    for chat_id in chat_ids:
+        try:
+            resp = requests.post(url, json={
+                'chat_id': chat_id,
+                'text': text,
+                'disable_web_page_preview': True,
+            }, timeout=5)
+            if resp.status_code == 200:
+                sent += 1
+            else:
+                print(f"Telegram send failed for {chat_id}: {resp.status_code} {resp.text[:200]}")
+        except Exception as e:
+            print(f"Telegram send error for {chat_id}: {e}")
+    return sent
+
+
+# Tiny in-memory TTL cache for the polling endpoint.
+_handoff_poll_cache = {'expires_at': 0.0, 'payload': None}
+_HANDOFF_POLL_TTL = 2.0
+
+
+def get_handoff_poll_payload():
+    """Build the polling payload for /admin/api/handoff-poll, with 2s TTL cache."""
+    now = time.time()
+    if _handoff_poll_cache['payload'] is not None and now < _handoff_poll_cache['expires_at']:
+        return _handoff_poll_cache['payload']
+    open_q = AdminIssue.query.filter_by(issue_type='handoff', status='open')
+    latest = open_q.order_by(AdminIssue.created_at.desc()).first()
+    payload = {
+        'open_count': open_q.count(),
+        'latest_id': latest.id if latest else None,
+        'latest_at': latest.created_at.isoformat() if latest else None,
+        'sound_enabled': get_sound_alerts_enabled(),
+    }
+    _handoff_poll_cache['payload'] = payload
+    _handoff_poll_cache['expires_at'] = now + _HANDOFF_POLL_TTL
+    return payload
+
+
+def invalidate_handoff_poll_cache():
+    """Drop the cached poll payload so the next request rebuilds it."""
+    _handoff_poll_cache['payload'] = None
+    _handoff_poll_cache['expires_at'] = 0.0
+
+
+def trigger_handoff(fb_user, reason, user_message):
+    """Run the full handoff flow: mute the bot for the configured window,
+    create an AdminIssue, ping admins via Telegram, send the user a polite
+    waiting message. Safe to call inside the webhook handler."""
+    hours = get_mute_duration_hours()
+    if hours > 0:
+        fb_user.bot_muted_until = datetime.utcnow() + timedelta(hours=hours)
+
+    off_hours = _is_off_hours()
+
+    issue = AdminIssue(
+        facebook_user_id=fb_user.id,
+        issue_type='handoff',
+        content=f"[{reason}]{'[OFF-HOURS]' if off_hours else ''} {user_message}"[:4000],
+        status='open',
+    )
+    db.session.add(issue)
+    db.session.commit()
+
+    invalidate_handoff_poll_cache()
+
+    if off_hours:
+        try:
+            oh_start = int(get_setting('office_hours_start', '8') or '8')
+            oh_end = int(get_setting('office_hours_end', '22') or '22')
+        except ValueError:
+            oh_start, oh_end = 8, 22
+        user_reply = HANDOFF_USER_REPLY_OFF_HOURS.format(start=oh_start, end=oh_end)
+    else:
+        user_reply = HANDOFF_USER_REPLY
+    send_facebook_message(fb_user.facebook_id, user_reply)
+    db.session.add(Message(
+        facebook_user_id=fb_user.id,
+        sender='bot',
+        content=user_reply,
+    ))
+    db.session.commit()
+
+    display_name = fb_user.name or fb_user.facebook_id
+    phone_part = f"\n📞 {fb_user.phone}" if fb_user.phone else ''
+    off_hours_tag = "🌙 [OFF-HOURS] " if off_hours else ""
+    tg_text = (
+        f"{off_hours_tag}🤝 Шинэ handoff хүсэлт\n"
+        f"👤 {display_name}{phone_part}\n"
+        f"📝 Шалтгаан: {reason}\n"
+        f"💬 Мессеж: {user_message[:500]}\n\n"
+        f"Facebook Page Inbox дээрээс хариулна уу."
+    )
+    send_telegram_notification(tg_text)
+    return issue
+
+
+# ===================== AUDIT LOG =====================
+
+def log_admin_action(action, entity_type=None, entity_id=None, entity_label=None, detail=None):
+    """Append an entry to the audit log. Safe to call from any admin route —
+    swallows errors so a logging failure can't break the user-facing action.
+
+    Call AFTER the primary db.session.commit() succeeds; this writes its own
+    row in a fresh add+commit so a failed audit insert doesn't roll back the
+    real change."""
+    try:
+        if not current_user.is_authenticated:
+            return
+        entry = AuditEntry(
+            actor_id=current_user.id,
+            actor_username=current_user.username,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            entity_label=(entity_label or '')[:255] if entity_label else None,
+            detail=detail,
+        )
+        db.session.add(entry)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"log_admin_action failed for {action!r}: {e}")
+
+
+# ===================== SEED / RECURRING =====================
+
+def advance_recurring_courses():
+    """For each is_recurring Course past its end_date, set next start/end dates.
+    First Monday >= 4 weeks after current end_date."""
+    now = datetime.utcnow()
+    updated = 0
+    for course in Course.query.filter_by(is_recurring=True, is_active=True).all():
+        ref_date = course.end_date or course.start_date
+        if not ref_date or ref_date > now:
+            continue
+        candidate = ref_date + timedelta(weeks=4)
+        days_until_monday = (7 - candidate.weekday()) % 7
+        next_start = candidate + timedelta(days=days_until_monday)
+        if course.end_date and course.start_date:
+            duration = course.end_date - course.start_date
+        else:
+            duration = timedelta(weeks=4)
+        course.start_date = next_start
+        course.end_date = next_start + duration
+        updated += 1
+    if updated:
+        db.session.commit()
+        print(f"Recurring courses: advanced {updated} course(s).")
+    return updated
+
+
+_DEFAULT_HANDOFF_KEYWORDS_EXPLICIT = [
+    'ажилтан', 'оператор', 'менежер', 'админтай', 'жинхэнэ хүн',
+    'хүнтэй', 'хүн рүү', 'хүн руу', 'хүний хариу', 'хүнээр',
+    'live agent', 'real agent', 'real person', 'human agent',
+    'speak to human', 'talk to human', 'operator please',
+]
+_DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION = [
+    'болохгүй байна', 'ойлгохгүй', 'ойлгомжгүй', 'муухай', 'үнэхээр муу',
+    'гомдол', 'буруу хариу', 'хариулж чадахгүй', 'юу яриад байгаа',
+    'хэрэггүй бот', 'утгагүй', 'ойлгосонгүй',
+]
+
+
+def seed_handoff_keywords():
+    """Populate HandoffKeyword table from the default lists on first run. Idempotent."""
+    if HandoffKeyword.query.count() > 0:
+        return
+    for kw in _DEFAULT_HANDOFF_KEYWORDS_EXPLICIT:
+        db.session.add(HandoffKeyword(keyword=kw.lower(), keyword_type='explicit', is_active=True))
+    for kw in _DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION:
+        db.session.add(HandoffKeyword(keyword=kw.lower(), keyword_type='frustration', is_active=True))
+    db.session.commit()
+    print(f"Seeded {len(_DEFAULT_HANDOFF_KEYWORDS_EXPLICIT) + len(_DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION)} default handoff keywords.")
+
+
+def seed_courses_and_faqs():
+    """Populate Courses and FAQs with Magic Financial Group defaults if empty.
+    Skipped entirely when SEED_DEFAULTS=false."""
+    if os.environ.get('SEED_DEFAULTS', 'true').strip().lower() != 'true':
+        print("SEED_DEFAULTS=false — skipping default course/FAQ seed.")
+        return
+
+    default_start = datetime.utcnow() + timedelta(days=14)
+
+    if Course.query.count() == 0:
+        courses = [
+            Course(
+                name='Нягтлан-Нярвын хосолсон сургалт — 100% Онлайн',
+                course_type='100% Online',
+                start_date=default_start,
+                time='Хүссэн үедээ судлах',
+                price=360000,
+                description=(
+                    'Бие даан судлах онлайн сургалт. Видео хичээл, бодлогууд, '
+                    'Magic Finance программын 6 сарын үнэгүй эрх багтана.'
+                ),
+                is_active=True,
+            ),
+            Course(
+                name='Нягтлан-Нярвын хосолсон сургалт — Хосолсон хэлбэр',
+                course_type='Hybrid',
+                start_date=default_start,
+                time='Даваа/Лхагва/Баасан танхимд, бусад өдөр онлайн',
+                price=440000,
+                description=(
+                    '7 хоногийн 3 өдөр танхимаар, үлдсэн өдрүүдэд онлайнаар '
+                    'хичээллэх уян хатан хөтөлбөр.'
+                ),
+                is_active=True,
+            ),
+            Course(
+                name='Нягтлан-Нярвын хосолсон сургалт — Багштай онлайн',
+                course_type='Online with Teacher',
+                start_date=default_start,
+                time='Даваа-Баасан онлайн',
+                price=660000,
+                description=(
+                    '1-5 дахь өдөр шууд багштай онлайн хичээл, асуулт-хариулт, '
+                    'бодит жишээний дадлагатай хөтөлбөр.'
+                ),
+                is_active=True,
+            ),
+            Course(
+                name='Нягтлан-Нярвын хосолсон сургалт — Танхим',
+                course_type='Classroom',
+                start_date=default_start,
+                time='Даваа-Баасан, өглөө 10:00-13:00 эсвэл орой 18:00-21:00',
+                price=880000,
+                description=(
+                    'UB Tower Plus, 5 давхар 509 тоот танхимд тогтмол '
+                    'хичээллэх бүрэн хэмжээний сургалт. Багштай шууд харилцана.'
+                ),
+                is_active=True,
+            ),
+        ]
+        for c in courses:
+            db.session.add(c)
+        print(f'Seeded {len(courses)} default courses.')
+
+    if FAQ.query.count() == 0:
+        faqs = [
+            FAQ(question='Сургалт хэдэн долоо хоног үргэлжилдэг вэ?',
+                answer=(
+                    'Сургалт нийт 4 долоо хоног үргэлжилнэ. '
+                    '1-р долоо хоногт нярвын тайлан гаргахыг сурна. '
+                    '2-р долоо хоногт санхүүгийн тайлан, '
+                    '3-р долоо хоногт татварын хичээл, '
+                    '4-р долоо хоногт Magic Finance программ дээр '
+                    'тайлан гаргахыг үздэг.'
+                ),
+                category='Хөтөлбөр'),
+            FAQ(question='Сургалтын үнэ хэд вэ?',
+                answer=(
+                    '100% Онлайн — 360,000₮, Хосолсон хэлбэр — 440,000₮, '
+                    'Багштай онлайн — 660,000₮, Танхим — 880,000₮. '
+                    'PocketZero-оор 4-6 хуваан, хүүгүй шимтгэлгүй төлөх '
+                    'боломжтой.'
+                ),
+                category='Төлбөр'),
+            FAQ(question='Хичээл хэдэн цагт ордог вэ?',
+                answer=(
+                    'Өглөөний анги 10:00–13:00, оройн анги 18:00–21:00 '
+                    'хооронд хичээллэдэг. Та цагаа сонгоход тань туслана.'
+                ),
+                category='Цаг'),
+            FAQ(question='Сургалтын төв хаана байрладаг вэ?',
+                answer=(
+                    'Манай сургалт БЗД 13-р хороолол, Натурын замд байрлах '
+                    'UB Tower Plus, 5 давхар, 509 тоотод явагддаг.'
+                ),
+                category='Хаяг'),
+            FAQ(question='Сургалтын дараа сертификат олгодог уу?',
+                answer=(
+                    'Тийм. 4 долоо хоногийн хичээл дуусаад шалгалт өгсний '
+                    'дараа Мэжик Санхүүгийн Группын албан ёсны сертификат '
+                    'олгоно. Мөн Magic Finance программыг 6 сар үнэгүй '
+                    'ашиглах эрх бэлэглэнэ.'
+                ),
+                category='Сертификат'),
+            FAQ(question='Ямар мэргэжилтэй хүн сурч болох вэ?',
+                answer=(
+                    'Та ямар ч мэргэжилтэй, ямар ч түвшний мэдлэгтэй байсан '
+                    'хамаагүй. Бид эхнээс нь ойлгомжтой, бодит жишээн дээр '
+                    'тулгуурлан заадаг тул шинэхэн суралцагч ч амжилттай '
+                    'төгсөж чадна.'
+                ),
+                category='Бүртгэл'),
+            FAQ(question='Төлбөрөө хуваан төлж болох уу?',
+                answer=(
+                    'Болно. PocketZero апп ашиглан 4-6 хуваан, хүүгүй '
+                    'шимтгэлгүй төлөх боломжтой. Эсвэл сургалтын эхэнд '
+                    'хагасыг нь төлж, хичээл явагдах хугацаандаа үлдсэнийг '
+                    'нөхөн төлж болно.'
+                ),
+                category='Төлбөр'),
+            FAQ(question='Magic Finance программ гэж юу вэ?',
+                answer=(
+                    'Magic Finance бол санхүүгийн тайлан гаргахад '
+                    'зориулагдсан, манай өөрсдийн хөгжүүлсэн программ. '
+                    'Гар аргаар хийдэг ажлыг 80% хүртэл хөнгөвчилж, '
+                    'хяналтаа сайжруулна. Суралцагч бүрт 6 сар үнэгүй '
+                    'ашиглах эрх олгоно.'
+                ),
+                category='Программ'),
+        ]
+        for f in faqs:
+            db.session.add(f)
+        print(f'Seeded {len(faqs)} default FAQs.')
+
+    db.session.commit()
+
+
+# ===================== BACKGROUND TASKS =====================
+
+def polling_task(app):
+    """Background task to poll Facebook posts and auto-comment.
+
+    Pass the Flask app so we can establish an app context for db access
+    inside the worker thread.
+    """
+    while True:
+        try:
+            with app.app_context():
+                posts = get_page_posts()
+                for post in posts:
+                    post_id = post.get('id')
+                    existing = PagePost.query.filter_by(facebook_post_id=post_id).first()
+
+                    if not existing:
+                        post_content = post.get('message') or post.get('story', '')
+                        comment_text = analyze_and_comment_on_post(post_content)
+
+                        if comment_text:
+                            if post_comment_on_page(post_id, comment_text):
+                                page_post = PagePost(
+                                    facebook_post_id=post_id,
+                                    content=post_content,
+                                    comment_posted=True,
+                                    comment_text=comment_text
+                                )
+                                db.session.add(page_post)
+                                db.session.commit()
+
+            time.sleep(60)
+        except Exception as e:
+            print(f"Polling error: {e}")
+            time.sleep(60)
+
+
+def _nudge_message_for(user):
+    stage = (user.funnel_stage or 'curious').lower()
+    name_prefix = ''
+    fname = first_name_of(user.name)
+    if fname:
+        name_prefix = f"{fname} аа, "
+
+    if stage == 'ready':
+        link = GOOGLE_FORM_URL or ''
+        link_line = f"\n\nБүртгэлийн линк: {link}" if link else ""
+        return (
+            f"{name_prefix}та бүртгүүлэх талаар бодож үзсэн байх. "
+            "Утасны дугаараа үлдээвэл бид өөрсдөө эргэж холбогдоно. "
+            "Эсвэл доорх линкээр шууд бүртгүүлж болно." + link_line
+        )
+    if stage == 'pricing':
+        return (
+            f"{name_prefix}өмнө нь сургалтын үнийн талаар асууж байсан шүү. "
+            "PocketZero-оор 4-6 хуваан, хүүгүй төлөх боломж байгаа. "
+            "Тодруулах зүйл байвал чөлөөтэй бичээрэй."
+        )
+    if stage == 'exploring_courses':
+        return (
+            f"{name_prefix}таны сонирхож байсан ангийн талаар нэмж тодруулах "
+            "зүйл байвал бичээрэй. Өөрт тань тохирох хэлбэрийг олоход баяртайгаар "
+            "туслана."
+        )
+    return (
+        f"{name_prefix}танд сургалттай холбоотой ямар нэг асуулт үлдсэн "
+        "бол хариулахад баяртай байх болно 😊"
+    )
+
+
+def nudge_pending_leads():
+    """Send one follow-up to each user whose last message is 4-12h old. Throttled to once per 7 days."""
+    now = datetime.utcnow()
+    window_min = now - timedelta(hours=12)
+    window_max = now - timedelta(hours=4)
+    nudge_throttle = now - timedelta(days=7)
+
+    last_msg_subq = (db.session.query(
+        Message.facebook_user_id.label('uid'),
+        db.func.max(Message.created_at).label('last_at'),
+    ).group_by(Message.facebook_user_id).subquery())
+
+    candidates = (db.session.query(FacebookUser, last_msg_subq.c.last_at)
+                  .join(last_msg_subq, FacebookUser.id == last_msg_subq.c.uid)
+                  .filter(last_msg_subq.c.last_at >= window_min)
+                  .filter(last_msg_subq.c.last_at <= window_max)
+                  .filter(db.or_(
+                      FacebookUser.last_nudge_at == None,  # noqa: E711
+                      FacebookUser.last_nudge_at < nudge_throttle,
+                  ))
+                  .all())
+
+    sent = 0
+    for user, last_at in candidates:
+        msg = _nudge_message_for(user)
+        if not send_facebook_message(user.facebook_id, msg):
+            continue
+        db.session.add(Message(
+            facebook_user_id=user.id,
+            sender='bot',
+            content=msg,
+        ))
+        user.last_nudge_at = now
+        db.session.commit()
+        sent += 1
+    if sent:
+        print(f"Nudge: sent {sent} follow-up(s).")
+    return sent
+
+
+def nudge_task(app):
+    """Background loop running nudge_pending_leads() every 30 minutes."""
+    while True:
+        try:
+            with app.app_context():
+                nudge_pending_leads()
+        except Exception as e:
+            print(f"Nudge error: {e}")
+        time.sleep(30 * 60)

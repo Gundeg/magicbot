@@ -20,16 +20,17 @@
                     <i class="bi bi-mortarboard"></i> Ботын дүр (Persona)
                 </div>
                 <div class="card-body">
+                    <label class="form-label visually-hidden" for="botPersona">Ботын дүр (Persona)</label>
                     <p class="text-muted small mb-2">
                         Ботын танилцуулга, дуу хоолой, ярианы хэв маяг. Энэ бол системийн зааварчилгааны эхний өгүүлбэр —
                         "Та ... туслах. ... хариулна." гэх мэт.
                     </p>
-                    <textarea name="bot_persona" class="form-control font-monospace" rows="6"
+                    <textarea name="bot_persona" id="botPersona" class="form-control font-monospace" rows="6"
                               placeholder="Хоосон үлдээвэл анхдагч утга ашиглагдана."
                               {% if current_user.role != 'super_admin' %}readonly{% endif %}>{{ persona_value }}</textarea>
                     {% if not persona_value %}
                     <details class="mt-2">
-                        <summary class="text-muted small" style="cursor: pointer;">
+                        <summary class="text-muted small cursor-pointer">
                             Хэрэглэгдэх анхдагч утга харах
                         </summary>
                         <pre class="small text-muted bg-light p-2 mt-2 rounded">{{ persona_fallback }}</pre>
@@ -43,20 +44,21 @@
                     <i class="bi bi-book-half"></i> Сургалтын суурь агуулга (Base intro)
                 </div>
                 <div class="card-body">
+                    <label class="form-label visually-hidden" for="trainingContent">Сургалтын суурь агуулга</label>
                     <p class="text-muted small mb-2">
                         Компанийн ерөнхий танилцуулга — нэг л удаа бичдэг "суурь" блок.
                         Шинэ нэмэлт, тодруулга нэмэхдээ доорх "Нэмэлт тайлбарууд" хэсгийг ашигла —
                         тэгвэл хуучин агуулгыг устгахгүй, олон удирдлагатай зэрэгцэн ажиллах боломжтой.
                     </p>
-                    <textarea name="training_content" class="form-control font-monospace" rows="14"
+                    <textarea name="training_content" id="trainingContent" class="form-control font-monospace" rows="14"
                               placeholder="Хоосон үлдээвэл анхдагч утга ашиглагдана."
                               {% if current_user.role != 'super_admin' %}readonly{% endif %}>{{ training_value }}</textarea>
                     {% if not training_value %}
                     <details class="mt-2">
-                        <summary class="text-muted small" style="cursor: pointer;">
+                        <summary class="text-muted small cursor-pointer">
                             Хэрэглэгдэх анхдагч утга харах ({{ training_fallback|length }} тэмдэгт)
                         </summary>
-                        <pre class="small text-muted bg-light p-2 mt-2 rounded" style="max-height: 300px; overflow-y: auto;">{{ training_fallback }}</pre>
+                        <pre class="small text-muted bg-light p-2 mt-2 rounded scroll-300">{{ training_fallback }}</pre>
                     </details>
                     {% endif %}
                 </div>
@@ -81,7 +83,7 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-list-check"></i> Нэмэлт тайлбарууд (Snippets)</span>
-                <button class="btn btn-sm btn-light" id="addSnippetBtn" data-bs-toggle="modal" data-bs-target="#snippetModal">
+                <button type="button" class="btn btn-sm btn-light" id="addSnippetBtn" data-bs-toggle="modal" data-bs-target="#snippetModal">
                     <i class="bi bi-plus-circle"></i> Нэмэлт нэмэх
                 </button>
             </div>
@@ -185,7 +187,7 @@
 </div>
 
 <div class="modal fade" id="snippetModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="snippetModalTitle">Нэмэлт тайлбар нэмэх</h5>
@@ -195,13 +197,13 @@
                 <form id="snippetForm">
                     <input type="hidden" id="snippetId" value="">
                     <div class="mb-3">
-                        <label class="form-label">Гарчиг <span class="text-danger">*</span></label>
+                        <label class="form-label" for="snippetTitle">Гарчиг <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="snippetTitle"
                                placeholder="Жишээ: PocketZero-оор төлөх дэлгэрэнгүй" required>
                     </div>
                     <div class="row">
                         <div class="col-md-7 mb-3">
-                            <label class="form-label">Ангилал</label>
+                            <label class="form-label" for="snippetCategory">Ангилал</label>
                             <input type="text" class="form-control" id="snippetCategory"
                                    placeholder="Жишээ: Төлбөр, Хичээл, Сертификат">
                         </div>
@@ -214,7 +216,7 @@
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Агуулга <span class="text-danger">*</span></label>
+                        <label class="form-label" for="snippetBody">Агуулга <span class="text-danger">*</span></label>
                         <textarea class="form-control font-monospace" id="snippetBody" rows="8"
                                   placeholder="Бодит чатнаас гарсан асуултанд яаж хариулахыг тайлбарла..." required></textarea>
                     </div>

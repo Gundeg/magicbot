@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block title %}Програм хангамж - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Програм хангамжийн удирдлага{% endblock %}
+
+{% block breadcrumb %}
+<div class="breadcrumb-bar">
+    <a href="{{ url_for('business_lines') }}"><i class="bi bi-diagram-3"></i> Бизнесийн нэгжүүд</a>
+    <i class="bi bi-chevron-right mx-1"></i>
+    <span class="text-dark fw-semibold"><i class="bi bi-cloud-fill me-1"></i>Magic Cloud</span>
+    <i class="bi bi-chevron-right mx-1"></i>
+    <span class="text-dark fw-semibold">Програм хангамж</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-box-seam"></i> Програм хангамж, лицензүүд</span>
+        <button type="button" class="btn btn-sm btn-light" id="addSoftwareBtn" data-bs-toggle="modal" data-bs-target="#softwareModal">
+            <i class="bi bi-plus-circle"></i> Програм нэмэх
+        </button>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-info d-flex gap-2 align-items-start py-2 mb-3 alert-brand-soft">
+            <i class="bi bi-info-circle-fill mt-1 flex-shrink-0"></i>
+            <div>
+                <strong>Magic Cloud ХХК</strong>-ын зарж буй програм хангамж, лицензүүдийг энд бүртгэнэ —
+                Magic Finance, Microsoft, Kaspersky гэх мэт. Үнэ нь хэрэглэгчийн тоо/захиалгаар тооцоологддог
+                бол хоосон үлдээж болно.
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Нэр</th>
+                        <th>Үйлдвэрлэгч</th>
+                        <th>Тайлбар</th>
+                        <th>Үнэ (₮)</th>
+                        <th>Төлөв</th>
+                        <th class="text-end">Үйлдэл</th>
+                    </tr>
+                </thead>
+                <tbody id="softwareList">
+                    {% for s in items %}
+                    <tr data-id="{{ s.id }}"
+                        data-name="{{ s.name | e }}"
+                        data-description="{{ (s.description or '') | e }}"
+                        data-vendor="{{ (s.vendor or '') | e }}"
+                        data-price="{{ s.price | int if s.price else '' }}"
+                        data-status-note="{{ (s.status_note or '') | e }}"
+                        data-active="{{ '1' if s.is_active else '0' }}">
+                        <td><strong>{{ s.name }}</strong></td>
+                        <td class="small">{{ s.vendor or '—' }}</td>
+                        <td class="text-muted small col-max-320">
+                            {{ (s.description or '')[:140] }}{% if s.description and s.description|length > 140 %}…{% endif %}
+                        </td>
+                        <td>{{ "{:,.0f}".format(s.price) if s.price else '—' }}</td>
+                        <td>
+                            {% if s.is_active %}
+                                <span class="badge bg-success">Идэвхтэй</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Түр зогссон</span>
+                                {% if s.status_note %}
+                                    <div class="text-muted small mt-1">{{ s.status_note }}</div>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-sm btn-warning edit-software" data-id="{{ s.id }}" title="Засах">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm {{ 'btn-outline-secondary' if s.is_active else 'btn-success' }} toggle-software"
+                                    data-id="{{ s.id }}"
+                                    data-active="{{ '1' if s.is_active else '0' }}"
+                                    title="{{ 'Түр зогсоох' if s.is_active else 'Идэвхжүүлэх' }}">
+                                <i class="bi {{ 'bi-pause-circle' if s.is_active else 'bi-play-circle' }}"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-danger delete-software" data-id="{{ s.id }}" title="Устгах">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-5">
+                            <i class="bi bi-box-seam empty-icon"></i>
+                            <div class="mt-2">Одоогоор програм/лиценз бүртгэгдээгүй байна.</div>
+                            <div class="small mt-1">Дээрх "Програм нэмэх" товчоор эхний программаа нэмнэ үү.</div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Software modal -->
+<div class="modal fade" id="softwareModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="softwareModalTitle">Програм нэмэх</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
+            </div>
+            <div class="modal-body">
+                <form id="softwareForm">
+                    <input type="hidden" id="softwareId" value="">
+                    <div class="row">
+                        <div class="col-md-7 mb-3">
+                            <label class="form-label" for="softwareName">Нэр <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="softwareName"
+                                   placeholder="Жишээ: Magic Finance" required>
+                        </div>
+                        <div class="col-md-5 mb-3">
+                            <label class="form-label" for="softwareVendor">Үйлдвэрлэгч</label>
+                            <input type="text" class="form-control" id="softwareVendor"
+                                   placeholder="Magic Cloud, Microsoft, Kaspersky">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="softwareDescription">Тайлбар</label>
+                        <textarea class="form-control" id="softwareDescription" rows="3"
+                                  placeholder="Юу хийдэг, ямар хэрэглэгчид тохиромжтой, лицензийн дэлгэрэнгүй..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="softwarePrice">Үнэ (₮) <small class="text-muted">— заавал биш</small></label>
+                        <input type="number" class="form-control" id="softwarePrice"
+                               placeholder="Хэрэглэгчийн тоо/захиалгаар тооцох бол хоосон">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Цуцлах</button>
+                <button type="button" class="btn btn-primary" id="saveSoftwareBtn">Хадгалах</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toggle modal -->
+<div class="modal fade" id="toggleSoftwareModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="toggleSoftwareTitle">Програмын төлөв өөрчлөх</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="toggleSoftwareId">
+                <p id="toggleSoftwareMsg"></p>
+                <div class="mb-3">
+                    <label class="form-label" for="toggleSoftwareNote">
+                        Тэмдэглэл <small class="text-muted">(заавал биш — AI-д харагдана)</small>
+                    </label>
+                    <input type="text" class="form-control" id="toggleSoftwareNote"
+                           placeholder="Жишээ: Лицензийн шинэчлэлт хүлээгдэж байна">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Цуцлах</button>
+                <button type="button" class="btn btn-primary" id="confirmToggleSoftwareBtn">Тийм, өөрчлөх</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const softwareUrl = '{{ url_for("software") }}';
+
+function postSoftware(payload) {
+    return fetch(softwareUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    }).then(r => r.json());
+}
+
+document.getElementById('addSoftwareBtn').addEventListener('click', () => {
+    document.getElementById('softwareForm').reset();
+    document.getElementById('softwareId').value = '';
+    document.getElementById('softwareModalTitle').textContent = 'Програм нэмэх';
+});
+
+document.getElementById('saveSoftwareBtn').addEventListener('click', () => {
+    const id = document.getElementById('softwareId').value;
+    const payload = {
+        action: id ? 'edit' : 'add',
+        id: id,
+        name: document.getElementById('softwareName').value,
+        description: document.getElementById('softwareDescription').value,
+        vendor: document.getElementById('softwareVendor').value,
+        price: document.getElementById('softwarePrice').value,
+    };
+    postSoftware(payload).then(r => {
+        if (r.success) location.reload();
+        else alert(r.error || 'Алдаа гарлаа.');
+    });
+});
+
+document.querySelectorAll('.edit-software').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const row = document.querySelector(`tr[data-id="${btn.dataset.id}"]`);
+        document.getElementById('softwareId').value = btn.dataset.id;
+        document.getElementById('softwareName').value = row.dataset.name;
+        document.getElementById('softwareDescription').value = row.dataset.description;
+        document.getElementById('softwareVendor').value = row.dataset.vendor;
+        document.getElementById('softwarePrice').value = row.dataset.price;
+        document.getElementById('softwareModalTitle').textContent = 'Програм засах';
+        new bootstrap.Modal(document.getElementById('softwareModal')).show();
+    });
+});
+
+document.querySelectorAll('.toggle-software').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const isActive = btn.dataset.active === '1';
+        if (!isActive) {
+            postSoftware({action: 'toggle', id: id, status_note: ''}).then(r => {
+                if (r.success) location.reload();
+                else alert('Алдаа гарлаа');
+            });
+            return;
+        }
+        const row = document.querySelector(`tr[data-id="${id}"]`);
+        document.getElementById('toggleSoftwareId').value = id;
+        document.getElementById('toggleSoftwareNote').value = row.dataset.statusNote || '';
+        document.getElementById('toggleSoftwareTitle').textContent = 'Програм түр зогсоох';
+        document.getElementById('toggleSoftwareMsg').textContent =
+            'Энэ программыг түр зогсоох уу? AI бот хэрэглэгчид зогссон гэдгийг мэдэгдэнэ.';
+        new bootstrap.Modal(document.getElementById('toggleSoftwareModal')).show();
+    });
+});
+
+document.getElementById('confirmToggleSoftwareBtn').addEventListener('click', () => {
+    const id = document.getElementById('toggleSoftwareId').value;
+    const note = document.getElementById('toggleSoftwareNote').value;
+    postSoftware({action: 'toggle', id: id, status_note: note}).then(r => {
+        if (r.success) location.reload();
+        else alert('Алдаа гарлаа');
+    });
+});
+
+document.querySelectorAll('.delete-software').forEach(btn => {
+    btn.addEventListener('click', () => {
+        if (!confirm('Энэ программыг устгах уу?')) return;
+        postSoftware({action: 'delete', id: btn.dataset.id}).then(r => {
+            if (r.success) location.reload();
+        });
+    });
+});
+
+document.getElementById('softwareModal').addEventListener('hidden.bs.modal', () => {
+    document.getElementById('softwareForm').reset();
+    document.getElementById('softwareId').value = '';
+    document.getElementById('softwareModalTitle').textContent = 'Програм нэмэх';
+});
+</script>
+{% endblock %}

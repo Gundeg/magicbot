@@ -4,48 +4,143 @@
 
 {% block page_title %}Хяналтын самбар{% endblock %}
 
+{% block extra_css %}
+<style>
+    .stack-card {
+        background: white;
+        border-radius: 10px;
+        padding: 16px 18px;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        text-decoration: none;
+        color: inherit;
+        transition: box-shadow 0.18s, transform 0.18s;
+        height: 100%;
+    }
+    .stack-card:hover {
+        box-shadow: 0 4px 16px rgba(0,80,80,0.15);
+        transform: translateY(-2px);
+        color: inherit;
+    }
+    .stack-card .icon-circle {
+        width: 44px; height: 44px;
+        border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.3rem;
+        flex-shrink: 0;
+    }
+    .stack-card .stack-count {
+        font-size: 1.6rem; font-weight: 700; line-height: 1;
+    }
+    .stack-card .stack-label {
+        font-size: 0.78rem; color: #666; margin-top: 2px;
+    }
+    .stack-card .stack-hint {
+        font-size: 0.7rem; color: #999;
+    }
+    .stack-card.urgent .icon-circle { background: #fdecea; color: #dc3545; }
+    .stack-card.urgent .stack-count { color: #dc3545; }
+    .stack-card.warm    .icon-circle { background: #fff3e0; color: #e65100; }
+    .stack-card.warm    .stack-count { color: #e65100; }
+    .stack-card.info    .icon-circle { background: var(--brand-muted); color: var(--brand); }
+    .stack-card.info    .stack-count { color: var(--brand); }
+    .stack-card.calm    .icon-circle { background: #e8f5e9; color: #28a745; }
+    .stack-card.calm    .stack-count { color: #28a745; }
+    .stack-card.zero    { opacity: 0.65; }
+
+    .health-row {
+        display: flex; align-items: center; gap: 8px;
+        padding: 8px 0;
+        border-bottom: 1px dashed #eee;
+        font-size: 0.85rem;
+    }
+    .health-row:last-child { border-bottom: none; }
+    .health-row .dot {
+        width: 10px; height: 10px; border-radius: 50%;
+        flex-shrink: 0;
+    }
+    .health-row .dot.ok      { background: #28a745; box-shadow: 0 0 0 3px rgba(40,167,69,0.18); }
+    .health-row .dot.warn    { background: #ffc107; box-shadow: 0 0 0 3px rgba(255,193,7,0.22); }
+    .health-row .dot.err     { background: #dc3545; box-shadow: 0 0 0 3px rgba(220,53,69,0.18); }
+    .health-row .label { flex: 1; color: #444; }
+    .health-row .detail { color: #888; font-size: 0.78rem; }
+
+    .zone-label {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #888;
+        margin: 18px 0 10px;
+    }
+    .zone-label .zone-rule {
+        flex: 1; height: 1px; background: #e1e7e7;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="row g-3 mb-4">
-    <div class="col-6 col-md-3">
-        <a href="{{ url_for('leads') }}" class="text-decoration-none">
-            <div class="stat-card">
-                <div class="stat-icon"><i class="bi bi-person-plus"></i></div>
-                <h3>{{ leads_count }}</h3>
-                <p>Нийт харилцагч</p>
+
+{# ════════════════════════════════════════════════════════════════════════
+   ZONE 1 — Тэргүүлэх ажил (Top of stack)
+   Action-oriented summary. Each card links to where the work happens.
+   ════════════════════════════════════════════════════════════════════════ #}
+<div class="zone-label">
+    <i class="bi bi-lightning-charge-fill text-brand"></i>
+    <span>Тэргүүлэх ажил</span>
+    <span class="zone-rule"></span>
+</div>
+
+<div class="row g-3 mb-2">
+    <div class="col-12 col-md-6 col-lg-3">
+        <a href="{{ url_for('leads') }}#hotTab"
+           class="stack-card {{ 'warm' if hot_prospects_count else 'calm zero' }}">
+            <div class="icon-circle"><i class="bi bi-fire"></i></div>
+            <div>
+                <div class="stack-count">{{ hot_prospects_count }}</div>
+                <div class="stack-label">Холбоо тогтоох халуун харилцагч</div>
+                <div class="stack-hint">Дугаар үлдээгээгүй ч үнэ/бүртгэлийн шатанд</div>
             </div>
         </a>
     </div>
-    <div class="col-6 col-md-3">
-        <a href="{{ url_for('issues') }}" class="text-decoration-none">
-            <div class="stat-card">
-                <div class="stat-icon" style="background: #fdecea; color: #dc3545;"><i class="bi bi-exclamation-circle"></i></div>
-                <h3 style="color: #dc3545;">{{ open_issues }}</h3>
-                <p>Нээлттэй асуудал</p>
+    <div class="col-12 col-md-6 col-lg-3">
+        <a href="{{ url_for('issues') }}"
+           class="stack-card {{ 'urgent' if aging_open_issues else ('info' if open_issues else 'calm zero') }}">
+            <div class="icon-circle"><i class="bi bi-hourglass-split"></i></div>
+            <div>
+                <div class="stack-count">{{ aging_open_issues }}</div>
+                <div class="stack-label">24 цагаас илүү нээлттэй асуудал</div>
+                <div class="stack-hint">Нийт нээлттэй: {{ open_issues }}</div>
             </div>
         </a>
     </div>
-    <div class="col-6 col-md-3">
-        <a href="{{ url_for('logs') }}" class="text-decoration-none">
-            <div class="stat-card">
-                <div class="stat-icon" style="background: #e8f5e9; color: #28a745;"><i class="bi bi-chat-left-text"></i></div>
-                <h3 style="color: #28a745;">{{ total_messages }}</h3>
-                <p>Нийт мессеж</p>
+    <div class="col-12 col-md-6 col-lg-3">
+        <a href="{{ url_for('issues') }}"
+           class="stack-card {{ 'urgent' if muted_users_count else 'calm zero' }}">
+            <div class="icon-circle"><i class="bi bi-volume-mute"></i></div>
+            <div>
+                <div class="stack-count">{{ muted_users_count }}</div>
+                <div class="stack-label">Чимээгүй болгосон бот</div>
+                <div class="stack-hint">Хүн орлох ёстой яриа</div>
             </div>
         </a>
     </div>
-    <div class="col-6 col-md-3">
-        <a href="{{ url_for('leads') }}#hotTab" class="text-decoration-none">
-            <div class="stat-card">
-                <div class="stat-icon" style="background: #fff3e0; color: #e65100;"><i class="bi bi-fire"></i></div>
-                <h3 style="color: #e65100;">{{ hot_prospects_count }}</h3>
-                <p>Халуун харилцагч</p>
+    <div class="col-12 col-md-6 col-lg-3">
+        <a href="{{ url_for('leads') }}"
+           class="stack-card {{ 'info' if leads_count else 'calm zero' }}">
+            <div class="icon-circle"><i class="bi bi-person-plus"></i></div>
+            <div>
+                <div class="stack-count">{{ leads_count }}</div>
+                <div class="stack-label">Нийт баталгаажсан харилцагч</div>
+                <div class="stack-hint">Утасны дугаар үлдээсэн</div>
             </div>
         </a>
     </div>
 </div>
 
-<div class="row">
-    <div class="col-md-6">
+<div class="row mt-1">
+    <div class="col-lg-6">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-exclamation-circle"></i> Сүүлийн асуудлууд</span>
@@ -66,14 +161,14 @@
                             {% for issue in recent_issues %}
                             <tr>
                                 <td class="ps-3 small">{{ issue.facebook_user.name or 'Unknown' }}</td>
-                                <td class="small text-truncate" style="max-width: 180px;">{{ issue.content[:60] }}</td>
+                                <td class="small text-truncate col-max-180">{{ issue.content[:60] }}</td>
                                 <td>
                                     {% if issue.status == 'open' %}
-                                        <span class="badge bg-danger" style="font-size:0.65rem;">Нээлттэй</span>
+                                        <span class="badge bg-danger fs-65">Нээлттэй</span>
                                     {% elif issue.status == 'in_progress' %}
-                                        <span class="badge bg-warning text-dark" style="font-size:0.65rem;">Хийгдэж байна</span>
+                                        <span class="badge bg-warning text-dark fs-65">Хийгдэж байна</span>
                                     {% else %}
-                                        <span class="badge bg-success" style="font-size:0.65rem;">Шийдсэн</span>
+                                        <span class="badge bg-success fs-65">Шийдсэн</span>
                                     {% endif %}
                                 </td>
                             </tr>
@@ -87,7 +182,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6">
+    <div class="col-lg-6">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-person-plus"></i> Сүүлийн харилцагчид</span>
@@ -109,7 +204,7 @@
                             <tr>
                                 <td class="ps-3 small">{{ lead.name or 'Unknown' }}</td>
                                 <td>
-                                    <span class="badge" style="background: var(--brand); font-size:0.65rem;">
+                                    <span class="badge bg-brand fs-65">
                                         {{ lead.funnel_stage or '—' }}
                                     </span>
                                 </td>
@@ -127,7 +222,97 @@
     </div>
 </div>
 
-<div class="row mt-2">
+{# ════════════════════════════════════════════════════════════════════════
+   ZONE 2 — Системийн эрүүл мэнд (System health)
+   Lightweight readiness signals so a broken bot is spotted before users
+   complain. No background processes — every check derives from existing
+   state at render time.
+   ════════════════════════════════════════════════════════════════════════ #}
+<div class="zone-label">
+    <i class="bi bi-heart-pulse-fill text-brand"></i>
+    <span>Системийн эрүүл мэнд</span>
+    <span class="zone-rule"></span>
+</div>
+
+<div class="row mt-1">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-plug"></i> Холболтын төлөв</div>
+            <div class="card-body py-2">
+                <div class="health-row">
+                    <span class="dot {{ 'ok' if health.openai_ready else 'err' }}"></span>
+                    <span class="label">OpenAI API түлхүүр</span>
+                    <span class="detail">{{ 'Тогтоосон' if health.openai_ready else 'Тогтоогоогүй' }}</span>
+                </div>
+                <div class="health-row">
+                    <span class="dot {{ 'ok' if health.facebook_token_ready else 'err' }}"></span>
+                    <span class="label">Facebook Page access token</span>
+                    <span class="detail">{{ 'Тогтоосон' if health.facebook_token_ready else 'Тогтоогоогүй' }}</span>
+                </div>
+                <div class="health-row">
+                    <span class="dot {{ 'ok' if health.facebook_signature_ready else 'warn' }}"></span>
+                    <span class="label">Facebook App Secret (webhook гарын үсэг)</span>
+                    <span class="detail">{{ 'Идэвхтэй' if health.facebook_signature_ready else 'Анхааруулга — production-д тогтоо' }}</span>
+                </div>
+                <div class="health-row">
+                    <span class="dot {{ 'ok' if health.telegram_ready else 'warn' }}"></span>
+                    <span class="label">Telegram анхааруулга</span>
+                    <span class="detail">{{ 'Холбогдсон' if health.telegram_ready else 'Тохируулаагүй' }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-activity"></i> Идэвх</div>
+            <div class="card-body py-2">
+                <div class="health-row">
+                    <span class="dot {% if health.last_message_age_minutes is none %}warn
+                                      {%- elif health.last_message_age_minutes < 60 %}ok
+                                      {%- elif health.last_message_age_minutes < 360 %}warn
+                                      {%- else %}err{% endif %}"></span>
+                    <span class="label">Сүүлийн ирсэн мессеж</span>
+                    <span class="detail">
+                        {% if health.last_message_at %}
+                            {{ health.last_message_at.strftime('%Y-%m-%d %H:%M') }} UTC
+                            ({{ health.last_message_age_minutes }} мин өмнө)
+                        {% else %}
+                            Одоогоор мессеж ирээгүй
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="health-row">
+                    <span class="dot info bg-brand"></span>
+                    <span class="label">Нийт мессеж бүртгэсэн</span>
+                    <span class="detail">{{ total_messages }}</span>
+                </div>
+                <div class="health-row">
+                    <span class="dot {{ 'ok' if open_issues == 0 else 'warn' }}"></span>
+                    <span class="label">Нээлттэй асуудал</span>
+                    <span class="detail">{{ open_issues }}</span>
+                </div>
+                <div class="health-row">
+                    <span class="dot {{ 'ok' if muted_users_count == 0 else 'warn' }}"></span>
+                    <span class="label">Чимээгүй болгосон бот</span>
+                    <span class="detail">{{ muted_users_count }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ════════════════════════════════════════════════════════════════════════
+   ZONE 3 — Чиг хандлага (Trends)
+   Analytics for the periodic review, not the day-to-day. Moved below the
+   action area on purpose.
+   ════════════════════════════════════════════════════════════════════════ #}
+<div class="zone-label">
+    <i class="bi bi-graph-up-arrow text-brand"></i>
+    <span>Чиг хандлага</span>
+    <span class="zone-rule"></span>
+</div>
+
+<div class="row mt-1">
     <div class="col-12">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -145,7 +330,7 @@
                             <tr>
                                 <th>Ангилал</th>
                                 <th class="text-end">Хэрэглэгч</th>
-                                <th style="width:45%"></th>
+                                <th class="col-w-45"><span class="visually-hidden">Үйлдэл</span></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -162,14 +347,18 @@
                                     {% elif topic == 'unclassified' %}
                                         <span class="badge bg-light text-muted border">Ангилагдаагүй</span>
                                     {% else %}
-                                        <span class="badge" style="background:var(--brand);">{{ topic }}</span>
+                                        <span class="badge bg-brand">{{ topic }}</span>
                                     {% endif %}
                                 </td>
                                 <td class="text-end fw-semibold">{{ count }}</td>
                                 <td>
                                     {% if total_classified > 0 %}
-                                    <div class="progress" style="height:8px;margin-top:6px;">
-                                        <div class="progress-bar" style="width:{{ (count / total_classified * 100)|round(1) }}%;background:var(--brand);"></div>
+                                    {# Bucket the percentage to the nearest 5% so the bar width comes from a class
+                                       instead of an inline style. Sub-5% precision isn't meaningful on this dashboard. #}
+                                    {% set pct = ((count / total_classified * 100) / 5) | round(0, 'floor') | int * 5 %}
+                                    {% if pct > 100 %}{% set pct = 100 %}{% endif %}
+                                    <div class="progress progress-thin">
+                                        <div class="progress-bar bg-brand pw-{{ pct }}"></div>
                                     </div>
                                     {% endif %}
                                 </td>
@@ -183,6 +372,69 @@
                     Ангилал байхгүй байна. "Ангилах" товч дарж AI ангиллыг эхлүүлнэ үү.
                 </div>
                 {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-1">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-diagram-3"></i> Бизнесийн нэгжүүд — {{ tenant_short_name or tenant_legal_name }}</span>
+                <a href="{{ url_for('business_lines') }}" class="btn btn-sm btn-light">Удирдах</a>
+            </div>
+            <div class="card-body py-3">
+                <p class="text-muted small mb-3">
+                    Bot нь доорх бизнесийн нэгжүүдийн тухай мэдэх ёстой. Нэгж бүрийн дэлгэрэнгүй тохиргоог
+                    <a href="{{ url_for('business_lines') }}">Бизнесийн нэгжүүд</a> хэсгээс засна.
+                </p>
+                <div class="row g-2">
+                    {% if business_lines_summary %}
+                        {% for line in business_lines_summary %}
+                        <div class="col-md-4 col-sm-6">
+                            <div class="border rounded p-2 h-100 {% if line.is_active %}biz-card-active{% else %}biz-card-paused opacity-50{% endif %}">
+                                <div class="d-flex align-items-start gap-2">
+                                    <div class="icon-md">
+                                        <i class="bi {% if 'сургалт' in line.name|lower or 'choice' in line.name|lower %}bi-mortarboard-fill text-success{% elif 'finance' in line.name|lower or 'санхүү' in line.name|lower %}bi-graph-up text-primary{% else %}bi-briefcase text-secondary{% endif %}"></i>
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        <div class="fw-semibold fs-88">{{ line.name }}</div>
+                                        {% if line.description %}
+                                        <div class="text-muted summary-desc">
+                                            {{ line.description[:80] }}{% if line.description|length > 80 %}…{% endif %}
+                                        </div>
+                                        {% endif %}
+                                        <div class="mt-1 d-flex gap-1 flex-wrap">
+                                            {% if line.is_active %}
+                                                <span class="badge bg-success fs-62">Идэвхтэй</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary fs-62">Зогссон</span>
+                                            {% endif %}
+                                            {% if line.action == 'answer' %}
+                                                <span class="badge bg-info fs-62">Хариулах</span>
+                                            {% else %}
+                                                <span class="badge bg-warning text-dark fs-62">Чиглүүлэх</span>
+                                            {% endif %}
+                                            {# Highlight the primary training line and show its courses count #}
+                                            {% if 'choice' in line.name|lower or 'сургалт' in line.name|lower %}
+                                                <a href="{{ url_for('courses') }}" class="badge text-decoration-none bg-brand fs-62">
+                                                    <i class="bi bi-calendar-event"></i> Сургалтууд →
+                                                </a>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="col-12 text-center text-muted small py-2">
+                            Бизнесийн нэгж нэмэгдээгүй байна.
+                            <a href="{{ url_for('business_lines') }}">Нэмэх →</a>
+                        </div>
+                    {% endif %}
+                </div>
             </div>
         </div>
     </div>
@@ -210,4 +462,3 @@ document.getElementById('classifyBtn').addEventListener('click', function () {
 </script>
 
 {% endblock %}
-

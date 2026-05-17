@@ -14,7 +14,7 @@
         </p>
     </div>
     <div class="col-auto">
-        <button class="btn btn-primary btn-sm" id="addKwBtn" data-bs-toggle="modal" data-bs-target="#kwModal">
+        <button type="button" class="btn btn-primary btn-sm" id="addKwBtn" data-bs-toggle="modal" data-bs-target="#kwModal">
             <i class="bi bi-plus-circle"></i> Нэмэх
         </button>
     </div>
@@ -53,21 +53,21 @@
                                 <td class="small text-muted">{{ kw.note or '—' }}</td>
                                 <td>
                                     {% if kw.is_active %}
-                                        <span class="badge bg-success" style="font-size:0.65rem;">Идэвхтэй</span>
+                                        <span class="badge bg-success fs-65">Идэвхтэй</span>
                                     {% else %}
-                                        <span class="badge bg-secondary" style="font-size:0.65rem;">Идэвхгүй</span>
+                                        <span class="badge bg-secondary fs-65">Идэвхгүй</span>
                                     {% endif %}
                                 </td>
                                 <td class="text-end pe-3">
-                                    <button class="btn btn-xs btn-outline-secondary edit-kw p-1 px-2"
+                                    <button type="button" class="btn btn-xs btn-outline-secondary edit-kw p-1 px-2"
                                             data-id="{{ kw.id }}" data-bs-toggle="modal" data-bs-target="#kwModal"
-                                            title="Засах"><i class="bi bi-pencil" style="font-size:0.75rem;"></i></button>
-                                    <button class="btn btn-xs btn-outline-warning toggle-kw p-1 px-2"
+                                            title="Засах"><i class="bi bi-pencil fs-75"></i></button>
+                                    <button type="button" class="btn btn-xs btn-outline-warning toggle-kw p-1 px-2"
                                             data-id="{{ kw.id }}"
-                                            title="Идэвх солих"><i class="bi bi-toggle2-on" style="font-size:0.75rem;"></i></button>
-                                    <button class="btn btn-xs btn-outline-danger delete-kw p-1 px-2"
+                                            title="Идэвх солих"><i class="bi bi-toggle2-on fs-75"></i></button>
+                                    <button type="button" class="btn btn-xs btn-outline-danger delete-kw p-1 px-2"
                                             data-id="{{ kw.id }}"
-                                            title="Устгах"><i class="bi bi-trash" style="font-size:0.75rem;"></i></button>
+                                            title="Устгах"><i class="bi bi-trash fs-75"></i></button>
                                 </td>
                             </tr>
                             {% else %}
@@ -113,21 +113,21 @@
                                 <td class="small text-muted">{{ kw.note or '—' }}</td>
                                 <td>
                                     {% if kw.is_active %}
-                                        <span class="badge bg-success" style="font-size:0.65rem;">Идэвхтэй</span>
+                                        <span class="badge bg-success fs-65">Идэвхтэй</span>
                                     {% else %}
-                                        <span class="badge bg-secondary" style="font-size:0.65rem;">Идэвхгүй</span>
+                                        <span class="badge bg-secondary fs-65">Идэвхгүй</span>
                                     {% endif %}
                                 </td>
                                 <td class="text-end pe-3">
-                                    <button class="btn btn-xs btn-outline-secondary edit-kw p-1 px-2"
+                                    <button type="button" class="btn btn-xs btn-outline-secondary edit-kw p-1 px-2"
                                             data-id="{{ kw.id }}" data-bs-toggle="modal" data-bs-target="#kwModal"
-                                            title="Засах"><i class="bi bi-pencil" style="font-size:0.75rem;"></i></button>
-                                    <button class="btn btn-xs btn-outline-warning toggle-kw p-1 px-2"
+                                            title="Засах"><i class="bi bi-pencil fs-75"></i></button>
+                                    <button type="button" class="btn btn-xs btn-outline-warning toggle-kw p-1 px-2"
                                             data-id="{{ kw.id }}"
-                                            title="Идэвх солих"><i class="bi bi-toggle2-on" style="font-size:0.75rem;"></i></button>
-                                    <button class="btn btn-xs btn-outline-danger delete-kw p-1 px-2"
+                                            title="Идэвх солих"><i class="bi bi-toggle2-on fs-75"></i></button>
+                                    <button type="button" class="btn btn-xs btn-outline-danger delete-kw p-1 px-2"
                                             data-id="{{ kw.id }}"
-                                            title="Устгах"><i class="bi bi-trash" style="font-size:0.75rem;"></i></button>
+                                            title="Устгах"><i class="bi bi-trash fs-75"></i></button>
                                 </td>
                             </tr>
                             {% else %}
@@ -149,7 +149,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="kwModalTitle">Түлхүүр үг нэмэх</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
             </div>
             <div class="modal-body">
                 <form id="kwForm">

@@ -8,7 +8,7 @@
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-question-circle"></i> FAQ удирдах</span>
-        <button class="btn btn-sm btn-light" id="addFaqBtn" data-bs-toggle="modal" data-bs-target="#faqModal">
+        <button type="button" class="btn btn-sm btn-light" id="addFaqBtn" data-bs-toggle="modal" data-bs-target="#faqModal">
             <i class="bi bi-plus-circle"></i> FAQ нэмэх
         </button>
     </div>
@@ -41,10 +41,13 @@
                             {% endif %}
                         </td>
                         <td>
-                            <button class="btn btn-sm btn-warning edit-faq" data-id="{{ faq.id }}" data-bs-toggle="modal" data-bs-target="#faqModal">
+                            <button type="button" class="btn btn-sm btn-warning edit-faq" data-id="{{ faq.id }}"
+                                    data-bs-toggle="modal" data-bs-target="#faqModal"
+                                    aria-label="FAQ засах">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <button class="btn btn-sm btn-danger delete-faq" data-id="{{ faq.id }}">
+                            <button type="button" class="btn btn-sm btn-danger delete-faq" data-id="{{ faq.id }}"
+                                    aria-label="FAQ устгах">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </td>
@@ -62,11 +65,11 @@
 
 <!-- Add/Edit FAQ Modal -->
 <div class="modal fade" id="faqModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="faqModalTitle">FAQ нэмэх</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
             </div>
             <div class="modal-body">
                 <form id="faqForm">
