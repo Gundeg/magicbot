@@ -75,20 +75,22 @@ def _rebuild_table(cur, old_name, new_create_sql, copy_columns, foreign_key_chec
 
     `copy_columns` is a comma-separated string listing the columns to copy
     from the old table to the new (must exist in both).
+
+    The caller is expected to have left FK enforcement off for the whole
+    migration connection — see the comment at the top of apply_migration().
+    The `foreign_key_check_off` parameter is retained for compatibility
+    but is now a no-op; flipping FK state inside an active transaction is
+    silently ignored by SQLite, which is why the previous implementation
+    appeared to work for product_link (no inbound FKs) but failed on
+    business_line (product.business_line_id references it).
     """
-    if foreign_key_check_off:
-        cur.execute("PRAGMA foreign_keys = OFF")
-    try:
-        cur.execute(new_create_sql)
-        cur.execute(
-            f"INSERT INTO _new_{old_name} ({copy_columns}) "
-            f"SELECT {copy_columns} FROM {old_name}"
-        )
-        cur.execute(f"DROP TABLE {old_name}")
-        cur.execute(f"ALTER TABLE _new_{old_name} RENAME TO {old_name}")
-    finally:
-        if foreign_key_check_off:
-            cur.execute("PRAGMA foreign_keys = ON")
+    cur.execute(new_create_sql)
+    cur.execute(
+        f"INSERT INTO _new_{old_name} ({copy_columns}) "
+        f"SELECT {copy_columns} FROM {old_name}"
+    )
+    cur.execute(f"DROP TABLE {old_name}")
+    cur.execute(f"ALTER TABLE _new_{old_name} RENAME TO {old_name}")
 
 
 def apply_migration(db_path):
@@ -96,7 +98,13 @@ def apply_migration(db_path):
         print(f'DB not found at {db_path}', file=sys.stderr)
         return 2
     conn = sqlite3.connect(db_path, timeout=10)
-    conn.execute("PRAGMA foreign_keys = ON")
+    # Intentionally LEAVE foreign_keys at SQLite's default (OFF) for the
+    # whole migration. We rebuild tables that other tables reference
+    # (business_line in particular — product.business_line_id FKs to it),
+    # and SQLite forbids dropping such tables while FK enforcement is on.
+    # The migration moves rows around but never breaks FK invariants, so
+    # disabling enforcement is safe. SQLAlchemy will reopen its own
+    # connections after this script returns and manage FK state on those.
     cur = conn.cursor()
 
     # --- preflight: check alembic_version, then sanity-check schema ---
@@ -107,6 +115,15 @@ def apply_migration(db_path):
     if cur.fetchone():
         v_row = cur.execute("SELECT version_num FROM alembic_version").fetchone()
         current_version = v_row[0] if v_row else None
+        if current_version is None:
+            # Table exists but has no row (left over from a prior
+            # half-completed migration). Insert the baseline so later
+            # UPDATE stamps actually have a row to update.
+            cur.execute(
+                "INSERT INTO alembic_version (version_num) VALUES ('0001_baseline')"
+            )
+            current_version = '0001_baseline'
+            print('alembic_version row missing; seeded with 0001_baseline.')
         if current_version == HEAD:
             # Sanity check: the version row claims we're at HEAD, but if a
             # prior run stamped the version while a step silently failed,
