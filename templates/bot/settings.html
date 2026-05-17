@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+
+{% block title %}Ботын тохиргоо - Ботын удирдлага{% endblock %}
+{% block page_title %}Ботын удирдлага{% endblock %}
+
+{% block content %}
+{% include "bot/partials/_tabs.html" %}
+
+<div id="bsToastContainer" class="position-fixed bottom-0 end-0 p-3 toast-stack"></div>
+
+<div class="alert alert-light border d-flex gap-2 align-items-start py-2 mb-3 fs-85">
+    <i class="bi bi-sliders mt-1 flex-shrink-0 text-brand"></i>
+    <div>
+        Ботын зан төлвийг тохируулах хэсэг: хүн рүү дамжуулах эмзэг байдал, ажлын цаг,
+        Telegram мэдэгдэл, Facebook Page сэтгэгдлийн загвар гэх мэт.
+    </div>
+</div>
+
+<form id="botSettingsForm" autocomplete="off">
+    {# ── Handoff ───────────────────────────────────────────────── #}
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-people"></i> Хүн рүү дамжуулах</div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label" for="handoff_sensitivity">Илрүүлэх мэдрэмж</label>
+                <select class="form-select" id="handoff_sensitivity" name="handoff_sensitivity">
+                    <option value="conservative" {% if settings.get('handoff_sensitivity', 'conservative') == 'conservative' %}selected{% endif %}>
+                        Болгоомжтой — зөвхөн "ажилтантай ярим" гэх мэт
+                    </option>
+                    <option value="balanced" {% if settings.get('handoff_sensitivity') == 'balanced' %}selected{% endif %}>
+                        Дунд зэрэг — гомдол, шүүмжлэлийг мөн оруулна
+                    </option>
+                    <option value="aggressive" {% if settings.get('handoff_sensitivity') == 'aggressive' %}selected{% endif %}>
+                        Идэвхтэй — давтан асуух, ойлгомжгүй гэх мэт бүгдийг
+                    </option>
+                </select>
+                <div class="form-text">Амралт эсвэл ажилтан цөөн үед "Идэвхтэй" болгож болно.</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="mute_duration_hours">Ботыг чимээгүй болгох цаг (handoff болсны дараа)</label>
+                <input type="number" min="0" max="168" class="form-control" id="mute_duration_hours"
+                       name="mute_duration_hours" value="{{ settings.get('mute_duration_hours', '2') }}">
+                <div class="form-text">0 = чимээгүй болгохгүй. Дээд тал 168 цаг (7 хоног).</div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Telegram alerts ───────────────────────────────────────── #}
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-bell"></i> Telegram мэдэгдэл</div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label" for="telegram_chat_ids">Chat ID-ууд</label>
+                <div class="input-group">
+                    <input type="text" class="form-control" id="telegram_chat_ids" name="telegram_chat_ids"
+                           value="{{ settings.get('telegram_chat_ids', '') }}"
+                           placeholder="123456789, 987654321">
+                    <button type="button" class="btn btn-outline-primary" id="testTelegramBtn"
+                            title="Хадгалсан ID руу туршилтын мессеж явуулах">
+                        <i class="bi bi-send"></i> Туршиж үзэх
+                    </button>
+                </div>
+                <div class="form-text">Таслалаар тусгаарлана. Туршихаас өмнө хадгална уу.</div>
+            </div>
+            <div class="form-check">
+                <input type="checkbox" class="form-check-input" id="sound_alerts_enabled" name="sound_alerts_enabled"
+                       {% if (settings.get('sound_alerts_enabled', 'on') or '').lower() in ('on', 'true', '1', 'yes') %}checked{% endif %}>
+                <label class="form-check-label" for="sound_alerts_enabled">
+                    Админ хуудсан дээр дуун дохио өгөх (шинэ handoff гарвал)
+                </label>
+            </div>
+        </div>
+    </div>
+
+    {# ── Working hours + funnel ────────────────────────────────── #}
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-clock"></i> Ажлын цаг ба воронк</div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                Off-hours (шөнийн) handoff үед Telegram-д 🌙 [OFF-HOURS] тэмдэглэгдэнэ.
+                Цагийг Улаанбаатарын цагаар (UTC+8).
+            </p>
+            <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                    <label class="form-label" for="office_hours_start">Ажлын цаг эхлэх</label>
+                    <input type="number" min="0" max="23" class="form-control" id="office_hours_start"
+                           name="office_hours_start" value="{{ settings.get('office_hours_start', '8') }}">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label" for="office_hours_end">Ажлын цаг дуусах</label>
+                    <input type="number" min="0" max="23" class="form-control" id="office_hours_end"
+                           name="office_hours_end" value="{{ settings.get('office_hours_end', '22') }}">
+                </div>
+            </div>
+            <div>
+                <label class="form-label" for="hot_prospect_stages">Халуун харилцагчийн шат (funnel)</label>
+                <input type="text" class="form-control" id="hot_prospect_stages" name="hot_prospect_stages"
+                       value="{{ settings.get('hot_prospect_stages', 'pricing,ready') }}"
+                       placeholder="pricing,ready">
+                <div class="form-text">Таслалаар тусгаарлана. Анхдагч: pricing,ready</div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Auto-comment ──────────────────────────────────────────── #}
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-chat-square-text"></i> Facebook Page-ын сэтгэгдлүүд</div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label" for="training_comment">Сургалтын постонд</label>
+                <textarea class="form-control" id="training_comment" name="training_comment" rows="2">{{ settings.get('training_comment', '') }}</textarea>
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="celebration_comment">Баяр хүргэх постонд</label>
+                <textarea class="form-control" id="celebration_comment" name="celebration_comment" rows="2">{{ settings.get('celebration_comment', '') }}</textarea>
+            </div>
+            <div>
+                <label class="form-label" for="default_comment">Бусад пост (анхдагч)</label>
+                <textarea class="form-control" id="default_comment" name="default_comment" rows="2">{{ settings.get('default_comment', '') }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    {# ── Legacy fallback messages ──────────────────────────────── #}
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-chat-left-quote"></i> Тогтмол хариултууд (legacy)</div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                Эдгээр талбарууд хуучин код ашигладаг тогтмол текст. Шинэ ботын зан төлвийг
+                "AI сургалт" хэсгээс тохируулна.
+            </p>
+            <div class="mb-3">
+                <label class="form-label" for="handoff_message">Handoff үед явах мессеж</label>
+                <textarea class="form-control" id="handoff_message" name="handoff_message" rows="2">{{ settings.get('handoff_message', '') }}</textarea>
+            </div>
+            <div>
+                <label class="form-label" for="bot_welcome">Ботын мэндчилгээ</label>
+                <textarea class="form-control" id="bot_welcome" name="bot_welcome" rows="2">{{ settings.get('bot_welcome', '') }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="text-end mb-4">
+        <button type="submit" class="btn btn-brand">
+            <i class="bi bi-save"></i> Хадгалах
+        </button>
+    </div>
+</form>
+
+<script>
+(function () {
+    const url = '{{ url_for("bot_management_settings") }}';
+    const testTelegramUrl = '{{ url_for("test_telegram") }}';
+    const form = document.getElementById('botSettingsForm');
+
+    function toast(msg, ok) {
+        const c = document.getElementById('bsToastContainer');
+        const el = document.createElement('div');
+        el.className = 'toast align-items-center text-white border-0 show shadow mb-2';
+        el.style.background = ok ? 'var(--brand-dark)' : '#dc3545';
+        el.innerHTML = `<div class="d-flex">
+            <div class="toast-body">${msg}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>`;
+        c.appendChild(el);
+        setTimeout(() => el.remove(), 4000);
+    }
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const data = {};
+        // Most fields are simple key/value pairs.
+        ['handoff_sensitivity','mute_duration_hours','telegram_chat_ids',
+         'office_hours_start','office_hours_end','hot_prospect_stages',
+         'training_comment','celebration_comment','default_comment',
+         'handoff_message','bot_welcome'].forEach(k => {
+            const el = document.getElementById(k);
+            if (el) data[k] = el.value;
+        });
+        // Checkbox needs special handling — only "on" or empty.
+        data.sound_alerts_enabled = document.getElementById('sound_alerts_enabled').checked ? 'on' : '';
+
+        fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('meta[name=csrf-token]')?.content || ''},
+            body: JSON.stringify(data),
+        }).then(r => r.json()).then(r => {
+            if (r.success) toast('Хадгалсан: ' + (r.saved || []).join(', '), true);
+            else toast(r.error || 'Алдаа гарлаа', false);
+        }).catch(e => toast('Алдаа: ' + e, false));
+    });
+
+    document.getElementById('testTelegramBtn').addEventListener('click', function () {
+        const btn = this;
+        btn.disabled = true;
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Илгээж байна...';
+        fetch(testTelegramUrl, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('meta[name=csrf-token]')?.content || ''},
+        }).then(r => r.json()).then(d => {
+            if (d.error) toast(d.error, false);
+            else if (d.success_count > 0) toast(`${d.success_count} chat-д амжилттай явсан.`, true);
+            else toast('Илгээж чадсангүй. Telegram chat ID болон TELEGRAM_BOT_TOKEN-ыг шалгана уу.', false);
+        }).catch(e => toast('Алдаа: ' + e, false))
+          .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+    });
+})();
+</script>
+{% endblock %}

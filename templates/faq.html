@@ -5,6 +5,34 @@
 {% block page_title %}Түгээмэл асуулт (FAQ){% endblock %}
 
 {% block content %}
+{% if active_tab %}{% include "bot/partials/_tabs.html" %}{% endif %}
+
+{% if active_tab == 'faqs' %}
+{# "From Chat" section: LLM-clustered themes from real user messages.
+   Phase 5a only renders the placeholder; Phase 5b populates `chat_clusters`. #}
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-chat-square-quote"></i> Чатнаас гарсан жинхэнэ асуултууд</span>
+        {% if chat_clusters %}
+            <span class="badge bg-secondary">{{ chat_clusters|length }}</span>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        {% if chat_clusters %}
+            {# Phase 5b will render the clusters with promote-to-FAQ buttons here. #}
+            <p class="text-muted small mb-0">{{ chat_clusters|length }} бүлгийг шинжилсэн.</p>
+        {% else %}
+            <p class="text-muted small mb-0">
+                <i class="bi bi-hourglass-split"></i>
+                Хэрэглэгчдийн чатнаас гарсан асуултуудыг автоматаар бүлэглэх систем (LLM clustering)
+                удахгүй идэвхжинэ. Идэвхжсэний дараа долоо хоног бүр шинэчлэгдэх ба чухал асуултыг
+                нэг товчоор FAQ болгож хадгалах боломжтой болно.
+            </p>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-question-circle"></i> FAQ удирдах</span>

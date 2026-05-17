@@ -5,6 +5,7 @@
 {% block page_title %}Дамжуулах түлхүүр үгс{% endblock %}
 
 {% block content %}
+{% if active_tab %}{% include "bot/partials/_tabs.html" %}{% endif %}
 <div class="row mb-3">
     <div class="col">
         <p class="text-muted small mb-0">

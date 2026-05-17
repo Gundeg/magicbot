@@ -1,0 +1,28 @@
+{# Tab nav shared across the four Bot Management pages.
+   `active_tab` is one of 'training' | 'handover' | 'faqs' | 'settings'. #}
+<ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'training' %}active{% endif %}"
+           href="{{ url_for('bot_management_training') }}">
+            <i class="bi bi-cpu"></i> AI сургалт
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'handover' %}active{% endif %}"
+           href="{{ url_for('bot_management_handover') }}">
+            <i class="bi bi-tags"></i> Дамжуулах түлхүүр үгс
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'faqs' %}active{% endif %}"
+           href="{{ url_for('bot_management_faqs') }}">
+            <i class="bi bi-question-circle"></i> FAQ
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'settings' %}active{% endif %}"
+           href="{{ url_for('bot_management_settings') }}">
+            <i class="bi bi-sliders"></i> Ботын тохиргоо
+        </a>
+    </li>
+</ul>

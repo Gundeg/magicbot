@@ -423,21 +423,26 @@
                    href="{{ url_for('business_management_employees') }}">
                     <i class="bi bi-people"></i> Ажилтнууд
                 </a>
-                {# FAQ moves to Bot Management in Phase 5; until then it stays
-                   reachable from the legacy /admin/faq URL. #}
-                <a class="nav-link nav-sub {% if request.endpoint == 'faq' %}active{% endif %}" href="{{ url_for('faq') }}">
-                    <i class="bi bi-question-circle"></i> Түгээмэл асуулт
-                </a>
             </nav>
 
-            {# ── ZONE 3 — Bot Brain: tune the AI when it misbehaves #}
-            <div class="nav-section">Бот тархи</div>
+            {# ── ZONE 3 — Bot Management: tune the AI #}
+            <div class="nav-section">Ботын удирдлага</div>
             <nav class="nav flex-column">
-                <a class="nav-link {% if request.endpoint == 'training' %}active{% endif %}" href="{{ url_for('training') }}">
-                    <i class="bi bi-cpu"></i> AI Сургалт
+                <a class="nav-link {% if request.endpoint in ('bot_management_training', 'training') %}active{% endif %}"
+                   href="{{ url_for('bot_management_training') }}">
+                    <i class="bi bi-cpu"></i> AI сургалт
                 </a>
-                <a class="nav-link {% if request.endpoint == 'handoff_keywords' %}active{% endif %}" href="{{ url_for('handoff_keywords') }}">
+                <a class="nav-link {% if request.endpoint in ('bot_management_handover', 'handoff_keywords') %}active{% endif %}"
+                   href="{{ url_for('bot_management_handover') }}">
                     <i class="bi bi-tags"></i> Дамжуулах түлхүүр үгс
+                </a>
+                <a class="nav-link {% if request.endpoint in ('bot_management_faqs', 'faq') %}active{% endif %}"
+                   href="{{ url_for('bot_management_faqs') }}">
+                    <i class="bi bi-question-circle"></i> FAQ
+                </a>
+                <a class="nav-link {% if request.endpoint in ('bot_management_settings', 'settings') %}active{% endif %}"
+                   href="{{ url_for('bot_management_settings') }}">
+                    <i class="bi bi-sliders"></i> Ботын тохиргоо
                 </a>
             </nav>
 

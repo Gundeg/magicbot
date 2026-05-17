@@ -1,18 +1,144 @@
 """Bot brain: AI training, training snippets, handoff keywords, FAQ.
 
-Phase 5 will reorganize these under a new Bot Management section with tabs
-(AI Training / Handover Keywords / FAQs / Bot Settings) and add a weekly
-chat-question clustering job that surfaces FAQ candidates from real chat.
+Phase 5 reorganizes these under a Bot Management section with four tabs:
+AI Training, Handover Keywords, FAQs, and Bot Settings. The legacy item
+URLs (/admin/training, /admin/handoff-keywords, /admin/faq, /admin/settings)
+remain alive as POST endpoints that the new tabs target; Phase 6 may
+collapse them into the new section URLs.
 """
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
 from app import app
-from auth import admin_required
+from auth import admin_required, super_admin_required
 from extensions import db
 from models import FAQ, GeneralSetting, HandoffKeyword, TrainingSnippet
 from services import (BOT_PERSONA, TRAINING_CONTENT, build_system_prompt,
                       get_setting, lint_training_data, log_admin_action)
+
+
+# Settings keys that belong on the Bot Settings tab. The other half of the
+# old Settings page (center_*, main_office_*, google_form_url) lives on
+# Business Management > General Information.
+BOT_SETTINGS_KEYS = (
+    'training_comment',
+    'celebration_comment',
+    'default_comment',
+    'handoff_sensitivity',
+    'mute_duration_hours',
+    'office_hours_start',
+    'office_hours_end',
+    'telegram_chat_ids',
+    'sound_alerts_enabled',
+    'hot_prospect_stages',
+    'handoff_message',
+    'bot_welcome',
+)
+
+
+# ===================== BOT MANAGEMENT — tab landing pages =====================
+
+@app.route('/bot-management')
+@login_required
+@admin_required
+def bot_management():
+    return redirect(url_for('bot_management_training'))
+
+
+@app.route('/bot-management/training')
+@login_required
+@admin_required
+def bot_management_training():
+    """AI Training tab. Renders the same content as /admin/training but
+    inside the new Bot Management layout. Saves still POST to /admin/training
+    so the existing handler stays the single source of truth."""
+    # Reuses templates/training.html — the same template the legacy
+    # /admin/training route renders. The shared template conditionally
+    # shows the bot-management tab nav at the top when `active_tab` is set.
+    snippets = (TrainingSnippet.query
+                .order_by(
+                    db.case((TrainingSnippet.priority == 'high', 0), else_=1),
+                    TrainingSnippet.sort_order.asc(),
+                    TrainingSnippet.created_at.desc(),
+                )
+                .all())
+    return render_template(
+        'training.html',
+        active_tab='training',
+        training_value=get_setting('training_content', ''),
+        training_fallback=TRAINING_CONTENT,
+        persona_value=get_setting('bot_persona', ''),
+        persona_fallback=BOT_PERSONA,
+        snippets=snippets,
+    )
+
+
+@app.route('/bot-management/handover')
+@login_required
+@admin_required
+def bot_management_handover():
+    keywords = HandoffKeyword.query.order_by(
+        HandoffKeyword.keyword_type.asc(),
+        HandoffKeyword.keyword.asc(),
+    ).all()
+    return render_template(
+        'handoff_keywords.html',
+        active_tab='handover',
+        keywords=keywords,
+    )
+
+
+@app.route('/bot-management/faqs')
+@login_required
+@admin_required
+def bot_management_faqs():
+    """FAQs tab. Two sections:
+      1) Curated FAQs — admin-authored Q/A pairs (existing FAQ model).
+      2) From Chat — LLM-clustered themes from real user messages.
+         Phase 5b populates `chat_clusters`; for now it's an empty
+         placeholder so admins can see the UI plan.
+    """
+    faqs = FAQ.query.all()
+    return render_template(
+        'faq.html',
+        active_tab='faqs',
+        faqs=faqs,
+        chat_clusters=[],
+    )
+
+
+@app.route('/bot-management/settings', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def bot_management_settings():
+    """Bot Settings tab. Saves the bot-config subset of GeneralSetting."""
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        allowed = {k: v for k, v in data.items() if k in BOT_SETTINGS_KEYS}
+        for key, value in allowed.items():
+            row = GeneralSetting.query.filter_by(key=key).first()
+            if row:
+                row.value = value
+            else:
+                row = GeneralSetting(key=key, value=value)
+                db.session.add(row)
+        db.session.commit()
+        log_admin_action(
+            'settings.save', 'setting', None, ', '.join(sorted(allowed.keys()))[:255],
+            detail=f'{len(allowed)} bot-settings key шинэчилсэн'
+        )
+        return jsonify({'success': True, 'saved': sorted(allowed.keys())})
+
+    settings_dict = {
+        s.key: s.value for s in GeneralSetting.query.filter(
+            GeneralSetting.key.in_(BOT_SETTINGS_KEYS)
+        ).all()
+    }
+    return render_template(
+        'bot/settings.html',
+        active_tab='settings',
+        settings=settings_dict,
+    )
 
 
 # ===================== FAQ =====================

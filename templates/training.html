@@ -5,6 +5,7 @@
 {% block page_title %}AI Сургалт{% endblock %}
 
 {% block content %}
+{% if active_tab %}{% include "bot/partials/_tabs.html" %}{% endif %}
 {% if current_user.role != 'super_admin' %}
 <div class="alert alert-warning d-flex align-items-center gap-2">
     <i class="bi bi-lock-fill"></i>
