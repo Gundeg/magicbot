@@ -218,9 +218,9 @@
                         <table class="table table-sm align-middle mb-0" id="linksTable">
                             <thead class="table-light">
                                 <tr>
-                                    <th class="col-w-14">kind</th>
-                                    <th class="col-w-24">Гарчиг</th>
+                                    <th class="col-w-24">Тайлбар</th>
                                     <th>URL</th>
+                                    <th class="col-w-24">Тэмдэглэл (дотоод)</th>
                                     <th class="col-w-8 text-center">Идэвхтэй</th>
                                     <th class="col-w-8"><span class="visually-hidden">Үйлдэл</span></th>
                                 </tr>
@@ -256,16 +256,16 @@ function postProduct(payload) {
 }
 
 // Inline link table — manipulated client-side, posted as an array with the
-// product. Empty rows (no kind + no URL) are dropped server-side so admins
-// can leave a half-finished row without breaking the save.
+// product. Empty rows (no description + no URL) are dropped server-side so
+// admins can leave a half-finished row without breaking the save.
 function buildLinkRow(link) {
-    link = link || {kind: '', label: '', url: '', is_active: true};
+    link = link || {description: '', url: '', note: '', is_active: true};
     const tr = document.createElement('tr');
     tr.className = 'link-row';
     tr.innerHTML = `
-        <td><input type="text" class="form-control form-control-sm link-kind" placeholder="purchase" aria-label="kind" value="${escapeHtml(link.kind)}"></td>
-        <td><input type="text" class="form-control form-control-sm link-label" placeholder="Худалдан авах хүсэлт" aria-label="Гарчиг" value="${escapeHtml(link.label || '')}"></td>
+        <td><input type="text" class="form-control form-control-sm link-description" placeholder="Худалдан авах хүсэлт" aria-label="Тайлбар" value="${escapeHtml(link.description || '')}"></td>
         <td><input type="url" class="form-control form-control-sm link-url" placeholder="https://..." aria-label="URL" value="${escapeHtml(link.url)}"></td>
+        <td><input type="text" class="form-control form-control-sm link-note" placeholder="Дотоод тэмдэглэл" aria-label="Тэмдэглэл" value="${escapeHtml(link.note || '')}"></td>
         <td class="text-center">
             <input type="checkbox" class="form-check-input link-active" aria-label="Идэвхтэй" ${link.is_active !== false ? 'checked' : ''}>
         </td>
@@ -307,9 +307,9 @@ function addLink(link) {
 
 function collectLinks() {
     return Array.from(document.querySelectorAll('#linksBody tr.link-row')).map((tr, idx) => ({
-        kind: tr.querySelector('.link-kind').value.trim(),
-        label: tr.querySelector('.link-label').value.trim(),
+        description: tr.querySelector('.link-description').value.trim(),
         url: tr.querySelector('.link-url').value.trim(),
+        note: tr.querySelector('.link-note').value.trim(),
         is_active: tr.querySelector('.link-active').checked,
         sort_order: idx,
     }));

@@ -24,7 +24,7 @@ except ImportError:
 from flask import Flask
 from werkzeug.security import generate_password_hash
 
-from extensions import db, login_manager, csrf
+from extensions import db, login_manager, csrf, migrate
 
 # ===================== APP CONSTRUCTION =====================
 
@@ -85,6 +85,10 @@ login_manager.login_view = 'login'
 # the token from the meta tag in base.html and send it as X-CSRFToken.
 # The Facebook webhook is exempted in routes/webhook.py via @csrf.exempt.
 csrf.init_app(app)
+# Flask-Migrate (Alembic wrapper). Schema changes go through migrations/
+# versions/ now instead of services.ensure_schema(). Existing DBs are
+# stamped to the baseline on first boot (see _bootstrap_alembic).
+migrate.init_app(app, db)
 
 # Models must be imported AFTER db.init_app(app) so the metadata binds correctly.
 # noqa imports are intentional — importing the module registers models on db.
@@ -187,7 +191,10 @@ def init_db():
 
 
 # Run at import so gunicorn workers initialize the DB on boot.
-init_db()
+# Skipped when running migration commands (set by `flask db ...` invocations)
+# to keep CLI fast and avoid seeding before migrations are applied.
+if os.environ.get('FLASK_SKIP_INIT_DB', '').lower() not in ('true', '1', 'yes'):
+    init_db()
 
 
 # ===================== BACKGROUND TASKS =====================

@@ -155,28 +155,23 @@ class BusinessLine(db.Model):
     """Magic Group-ын охин компаниуд болон тэдгээрийн бүтээгдэхүүн/үйлчилгээ.
     Magic Choice (сургалт), Magic Consulting Audit (аудит, CPA),
     Magic Cloud (програм хангамжийн лиценз). Each line has an action
-    telling the bot whether to answer briefly or refer to staff."""
+    telling the bot whether to answer briefly or refer to staff.
+
+    `product_type` picks which item schema the BU's drill-in page uses:
+    'Course' (scheduled), 'Service' (ongoing), or 'Product' (license-style).
+    Set per-BU so admins can add new units without code changes."""
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(150), nullable=False)
     description = db.Column(db.Text)
     action = db.Column(db.String(20), default='refer')  # 'answer' | 'refer'
     contact_info = db.Column(db.String(255))            # e.g. phone, email, dept
-    # Per-line fields the bot quotes verbatim. Kept separate from
-    # `contact_info` and the freeform `description` so admins can update
-    # one number/URL/address without rewriting the description blob.
     address = db.Column(db.Text)
     email = db.Column(db.String(200))
-    signup_form_url = db.Column(db.String(500))
-    signup_phone = db.Column(db.String(100))
-    # Training has both a registration form and an exam form (software-only
-    # learning path). Other lines leave this null.
-    exam_form_url = db.Column(db.String(500))
-    # Stats vary per line (training has 'students', software has 'users'),
-    # so each line carries its own three numbers instead of a single
-    # company-wide About Us block.
     established_year = db.Column(db.Integer)
-    num_products_or_services = db.Column(db.Integer)
-    total_clients_or_users = db.Column(db.Integer)
+    # Drives the items grid on the BU drill-in page. Course / Service / Product.
+    # CHECK constraint enforced at the DB layer via the migration; we don't
+    # repeat it here so the model doesn't drift if values are ever added.
+    product_type = db.Column(db.String(20), nullable=False, default='Product')
     is_active = db.Column(db.Boolean, default=True)
     status_note = db.Column(db.String(255))  # reason for pause / admin note visible to AI
     sort_order = db.Column(db.Integer, default=0)
@@ -221,16 +216,17 @@ class ProductLink(db.Model):
     """One resource link attached to a Product — purchase form, support
     ticket URL, manual, community forum, download page, etc.
 
-    `kind` is free-form so admins can add new categories without a code
-    deploy. The bot is told to match user intent semantically against
-    kind + label and quote the matching link, never invent one."""
+    Shape is mirrored by CourseLink and ServiceLink so the admin edit
+    partial (templates/business/partials/_links_editor.html) renders the
+    same form for every item type. `description` is what users see in the
+    bot's reply; `note` is admin-only context never surfaced to chat."""
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(
         db.Integer, db.ForeignKey('product.id'), nullable=False
     )
-    kind = db.Column(db.String(40), nullable=False)
-    label = db.Column(db.String(160))
+    description = db.Column(db.String(200), nullable=False)
     url = db.Column(db.String(500), nullable=False)
+    note = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
     sort_order = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -238,6 +234,46 @@ class ProductLink(db.Model):
         'Product',
         backref=db.backref('links', lazy=True, cascade='all, delete-orphan',
                            order_by='ProductLink.sort_order')
+    )
+
+
+class CourseLink(db.Model):
+    """One resource link attached to a Course — registration form, syllabus,
+    exam form, etc. Same shape as ProductLink; see its docstring."""
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(
+        db.Integer, db.ForeignKey('course.id'), nullable=False
+    )
+    description = db.Column(db.String(200), nullable=False)
+    url = db.Column(db.String(500), nullable=False)
+    note = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    course = db.relationship(
+        'Course',
+        backref=db.backref('links', lazy=True, cascade='all, delete-orphan',
+                           order_by='CourseLink.sort_order')
+    )
+
+
+class ServiceLink(db.Model):
+    """One resource link attached to a Service — quote request, sample
+    report, scheduling page, etc. Same shape as ProductLink."""
+    id = db.Column(db.Integer, primary_key=True)
+    service_id = db.Column(
+        db.Integer, db.ForeignKey('service.id'), nullable=False
+    )
+    description = db.Column(db.String(200), nullable=False)
+    url = db.Column(db.String(500), nullable=False)
+    note = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    service = db.relationship(
+        'Service',
+        backref=db.backref('links', lazy=True, cascade='all, delete-orphan',
+                           order_by='ServiceLink.sort_order')
     )
 
 
@@ -286,17 +322,7 @@ class Service(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class Software(db.Model):
-    """Catalog of software licenses Magic Cloud resells (Magic Finance, Microsoft,
-    Kaspersky, etc.). Keeps the same minimal shape as Service so both placeholder
-    pages reuse one CRUD pattern."""
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(255), nullable=False)
-    description = db.Column(db.Text)
-    price = db.Column(db.Float)             # nullable: license pricing often per-seat / quoted
-    vendor = db.Column(db.String(120))      # e.g. "Microsoft", "Kaspersky", "Magic Cloud"
-    is_active = db.Column(db.Boolean, default=True)
-    status_note = db.Column(db.String(255))
-    sort_order = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+# Software model removed in Phase 1 of the admin IA reorg. Its rows were
+# migrated to Product rows under the Magic Cloud business line; see
+# migrations/versions/0002_phase_1_ia_reorg.py and
+# scripts/apply_phase_1_migration.py for the migration details.

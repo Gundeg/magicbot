@@ -13,7 +13,7 @@ from auth import admin_required
 from datetime import datetime
 from extensions import db
 from models import (BusinessLine, Course, Product, ProductLink, Service,
-                    Software, TeamMember)
+                    TeamMember)
 from services import (ALLOWED_COURSE_TYPES, SELF_PACED_COURSE_TYPE,
                       advance_recurring_courses, archive_past_courses,
                       log_admin_action)
@@ -227,65 +227,9 @@ def services():
     return render_template('services.html', items=items)
 
 
-# ===================== SOFTWARE =====================
-
-@app.route('/admin/software', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def software():
-    if request.method == 'POST':
-        data = request.get_json() or {}
-        action = data.get('action')
-
-        if action in ('add', 'edit'):
-            if action == 'add':
-                item = Software(is_active=True)
-                db.session.add(item)
-            else:
-                item = Software.query.get(data.get('id'))
-                if not item:
-                    return jsonify({'success': False}), 404
-            item.name = (data.get('name') or '').strip()
-            item.description = (data.get('description') or '').strip() or None
-            price_raw = data.get('price')
-            item.price = float(price_raw) if price_raw not in (None, '') else None
-            item.vendor = (data.get('vendor') or '').strip() or None
-            if not item.name:
-                db.session.rollback()
-                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
-            db.session.commit()
-            return jsonify({'success': True, 'id': item.id})
-
-        if action == 'toggle':
-            item = Software.query.get(data.get('id'))
-            if not item:
-                return jsonify({'success': False}), 404
-            item.is_active = not item.is_active
-            item.status_note = (data.get('status_note') or '').strip() or None
-            db.session.commit()
-            log_admin_action(
-                'software.toggle', 'software', item.id, item.name,
-                detail=('Идэвхжүүлсэн' if item.is_active else 'Түр зогсоосон') +
-                       (f". Тэмдэглэл: {item.status_note}" if item.status_note else '')
-            )
-            return jsonify({'success': True, 'is_active': item.is_active})
-
-        if action == 'delete':
-            item = Software.query.get(data.get('id'))
-            if not item:
-                return jsonify({'success': False}), 404
-            label, sid = item.name, item.id
-            db.session.delete(item)
-            db.session.commit()
-            log_admin_action('software.delete', 'software', sid, label, detail='Устгасан')
-            return jsonify({'success': True})
-
-        return jsonify({'success': False, 'error': 'unknown action'}), 400
-
-    items = (Software.query
-             .order_by(Software.sort_order.asc(), Software.id.asc())
-             .all())
-    return render_template('software.html', items=items)
+# Software route removed in Phase 1 — software rows migrated to Product
+# under the Magic Cloud business line. Magic Cloud now has product_type='Product'
+# and uses the same items grid as any other Product-typed business unit.
 
 
 # ===================== BUSINESS LINES =====================
@@ -313,27 +257,23 @@ def business_lines():
             line.status_note = (data.get('status_note') or '').strip() or None
             line.address = (data.get('address') or '').strip() or None
             line.email = (data.get('email') or '').strip() or None
-            line.signup_form_url = (data.get('signup_form_url') or '').strip() or None
-            line.signup_phone = (data.get('signup_phone') or '').strip() or None
-            line.exam_form_url = (data.get('exam_form_url') or '').strip() or None
+            pt = (data.get('product_type') or 'Product').strip()
+            if pt not in ('Course', 'Service', 'Product'):
+                db.session.rollback()
+                return jsonify({'success': False,
+                                'error': "product_type Course/Service/Product байх ёстой."}), 400
+            line.product_type = pt
 
-            def _opt_int(field):
-                raw = data.get(field)
-                if raw in (None, '', 'null'):
-                    return None
+            raw_year = data.get('established_year')
+            if raw_year in (None, '', 'null'):
+                line.established_year = None
+            else:
                 try:
-                    return int(raw)
+                    line.established_year = int(raw_year)
                 except (TypeError, ValueError):
-                    return 'invalid'
-
-            for field in ('established_year', 'num_products_or_services',
-                          'total_clients_or_users'):
-                value = _opt_int(field)
-                if value == 'invalid':
                     db.session.rollback()
                     return jsonify({'success': False,
-                                    'error': f'{field} бүхэл тоо байх ёстой.'}), 400
-                setattr(line, field, value)
+                                    'error': 'established_year бүхэл тоо байх ёстой.'}), 400
 
             if not line.name:
                 db.session.rollback()
@@ -413,16 +353,16 @@ def _parse_product_payload(data, existing=None):
         return None, None, 'links талбар жагсаалт байх ёстой.'
     links = []
     for i, link in enumerate(raw_links):
-        kind = (link.get('kind') or '').strip()
+        description = (link.get('description') or '').strip()
         url = (link.get('url') or '').strip()
-        if not kind and not url:
+        if not description and not url:
             continue  # let admin leave empty rows
-        if not kind or not url:
-            return None, None, f'Холбоос #{i+1}: kind болон URL хоёулаа шаардлагатай.'
+        if not description or not url:
+            return None, None, f'Холбоос #{i+1}: description болон URL хоёулаа шаардлагатай.'
         links.append({
-            'kind': kind[:40],
-            'label': (link.get('label') or '').strip()[:160] or None,
+            'description': description[:200],
             'url': url[:500],
+            'note': (link.get('note') or '').strip() or None,
             'is_active': bool(link.get('is_active', True)),
             'sort_order': int(link.get('sort_order') or i),
         })
@@ -522,9 +462,9 @@ def products():
     for p in all_products:
         p._links_json = [
             {
-                'kind': l.kind,
-                'label': l.label or '',
+                'description': l.description,
                 'url': l.url,
+                'note': l.note or '',
                 'is_active': bool(l.is_active),
                 'sort_order': l.sort_order,
             }

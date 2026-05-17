@@ -434,13 +434,9 @@
                 <a class="nav-link nav-sub {% if request.endpoint == 'services' %}active{% endif %}" href="{{ url_for('services') }}">
                     <i class="bi bi-file-earmark-text"></i> Үйлчилгээнүүд
                 </a>
-                {# Magic Cloud → Software licenses #}
-                <div class="nav-sub-header">
-                    <i class="bi bi-cloud-fill"></i> Magic Cloud
-                </div>
-                <a class="nav-link nav-sub {% if request.endpoint == 'software' %}active{% endif %}" href="{{ url_for('software') }}">
-                    <i class="bi bi-box-seam"></i> Програм хангамж
-                </a>
+                {# Magic Cloud now lives as a Product-typed business line — its software
+                   rows were migrated to product rows in Phase 1. Reach them from the
+                   Products page or (Phase 4) the Magic Cloud business unit drill-in. #}
                 {# Cross-line product catalog (Magic Finance + Microsoft + Kaspersky etc.) #}
                 <a class="nav-link nav-sub {% if request.endpoint == 'products' %}active{% endif %}" href="{{ url_for('products') }}">
                     <i class="bi bi-collection"></i> Бүтээгдэхүүн ба License

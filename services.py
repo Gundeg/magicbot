@@ -332,16 +332,17 @@ def ensure_schema():
         'duration_days': 'duration_days INTEGER',
     })
 
+    # ensure_schema() is the legacy migration path (pre-Alembic). Going forward,
+    # schema changes go through migrations/versions/. We keep the existing
+    # entries here so old DBs that boot without ever applying Alembic still
+    # self-heal. The 5 BU columns (signup_form_url, signup_phone, exam_form_url,
+    # num_products_or_services, total_clients_or_users) were removed in Phase 1
+    # and intentionally NOT added back here.
     add_columns('business_line', {
         'status_note': 'status_note VARCHAR(255)',
         'address': 'address TEXT',
         'email': 'email VARCHAR(200)',
-        'signup_form_url': 'signup_form_url VARCHAR(500)',
-        'signup_phone': 'signup_phone VARCHAR(100)',
-        'exam_form_url': 'exam_form_url VARCHAR(500)',
         'established_year': 'established_year INTEGER',
-        'num_products_or_services': 'num_products_or_services INTEGER',
-        'total_clients_or_users': 'total_clients_or_users INTEGER',
     })
 
     # Product + ProductLink were added after the initial schema; create them
@@ -702,8 +703,7 @@ def _format_product_entry(p):
     if active_links:
         lines.append("    Холбоосууд:")
         for l in sorted(active_links, key=lambda x: (x.sort_order, x.id)):
-            label = l.label or l.kind
-            lines.append(f"      - [{l.kind}] {label}: {l.url}")
+            lines.append(f"      - {l.description}: {l.url}")
     return "\n".join(lines)
 
 
@@ -720,10 +720,6 @@ def _format_business_line_entry(b):
     extras = []
     if b.established_year:
         extras.append(f"үүсгэн байгуулагдсан: {b.established_year}")
-    if b.num_products_or_services:
-        extras.append(f"бүтээгдэхүүн/үйлчилгээ: {b.num_products_or_services}")
-    if b.total_clients_or_users:
-        extras.append(f"харилцагч/хэрэглэгч: {b.total_clients_or_users:,}")
 
     address = b.address or get_main_office_address()
     if address:
@@ -744,12 +740,6 @@ def _format_business_line_entry(b):
 
     if b.email:
         extras.append(f"имэйл: {b.email}")
-    if b.signup_phone:
-        extras.append(f"бүртгэлийн утас: {b.signup_phone}")
-    if b.signup_form_url:
-        extras.append(f"бүртгэлийн линк: {b.signup_form_url}")
-    if b.exam_form_url:
-        extras.append(f"шалгалтын линк: {b.exam_form_url}")
     if extras:
         parts.append("\n  (" + "; ".join(extras) + ")")
 
@@ -1260,18 +1250,22 @@ def lint_training_data():
     biz_phones = set()
     biz_urls = set()
     biz_text_prices = set()
+    # Pull authoritative phone numbers + URLs the bot is allowed to quote.
+    # Sources: per-BU contact_info, plus every active ProductLink under each BU.
+    # Used by the lint check below to flag text references that don't match.
     for b in BusinessLine.query.all():
-        for field in (b.contact_info or '', b.signup_phone or ''):
-            for m in _PHONE_RE.finditer(field):
-                biz_phones.add(_normalize_phone(m.group()))
-        if b.signup_form_url:
-            biz_urls.add(b.signup_form_url.strip())
+        for m in _PHONE_RE.finditer(b.contact_info or ''):
+            biz_phones.add(_normalize_phone(m.group()))
         if b.description:
             for m in _PRICE_RE.finditer(b.description):
                 try:
                     biz_text_prices.add(_normalize_int(m.group(1)))
                 except ValueError:
                     pass
+        for p in (b.products or []):
+            for l in (p.links or []):
+                if l.is_active and l.url:
+                    biz_urls.add(l.url.strip())
 
     expected_prices = course_prices | biz_text_prices
 
@@ -1315,8 +1309,8 @@ def lint_training_data():
                     'source_id': sid,
                     'label': label[:80],
                     'detail': (
-                        f'"{m.group()}" дугаар үйлчилгээний contact_info / '
-                        'signup_phone-д бүртгэлтэй биш.'
+                        f'"{m.group()}" дугаар үйлчилгээний contact_info-д '
+                        'бүртгэлтэй биш.'
                     ),
                 })
         for m in _URL_RE.finditer(text):
@@ -1329,7 +1323,8 @@ def lint_training_data():
                     'source_id': sid,
                     'label': label[:80],
                     'detail': (
-                        f'{url} линк үйлчилгээний signup_form_url-д бүртгэлтэй биш.'
+                        f'{url} линк бизнесийн чиглэлийн product_link-д '
+                        'бүртгэлтэй биш.'
                     ),
                 })
 
