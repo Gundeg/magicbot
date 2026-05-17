@@ -1870,16 +1870,20 @@ def seed_default_magic_links():
              'Microsoft Office license-ийг манайхаас худалдан авах захиалгын форм.'),
         ]),
         # ----- Audit service (Magic Consulting Audit BU) -----
+        # Matches "Санхүүгийн тайлан баталгаажуулах аудитын үйлчилгээ"
         ('service', ['аудит', 'audit'], [
             ('Аудит хийлгэх захиалгын форм',
              'https://share.teamforms.app/form/MDkyNzU3M2QtNjJhNC00MjRiLWI3ODEtMDExMzUyZDRhZDUzOjVhYzE3NWQxLTdmOGUtNGI3OC05MmYwLWZjZjk1MDJiYjI4YjoyMWRlMWRjNi0zYzFmLTQ3ZWEtYmE4Ny0zMGFkZWVlMjM5MmY=',
              'Аудитийн үйлчилгээ авах захиалгын форм — Magic Consulting Audit.'),
         ]),
-        # ----- Report service -----
-        ('service', ['тайлан гаргуулах', 'тайлан', 'report'], [
+        # ----- Tax-consulting / report-filing service -----
+        # Matches "Татварын мэргэшсэн зөвлөх үйлчилгээ" — the form labelled
+        # "Тайлан гаргуулая" goes to the tax-consulting service because tax
+        # reports (татварын тайлан) are filed through that channel.
+        ('service', ['татвар', 'мэргэшсэн зөвлөх', 'tax'], [
             ('Тайлан гаргуулах захиалгын форм',
              'https://share.teamforms.app/form/ZmU3YzZjMjItNTA0ZC00NWE5LTkwYjMtYWQ2Mjk4MzI5YjkwOjVhYzE3NWQxLTdmOGUtNGI3OC05MmYwLWZjZjk1MDJiYjI4YjpmMDlkNjE0Ni1jZjU5LTRmNzgtYWZlOS0wMTQyMmNjYWM3Yzk=',
-             'Санхүүгийн тайлан гаргуулах захиалгын форм.'),
+             'Татварын / санхүүгийн тайлан гаргуулах захиалгын форм.'),
         ]),
     ]
 
