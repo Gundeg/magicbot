@@ -1794,6 +1794,147 @@ _DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION = [
 ]
 
 
+def seed_discovery_phrasing_snippets():
+    """Seed TrainingSnippet rows that map common customer phrasings (in
+    Cyrillic and Latin transliteration) to the right service / product
+    / course. Helps gpt-4o-mini route reliably even when customers don't
+    use the exact service name.
+
+    Idempotent: matches by snippet title — re-running is a no-op for
+    existing rows, and adds only the missing ones. Returns a multi-line
+    log suitable for surfacing via the admin endpoint."""
+    log = []
+
+    seeds = [
+        {
+            'title': 'Аудит асуултын чиглэл',
+            'category': 'service-routing',
+            'priority': 'high',
+            'body': (
+                "Хэрэглэгч 'аудит хийдэг үү?', 'audit baigaa yu?', "
+                "'санхүүгийн тайлан баталгаажуулах', 'санхүүгийн аудит', "
+                "'auditiin uilchilgee', 'audit hiilgemeer', 'аудитийн "
+                "үйлчилгээ', 'нягтлан баталгаажуулах' гэх мэт асуувал — "
+                "Тийм ээ, бид аудитын үйлчилгээ үзүүлдэг (Magic Consulting "
+                "Audit). Үйлчилгээний дэлгэрэнгүй болон захиалгын формыг "
+                "хариултдаа оруул."
+            ),
+        },
+        {
+            'title': 'Татвар, тайлан, нягтлан outsource асуултын чиглэл',
+            'category': 'service-routing',
+            'priority': 'high',
+            'body': (
+                "Хэрэглэгч 'татварын тайлан гаргах', 'тайлан гаргаж "
+                "өгөх', 'тайлан хийж өгөх', 'нягтлан outsource', "
+                "'нягтлагийн outsource', 'татвар бодуулах', 'tatvariin "
+                "tailan', 'tailan gargaj uguh', 'nyagtlan outsource', "
+                "'tatvariin medeelel', 'санхүүгийн тайлан хийж өгдөг үү?' "
+                "гэх мэт асуувал — Татварын мэргэшсэн зөвлөх үйлчилгээ "
+                "рүү чиглүүл (Magic Consulting Audit-ын дотор), форм "
+                "линкийг хариултдаа оруул."
+            ),
+        },
+        {
+            'title': 'Magic Finance програмын асуултын чиглэл',
+            'category': 'product-routing',
+            'priority': 'normal',
+            'body': (
+                "Magic Finance програмын тухай асуултуудыг таних:\n"
+                "  • 'татаж авах', 'татах', 'шинэ хувилбар', 'татвар "
+                "татах', 'download', 'татацгаах' → татах хуудасны линк\n"
+                "  • 'заавар', 'гарын авлага', 'хэрхэн ашиглах', 'help', "
+                "'instruction', 'video' → help center линк\n"
+                "  • 'код', 'лиценз сунгуулах', 'хугацаа сунгах', 'код "
+                "авах', 'license renewal', 'code avah' → renewal линк\n"
+                "  • 'тайлан шалгуулах', 'файл шалгуулах', 'алдаатай "
+                "тайлан', 'support', 'ticket', 'дэмжлэг' → support "
+                "ticket линк\n"
+                "  • 'хэрэглэгчийн групп', 'facebook групп', 'community' "
+                "→ Facebook групп линк\n"
+                "  • 'шинэчлэлт', 'update', 'версия', 'шинэ боломж' → "
+                "шинэчлэлтийн мэдээллийн линк\n"
+                "Бүгдийг Magic Finance бүтээгдэхүүний холбоосуудаас сонг."
+            ),
+        },
+        {
+            'title': 'Microsoft Office license асуулт',
+            'category': 'product-routing',
+            'priority': 'normal',
+            'body': (
+                "'MS Office', 'Microsoft Office', 'Word', 'Excel', "
+                "'PowerPoint license', 'офис license', 'microsoftiin "
+                "license', 'office program' гэх мэт асуувал Microsoft "
+                "license бүтээгдэхүүний захиалгын форм линкийг өг. "
+                "Үнэ, нөхцлийн дэлгэрэнгүй ажилтан хариулна."
+            ),
+        },
+        {
+            'title': 'Сургалтад бүртгүүлэх асуултын чиглэл',
+            'category': 'course-routing',
+            'priority': 'high',
+            'body': (
+                "Хэрэглэгч 'бүртгүүлэх', 'элсэх', 'яаж бүртгүүлэх', "
+                "'шууд бүртгүүлэх боломжтой юу?', 'register hiih', "
+                "'register hiimer', 'burtguulj boloh uu?', 'enroll', "
+                "'элсэлт' гэх мэт асуувал ЭХЛЭЭД БҮРТГЭЛИЙН ЛИНКийг "
+                "үндсэн хариулт болгож үзүүл — энэ нь өөрөө бөглөж "
+                "бүртгүүлэх форм. Эсвэл утсаа үлдээвэл ажилтан "
+                "холбогдоно гэдгийг хоёрдогч сонголт болгож нэм. "
+                "Хэрэглэгчээс заавал утас ШААРДАХГҮЙ — форм линк нь "
+                "хүчинтэй бие даасан зам."
+            ),
+        },
+        {
+            'title': 'Анги, хичээл тодруулах асуулт',
+            'category': 'course-routing',
+            'priority': 'normal',
+            'body': (
+                "'Хичээл хэдэн цагт?', 'танхимаар үзэх боломжтой юу?', "
+                "'онлайн боломжтой юу?', 'когорт', 'хэдэн долоо "
+                "хоног үргэлжилдэг вэ?', 'hicheel hed tsagt?', 'class "
+                "schedule', 'tankhim baigaa yu?' гэх мэт асуултанд "
+                "Канонокал ангийн жагсаалтаас хариулна. Жагсаалтад "
+                "байхгүй цаг, төрөл, огноо БҮҮ ЗОХИО."
+            ),
+        },
+        {
+            'title': 'Бизнес/компанид зориулсан асуулт',
+            'category': 'service-routing',
+            'priority': 'normal',
+            'body': (
+                "'Компанид сургалт', 'дотоод сургалт', 'corporate "
+                "training', 'команд', 'бөөнөөр', 'b2b' гэх мэт "
+                "асуувал manai mergejilten holbogdoh saanal tavi. "
+                "Энэ нь BU-н түвшин дэх захиалгын асуудал тул "
+                "ажилтанд чиглүүлэх нь зөв."
+            ),
+        },
+    ]
+
+    existing_titles = {
+        t for (t,) in db.session.query(TrainingSnippet.title).all() if t
+    }
+    inserted = 0
+    for s in seeds:
+        if s['title'] in existing_titles:
+            log.append(f"SKIPPED (already exists): {s['title']}")
+            continue
+        db.session.add(TrainingSnippet(
+            title=s['title'],
+            body=s['body'],
+            category=s['category'],
+            priority=s['priority'],
+            is_active=True,
+        ))
+        existing_titles.add(s['title'])
+        inserted += 1
+        log.append(f"Added: {s['title']} (priority={s['priority']})")
+    db.session.commit()
+    log.append(f"\nTotal added: {inserted}. Total skipped: {len(seeds) - inserted}.")
+    return '\n'.join(log)
+
+
 def seed_default_magic_links():
     """One-shot helper that wires Magic Financial Group's known set of
     product/service URLs into the catalog. Idempotent: matches links by

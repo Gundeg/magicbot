@@ -99,6 +99,37 @@ def run_migration_now():
 # ticket, Office license form, audit form, report form, course form).
 # Idempotent: re-running attaches only the missing links.
 
+@app.route('/admin/api/seed-discovery-snippets', methods=['POST', 'GET'])
+@login_required
+@admin_required
+def seed_discovery_snippets_now():
+    """Adds 7 high/normal-priority training snippets that map common
+    Mongolian (Cyrillic + Latin) phrasings to the right service / product
+    / course. Makes the bot's routing robust against phrasing variation
+    without admins having to enrich every service description by hand."""
+    from flask import Response
+    from services import seed_discovery_phrasing_snippets
+    try:
+        report = seed_discovery_phrasing_snippets()
+    except Exception as e:
+        import traceback
+        return Response(
+            f"seed_discovery_phrasing_snippets() raised:\n{type(e).__name__}: {e}\n\n"
+            f"{traceback.format_exc()}",
+            status=500, mimetype='text/plain; charset=utf-8',
+        )
+    log_admin_action(
+        'system.seed_discovery_snippets', 'system', None, current_user.username,
+        detail='Discovery-phrasing training snippets seeded'
+    )
+    return Response(
+        f"=== Discovery-phrasing snippets seeder ===\n"
+        f"Triggered by: {current_user.username}\n\n"
+        f"{report}\n\n--- Done ---\n",
+        mimetype='text/plain; charset=utf-8',
+    )
+
+
 @app.route('/admin/api/seed-default-links', methods=['POST', 'GET'])
 @login_required
 @admin_required
