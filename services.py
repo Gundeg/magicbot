@@ -905,7 +905,13 @@ def _format_current_time_block():
 
     Server runs in UTC; Mongolia is UTC+8 with no DST, so we shift by 8.
     The block also names which bucket the persona rules apply to so the
-    model doesn't have to map the hour itself."""
+    model doesn't have to map the hour itself.
+
+    PRECEDENCE NOTE: this block tells the model to greet "per the persona
+    rule" but SESSION_RULES['active'] / ['gap'] (injected later as the "0."
+    item in ЧУХАЛ ДҮРМҮҮД) hard-override and forbid greetings on
+    in-flight sessions. Personas effectively only choose the greeting for
+    'new' / 'returning' sessions."""
     now_utc = datetime.utcnow()
     ub_hour = (now_utc.hour + 8) % 24
     ub_minute = now_utc.minute
@@ -1107,7 +1113,7 @@ F. ӨМНӨХ ХАРИЛЦАА ГҮН:
    (б) Хэрэглэгч pricing/ready үе шатанд ороод үнийн дэлгэрэнгүй асуусан;
    (в) Сургалтаас өөр чиглэлийн үйлчилгээ (audit, consulting, бүтээгдэхүүн г.м.)-ийн талаарх асуулт, хариулт нь "manai mergejilten" зэрэг чиглүүлгийн хариулт байх үед.
    Эдгээр үед БҮРТГЭЛИЙН ЛИНК (байвал) + "эсвэл утасны дугаараа үлдээгээрэй" гэсэн хоёр сонголтыг ЗЭРЭГ өг.
-   ДИСКАВЕРИ-Н (curious/exploring_courses) шатанд утас/линк бүү тулга — энэ үед бид нээлттэй асуулт асуудаг, хэрэглэгчийн хэрэгцээг ойлгох зорилготой. Funnel rule-ийг баримтал.
+   Дискавери (curious/exploring_courses) шатанд хэзээ утас/линк тавихыг өмнөх FUNNEL RULE тодорхойлсон — давтан энд бүү бич.
 4. Хэрэглэгч утасны дугаар бичсэн бол баярлал илэрхийлж, "Манай ажилтан удахгүй тантай холбогдоно" гэж мэдэгд.
 5. Шийдэх боломжгүй буюу мэдэхгүй асуудал тулгарвал "Энэ асуудлыг манай ажилтан тантай эргэж холбогдож тодруулна" гэж хэлээд Дүрэм 3-ын дагуу хоёр сонголтыг өг.
 6. Эмодзи цөөн (1-2) хэрэглэж, илүү гар бичмэл маяг бүү аватарла.
@@ -1123,8 +1129,10 @@ F. ӨМНӨХ ХАРИЛЦАА ГҮН:
 
 def generate_bot_response(user_message, conversation_history,
                           session_state='new', funnel_stage='curious',
-                          user_first_name=''):
-    """Generate bot response using OpenAI"""
+                          user_first_name='', handoff_pending=False):
+    """Generate bot response using OpenAI. `handoff_pending=True` enables
+    advisory mode in the system prompt — bot keeps helping but doesn't
+    re-route the customer to staff (since the handoff was already fired)."""
     try:
         messages = [{
             "role": "system",
@@ -1132,6 +1140,7 @@ def generate_bot_response(user_message, conversation_history,
                 session_state=session_state,
                 funnel_stage=funnel_stage,
                 user_first_name=user_first_name,
+                handoff_pending=handoff_pending,
             ),
         }]
         messages.extend(conversation_history)
