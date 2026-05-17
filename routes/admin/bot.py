@@ -12,9 +12,11 @@ from flask_login import current_user, login_required
 from app import app
 from auth import admin_required, super_admin_required
 from extensions import db
-from models import FAQ, GeneralSetting, HandoffKeyword, TrainingSnippet
+from models import (ChatQuestionCluster, FAQ, GeneralSetting, HandoffKeyword,
+                    TrainingSnippet)
 from services import (BOT_PERSONA, TRAINING_CONTENT, build_system_prompt,
-                      get_setting, lint_training_data, log_admin_action)
+                      cluster_chat_questions, get_setting, lint_training_data,
+                      log_admin_action)
 
 
 # Settings keys that belong on the Bot Settings tab. The other half of the
@@ -95,16 +97,81 @@ def bot_management_faqs():
     """FAQs tab. Two sections:
       1) Curated FAQs — admin-authored Q/A pairs (existing FAQ model).
       2) From Chat — LLM-clustered themes from real user messages.
-         Phase 5b populates `chat_clusters`; for now it's an empty
-         placeholder so admins can see the UI plan.
+         Phase 5b populates `chat_clusters`. Empty list means clustering
+         hasn't been run yet (or the model found no recurring themes).
     """
+    import json as _json
     faqs = FAQ.query.all()
+    raw_clusters = (ChatQuestionCluster.query
+                    .order_by(ChatQuestionCluster.promoted_to_faq_id.is_(None).desc(),
+                              ChatQuestionCluster.count.desc(),
+                              ChatQuestionCluster.id.desc())
+                    .all())
+    # Pre-decode the sample_questions JSON for the template.
+    chat_clusters = []
+    for c in raw_clusters:
+        try:
+            samples = _json.loads(c.sample_questions or '[]')
+            if not isinstance(samples, list):
+                samples = []
+        except Exception:
+            samples = []
+        chat_clusters.append({
+            'id': c.id,
+            'title': c.title,
+            'representative_question': c.representative_question,
+            'samples': samples,
+            'count': c.count,
+            'last_seen_at': c.last_seen_at,
+            'promoted_to_faq_id': c.promoted_to_faq_id,
+        })
     return render_template(
         'faq.html',
         active_tab='faqs',
         faqs=faqs,
-        chat_clusters=[],
+        chat_clusters=chat_clusters,
     )
+
+
+@app.route('/admin/api/cluster-chat-questions', methods=['POST'])
+@login_required
+@admin_required
+def cluster_chat_questions_now():
+    """Manual trigger for the LLM clustering job. Lets admins refresh the
+    'From Chat' section without waiting for the weekly cron. Returns the
+    number of clusters written."""
+    written = cluster_chat_questions()
+    return jsonify({'success': True, 'clusters_written': written})
+
+
+@app.route('/admin/api/promote-cluster-to-faq', methods=['POST'])
+@login_required
+@admin_required
+def promote_cluster_to_faq():
+    """Turn a chat-question cluster into a curated FAQ row. The cluster
+    keeps its row (with promoted_to_faq_id set) so we know not to surface
+    it again on the next clustering run."""
+    data = request.get_json() or {}
+    cluster = ChatQuestionCluster.query.get(data.get('id'))
+    if not cluster:
+        return jsonify({'success': False, 'error': 'Cluster олдсонгүй.'}), 404
+    answer = (data.get('answer') or '').strip()
+    if not answer:
+        return jsonify({'success': False, 'error': 'Хариулт шаардлагатай.'}), 400
+    faq_row = FAQ(
+        question=cluster.representative_question,
+        answer=answer,
+        category=cluster.title[:100],
+    )
+    db.session.add(faq_row)
+    db.session.flush()
+    cluster.promoted_to_faq_id = faq_row.id
+    db.session.commit()
+    log_admin_action(
+        'faq.create', 'faq', faq_row.id, cluster.title,
+        detail=f'Chat кластерээс FAQ болгож хадгалав (cluster_id={cluster.id})'
+    )
+    return jsonify({'success': True, 'faq_id': faq_row.id})
 
 
 @app.route('/bot-management/settings', methods=['GET', 'POST'])

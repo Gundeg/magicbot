@@ -9,28 +9,148 @@
 
 {% if active_tab == 'faqs' %}
 {# "From Chat" section: LLM-clustered themes from real user messages.
-   Phase 5a only renders the placeholder; Phase 5b populates `chat_clusters`. #}
+   Populated by services.cluster_chat_questions() on schedule (weekly) or
+   on-demand via the "Шинэчлэх" button below. Each cluster has a "FAQ
+   болгож хадгалах" button that promotes it into the curated FAQ table. #}
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-chat-square-quote"></i> Чатнаас гарсан жинхэнэ асуултууд</span>
-        {% if chat_clusters %}
-            <span class="badge bg-secondary">{{ chat_clusters|length }}</span>
-        {% endif %}
+        <div class="d-flex gap-2 align-items-center">
+            {% if chat_clusters %}<span class="badge bg-secondary">{{ chat_clusters|length }}</span>{% endif %}
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshClustersBtn"
+                    title="LLM-ийн бүлэглэлийг яг одоо ажиллуулах">
+                <i class="bi bi-arrow-clockwise"></i> Шинэчлэх
+            </button>
+        </div>
     </div>
-    <div class="card-body">
+    <div class="card-body p-0">
         {% if chat_clusters %}
-            {# Phase 5b will render the clusters with promote-to-FAQ buttons here. #}
-            <p class="text-muted small mb-0">{{ chat_clusters|length }} бүлгийг шинжилсэн.</p>
+        <ul class="list-group list-group-flush">
+            {% for c in chat_clusters %}
+            <li class="list-group-item">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div class="flex-grow-1">
+                        <strong>{{ c.title }}</strong>
+                        <span class="badge bg-light text-dark border ms-1">{{ c.count }} удаа</span>
+                        {% if c.promoted_to_faq_id %}
+                            <span class="badge bg-success ms-1">FAQ болсон</span>
+                        {% endif %}
+                        <div class="text-muted small mt-1">
+                            <em>"{{ c.representative_question }}"</em>
+                        </div>
+                        {% if c.samples %}
+                        <details class="mt-1">
+                            <summary class="text-muted small cursor-pointer">
+                                {{ c.samples|length }} ижил төстэй асуулт харах
+                            </summary>
+                            <ul class="text-muted small mt-1 mb-0">
+                                {% for s in c.samples %}<li>{{ s }}</li>{% endfor %}
+                            </ul>
+                        </details>
+                        {% endif %}
+                    </div>
+                    {% if not c.promoted_to_faq_id %}
+                    <button type="button" class="btn btn-sm btn-primary promote-cluster"
+                            data-id="{{ c.id }}"
+                            data-question="{{ c.representative_question|e }}"
+                            data-title="{{ c.title|e }}">
+                        <i class="bi bi-plus-lg"></i> FAQ болгох
+                    </button>
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
         {% else %}
-            <p class="text-muted small mb-0">
-                <i class="bi bi-hourglass-split"></i>
-                Хэрэглэгчдийн чатнаас гарсан асуултуудыг автоматаар бүлэглэх систем (LLM clustering)
-                удахгүй идэвхжинэ. Идэвхжсэний дараа долоо хоног бүр шинэчлэгдэх ба чухал асуултыг
-                нэг товчоор FAQ болгож хадгалах боломжтой болно.
-            </p>
+        <div class="p-3 text-muted small">
+            <i class="bi bi-hourglass-split"></i>
+            Одоогоор бүлэглэгдсэн асуулт алга. Дээрх "Шинэчлэх" товчоор LLM-ийг ажиллуулна уу.
+            Render-д <code>ENABLE_CHAT_CLUSTERING=true</code> орчны хувьсагч тохируулсан бол
+            долоо хоног бүр автоматаар шинэчлэгдэнэ.
+        </div>
         {% endif %}
     </div>
 </div>
+
+<div class="modal fade" id="promoteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Чат кластерээс FAQ болгох</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="promoteClusterId">
+                <div class="mb-3">
+                    <label class="form-label">Асуулт (бүлэглэлийн төлөөлөгч)</label>
+                    <textarea class="form-control" id="promoteQuestion" rows="2" readonly></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Ангилал</label>
+                    <input type="text" class="form-control" id="promoteCategory" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="promoteAnswer">Хариулт <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="promoteAnswer" rows="5"
+                              placeholder="Энэ асуултанд бот хэрхэн хариулахыг бичнэ үү..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Болих</button>
+                <button type="button" class="btn btn-primary" id="savePromoteBtn">
+                    <i class="bi bi-save"></i> FAQ болгож хадгалах
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const refreshBtn = document.getElementById('refreshClustersBtn');
+    if (!refreshBtn) return;
+    const csrf = document.querySelector('meta[name=csrf-token]')?.content || '';
+
+    refreshBtn.addEventListener('click', function () {
+        if (!confirm('LLM-ийг ажиллуулах уу? Энэ нь OpenAI зардал гаргана.')) return;
+        const original = refreshBtn.innerHTML;
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Ажиллаж байна...';
+        fetch('{{ url_for("cluster_chat_questions_now") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+        }).then(r => r.json()).then(d => {
+            alert(`Бүлэглэсэн: ${d.clusters_written}\n\nХуудсыг шинэчилж байна...`);
+            location.reload();
+        }).catch(e => alert('Алдаа: ' + e))
+          .finally(() => { refreshBtn.disabled = false; refreshBtn.innerHTML = original; });
+    });
+
+    document.querySelectorAll('.promote-cluster').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.getElementById('promoteClusterId').value = btn.dataset.id;
+            document.getElementById('promoteQuestion').value = btn.dataset.question;
+            document.getElementById('promoteCategory').value = btn.dataset.title;
+            document.getElementById('promoteAnswer').value = '';
+            new bootstrap.Modal(document.getElementById('promoteModal')).show();
+        });
+    });
+
+    document.getElementById('savePromoteBtn').addEventListener('click', () => {
+        const id = document.getElementById('promoteClusterId').value;
+        const answer = document.getElementById('promoteAnswer').value.trim();
+        if (!answer) { alert('Хариулт шаардлагатай.'); return; }
+        fetch('{{ url_for("promote_cluster_to_faq") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+            body: JSON.stringify({id: id, answer: answer}),
+        }).then(r => r.json()).then(d => {
+            if (d.success) location.reload();
+            else alert(d.error || 'Алдаа гарлаа.');
+        }).catch(e => alert('Алдаа: ' + e));
+    });
+})();
+</script>
 {% endif %}
 
 <div class="card">

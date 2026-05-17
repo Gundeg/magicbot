@@ -24,9 +24,9 @@ from sqlalchemy.exc import IntegrityError
 
 from extensions import db
 from models import (
-    AdminIssue, AuditEntry, BusinessLine, Course, FacebookUser, FAQ,
-    GeneralSetting, HandoffKeyword, Message, PagePost, Product, ProductLink,
-    TeamMember, TrainingSnippet, User,
+    AdminIssue, AuditEntry, BusinessLine, ChatQuestionCluster, Course,
+    FacebookUser, FAQ, GeneralSetting, HandoffKeyword, Message, PagePost,
+    Product, ProductLink, TeamMember, TrainingSnippet, User,
 )
 
 
@@ -1758,3 +1758,188 @@ def nudge_task(app):
         except Exception as e:
             print(f"Nudge error: {e}")
         time.sleep(30 * 60)
+
+
+# ===================== CHAT QUESTION CLUSTERING =====================
+# Phase 5b: groups recent user messages into themes via LLM so admins can
+# see "what users are actually asking" and one-click promote popular
+# questions into the curated FAQ.
+
+# Mongolian interrogative starters used by _is_question_like as a cheap
+# heuristic to filter the user-message firehose to question-ish content.
+_MONGOLIAN_QUESTION_STARTERS = (
+    'яаж', 'ямар', 'хэр', 'хэдэн', 'хэзээ', 'хаана', 'хэн',
+    'юу', 'юутай', 'юунд', 'юугаар', 'хичнээн', 'хэдий',
+)
+
+
+def _is_question_like(text):
+    """Cheap filter applied before sending messages to the LLM. Catches
+    obvious questions (ends with '?', Mongolian interrogatives at start)
+    while letting the LLM make the final call on ambiguous cases. Drops
+    one-word acknowledgements (za, tiim, ok)."""
+    if not text:
+        return False
+    s = text.strip().lower()
+    if len(s) < 4:
+        return False
+    if s.endswith('?'):
+        return True
+    if any(s.startswith(starter) for starter in _MONGOLIAN_QUESTION_STARTERS):
+        return True
+    return len(s) >= 10
+
+
+def _build_clustering_prompt(questions):
+    """Render the LLM prompt for clustering. Asks for strict JSON output
+    so parsing stays reliable; rejects clusters with fewer than 2
+    questions so admins don't see one-off noise."""
+    numbered = '\n'.join(f'{i+1}. {q}' for i, q in enumerate(questions))
+    return (
+        "You receive a list of real user questions sent to a Mongolian Facebook "
+        "Messenger chatbot for a financial-training / consulting company. Group "
+        "them into 5 to 15 themes that capture what users keep asking about.\n\n"
+        "Rules:\n"
+        "- Only emit a cluster if at least 2 of the input questions belong in it.\n"
+        "- The title must be in Mongolian, short (under 60 characters), "
+        "business-relevant. Examples: \"Үнийн асуултууд\", \"Хичээлийн хуваарь\".\n"
+        "- representative_question is the single question from the input that "
+        "best captures the theme — quote it verbatim.\n"
+        "- sample_questions is up to 5 distinct phrasings from the input that "
+        "belong to this theme (verbatim quotes).\n"
+        "- count is the total number of input questions that map to this theme.\n"
+        "- Return ONLY a JSON object with key 'clusters' whose value is an "
+        "array of objects with these exact keys: title, representative_question, "
+        "sample_questions, count. No prose, no explanation, no markdown.\n\n"
+        "Input questions:\n" + numbered
+    )
+
+
+def cluster_chat_questions(lookback_days=30, max_questions=400):
+    """Pull recent user messages, ask the LLM to group them into themes,
+    wholesale-replace ChatQuestionCluster rows.
+
+    Returns the number of clusters written. Returns 0 on any failure
+    rather than raising, so the weekly background thread doesn't crash on
+    a transient OpenAI hiccup. Promoted clusters (admin already turned
+    them into FAQ) are preserved across runs.
+    """
+    import json as _json
+
+    api_key = os.environ.get('OPENAI_API_KEY', '').strip()
+    if not api_key:
+        print('cluster_chat_questions: OPENAI_API_KEY not set, skipping.')
+        return 0
+
+    since = datetime.utcnow() - timedelta(days=lookback_days)
+    rows = (Message.query
+            .filter(Message.sender == 'user')
+            .filter(Message.created_at >= since)
+            .order_by(Message.created_at.desc())
+            .all())
+    questions = []
+    seen = set()
+    for m in rows:
+        text = (m.content or '').strip()
+        if not _is_question_like(text):
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        questions.append(text)
+        if len(questions) >= max_questions:
+            break
+    if len(questions) < 5:
+        print(f'cluster_chat_questions: only {len(questions)} question-like messages, skipping.')
+        return 0
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model='gpt-4o-mini',
+            messages=[
+                {'role': 'system', 'content': 'You output strict JSON only. No prose, no markdown.'},
+                {'role': 'user', 'content': _build_clustering_prompt(questions)},
+            ],
+            response_format={'type': 'json_object'},
+            temperature=0.2,
+        )
+        raw = resp.choices[0].message.content or ''
+    except Exception as e:
+        print(f'cluster_chat_questions: OpenAI error: {e}')
+        return 0
+
+    try:
+        parsed = _json.loads(raw)
+    except Exception as e:
+        print(f'cluster_chat_questions: JSON parse failed: {e}; raw[:300]={raw[:300]!r}')
+        return 0
+    # Be permissive about the wrapper shape.
+    clusters = None
+    if isinstance(parsed, list):
+        clusters = parsed
+    elif isinstance(parsed, dict):
+        for v in parsed.values():
+            if isinstance(v, list):
+                clusters = v
+                break
+    if not clusters:
+        print(f'cluster_chat_questions: no cluster array in response: {raw[:300]}')
+        return 0
+
+    now = datetime.utcnow()
+    # Wipe everything except clusters already promoted to FAQ.
+    promoted_titles = {
+        c.title for c in ChatQuestionCluster.query.filter(
+            ChatQuestionCluster.promoted_to_faq_id.isnot(None)
+        ).all()
+    }
+    ChatQuestionCluster.query.filter(
+        ChatQuestionCluster.promoted_to_faq_id.is_(None)
+    ).delete(synchronize_session=False)
+
+    inserted = 0
+    for c in clusters:
+        if not isinstance(c, dict):
+            continue
+        try:
+            title = (c.get('title') or '').strip()[:200]
+            rep = (c.get('representative_question') or '').strip()
+            samples = c.get('sample_questions') or []
+            cnt = int(c.get('count') or 0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if not title or not rep or cnt < 2:
+            continue
+        if title in promoted_titles:
+            continue
+        if not isinstance(samples, list):
+            samples = []
+        samples = [str(s).strip() for s in samples if str(s).strip()][:5]
+        db.session.add(ChatQuestionCluster(
+            title=title,
+            representative_question=rep,
+            sample_questions=_json.dumps(samples, ensure_ascii=False),
+            count=max(cnt, len(samples)),
+            first_seen_at=since,
+            last_seen_at=now,
+        ))
+        inserted += 1
+    db.session.commit()
+    print(f'cluster_chat_questions: wrote {inserted} cluster(s) from {len(questions)} questions.')
+    return inserted
+
+
+def cluster_task(app):
+    """Background loop running cluster_chat_questions() weekly. Gated by
+    ENABLE_CHAT_CLUSTERING=true so dev / non-MagicBot deploys don't burn
+    OpenAI credits unnecessarily."""
+    while True:
+        try:
+            with app.app_context():
+                cluster_chat_questions()
+        except Exception as e:
+            print(f"Clustering error: {e}")
+        # Once per week. Don't tighten without checking OpenAI cost.
+        time.sleep(7 * 24 * 60 * 60)

@@ -254,6 +254,15 @@ if os.environ.get('ENABLE_NUDGE', 'false').lower() == 'true':
     from services import nudge_task
     Thread(target=nudge_task, args=(app,), daemon=True).start()
 
+# Optional weekly LLM clustering of user chat messages into FAQ candidates
+# (Phase 5b). Off by default to avoid OpenAI credit burn on dev / unused
+# deployments; turn on per-service in Render env. Admins can also trigger
+# a one-shot run via the "Шинэчлэх" button on the FAQ tab without flipping
+# this var.
+if os.environ.get('ENABLE_CHAT_CLUSTERING', 'false').lower() == 'true':
+    from services import cluster_task
+    Thread(target=cluster_task, args=(app,), daemon=True).start()
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

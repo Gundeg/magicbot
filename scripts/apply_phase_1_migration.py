@@ -1,18 +1,22 @@
-"""One-shot migration runner for Phase 1 (admin IA reorg).
+"""One-shot migration runner for Phase 1 and later admin IA reorg changes.
 
-Applies the same schema + data changes documented in
-migrations/versions/0002_phase_1_ia_reorg.py but using pure stdlib `sqlite3`
-because SQLAlchemy / Alembic startup is prohibitively slow on this machine.
+Applies the schema + data changes documented in migrations/versions/*.py
+using pure stdlib `sqlite3` because SQLAlchemy / Alembic startup is
+prohibitively slow on the dev machine, and we want prod auto-bootstrap to
+be fast and dependency-light on every boot.
 
-After running:
-  - alembic_version row exists with version_num = '0002_phase_1_ia_reorg'
-  - All Phase 1 schema/data changes are applied
-  - Future migrations can use the regular Alembic CLI
+Currently applies:
+  - 0001 -> 0002 (Phase 1: BU schema + Software->Product + unified links)
+  - 0002 -> 0003 (Phase 5b: chat_question_cluster table)
+
+Idempotent: re-running on a fully-migrated DB is a fast no-op.
+
+Future migrations can either add a new step here or be applied via the
+regular Alembic CLI (`alembic upgrade head`) once Alembic's import speed
+isn't a blocker.
 
 Usage:
     python scripts/apply_phase_1_migration.py [--db PATH]
-
-Idempotent: re-running detects an already-applied migration and exits.
 """
 import argparse
 import os
@@ -96,15 +100,17 @@ def apply_migration(db_path):
     cur = conn.cursor()
 
     # --- preflight: check alembic_version ---
+    HEAD = '0003_chat_question_clusters'
     cur.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='alembic_version'"
     )
     if cur.fetchone():
-        v = cur.execute("SELECT version_num FROM alembic_version").fetchone()
-        if v and v[0] == '0002_phase_1_ia_reorg':
-            print('Phase 1 already applied (alembic_version=0002_phase_1_ia_reorg). Nothing to do.')
+        v_row = cur.execute("SELECT version_num FROM alembic_version").fetchone()
+        current_version = v_row[0] if v_row else None
+        if current_version == HEAD:
+            print(f'DB already at {HEAD}. Nothing to do.')
             return 0
-        print(f'alembic_version present but at {v[0] if v else "None"}; expecting baseline.')
+        print(f'alembic_version present but at {current_version}; running pending migrations to {HEAD}.')
     else:
         # Create alembic_version table and stamp at baseline.
         cur.execute(
@@ -112,6 +118,7 @@ def apply_migration(db_path):
             "CONSTRAINT alembic_version_pkc PRIMARY KEY)"
         )
         cur.execute("INSERT INTO alembic_version (version_num) VALUES ('0001_baseline')")
+        current_version = '0001_baseline'
         print('Created alembic_version table, stamped at 0001_baseline.')
 
     now = datetime.utcnow().isoformat(sep=' ', timespec='seconds')
@@ -290,9 +297,35 @@ def apply_migration(db_path):
     else:
         print('business_line already migrated (no obsolete columns).')
 
-    # --- 7. stamp at new revision ---
+    # --- 7. stamp at Phase 1 revision ---
     cur.execute("UPDATE alembic_version SET version_num = '0002_phase_1_ia_reorg'")
     print('Stamped alembic_version at 0002_phase_1_ia_reorg.')
+
+    # --- 8. Phase 5b: create chat_question_cluster table -----------------
+    cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='chat_question_cluster'"
+    )
+    if not cur.fetchone():
+        cur.execute(
+            "CREATE TABLE chat_question_cluster ("
+            " id INTEGER PRIMARY KEY,"
+            " title VARCHAR(200) NOT NULL,"
+            " representative_question TEXT NOT NULL,"
+            " sample_questions TEXT NOT NULL,"
+            " count INTEGER NOT NULL DEFAULT 0,"
+            " first_seen_at DATETIME,"
+            " last_seen_at DATETIME,"
+            " promoted_to_faq_id INTEGER,"
+            " created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            " FOREIGN KEY (promoted_to_faq_id) REFERENCES faq (id) ON DELETE SET NULL"
+            ")"
+        )
+        print('Created chat_question_cluster table.')
+    else:
+        print('chat_question_cluster table already exists, skipping.')
+
+    cur.execute("UPDATE alembic_version SET version_num = '0003_chat_question_clusters'")
+    print('Stamped alembic_version at 0003_chat_question_clusters.')
 
     conn.commit()
     conn.close()

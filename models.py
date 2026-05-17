@@ -326,3 +326,26 @@ class Service(db.Model):
 # migrated to Product rows under the Magic Cloud business line; see
 # migrations/versions/0002_phase_1_ia_reorg.py and
 # scripts/apply_phase_1_migration.py for the migration details.
+
+
+class ChatQuestionCluster(db.Model):
+    """LLM-grouped themes from real user chat messages, populated weekly by
+    services.cluster_chat_questions(). Surfaces FAQ candidates: each row is
+    a cluster of similar user questions ("price questions", "schedule
+    questions", ...) the admin can one-click promote into the curated FAQ.
+
+    Wholesale-replaced on every clustering run, so `id` is not stable
+    across runs. `count` is the number of source messages that mapped to
+    this cluster in the most recent run.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    representative_question = db.Column(db.Text, nullable=False)
+    sample_questions = db.Column(db.Text, nullable=False)  # JSON array
+    count = db.Column(db.Integer, nullable=False, default=0)
+    first_seen_at = db.Column(db.DateTime)
+    last_seen_at = db.Column(db.DateTime)
+    # Set when admin clicks "Promote to FAQ" so the cluster doesn't keep
+    # nagging on subsequent runs. Cleared if the FAQ row is deleted.
+    promoted_to_faq_id = db.Column(db.Integer, db.ForeignKey('faq.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
