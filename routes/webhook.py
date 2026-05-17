@@ -13,7 +13,8 @@ from sqlalchemy.exc import IntegrityError
 from app import app, csrf
 from extensions import db
 from models import FacebookUser, Message
-from services import (PHONE_RE, check_rate_limit, classify_conversation,
+from services import (PHONE_RE, bot_response_implies_handoff,
+                      check_rate_limit, classify_conversation,
                       classify_session, detect_funnel_stage, first_name_of,
                       generate_bot_response, get_facebook_user_info,
                       refresh_facebook_user_name, send_facebook_message,
@@ -138,6 +139,21 @@ def webhook():
                     db.session.commit()
 
                     send_facebook_message(sender_id, bot_response)
+
+                    # Implicit handoff: if the bot's own reply was a
+                    # "defer to staff" message, mute the bot, create an
+                    # AdminIssue, and ping Telegram — but skip the
+                    # standard handoff user-message since the bot already
+                    # sent one. Catches every staff-deferral path,
+                    # whether or not a user keyword matched earlier.
+                    deferral_phrase = bot_response_implies_handoff(bot_response)
+                    if deferral_phrase:
+                        trigger_handoff(
+                            fb_user,
+                            f'bot_deferral:{deferral_phrase}',
+                            message_text,
+                            send_user_message=False,
+                        )
 
                     try:
                         classify_conversation(fb_user)

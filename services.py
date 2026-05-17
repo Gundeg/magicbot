@@ -1185,10 +1185,14 @@ def invalidate_handoff_poll_cache():
     _handoff_poll_cache['expires_at'] = 0.0
 
 
-def trigger_handoff(fb_user, reason, user_message):
+def trigger_handoff(fb_user, reason, user_message, send_user_message=True):
     """Run the full handoff flow: mute the bot for the configured window,
-    create an AdminIssue, ping admins via Telegram, send the user a polite
-    waiting message. Safe to call inside the webhook handler."""
+    create an AdminIssue, ping admins via Telegram, optionally send the
+    user a polite waiting message. Safe to call inside the webhook handler.
+
+    Pass `send_user_message=False` when the bot has already sent the
+    customer a deferring reply (see _bot_response_implies_handoff) so the
+    user doesn't receive two back-to-back messages."""
     hours = get_mute_duration_hours()
     if hours > 0:
         fb_user.bot_muted_until = datetime.utcnow() + timedelta(hours=hours)
@@ -1206,22 +1210,23 @@ def trigger_handoff(fb_user, reason, user_message):
 
     invalidate_handoff_poll_cache()
 
-    if off_hours:
-        try:
-            oh_start = int(get_setting('office_hours_start', '8') or '8')
-            oh_end = int(get_setting('office_hours_end', '22') or '22')
-        except ValueError:
-            oh_start, oh_end = 8, 22
-        user_reply = HANDOFF_USER_REPLY_OFF_HOURS.format(start=oh_start, end=oh_end)
-    else:
-        user_reply = HANDOFF_USER_REPLY
-    send_facebook_message(fb_user.facebook_id, user_reply)
-    db.session.add(Message(
-        facebook_user_id=fb_user.id,
-        sender='bot',
-        content=user_reply,
-    ))
-    db.session.commit()
+    if send_user_message:
+        if off_hours:
+            try:
+                oh_start = int(get_setting('office_hours_start', '8') or '8')
+                oh_end = int(get_setting('office_hours_end', '22') or '22')
+            except ValueError:
+                oh_start, oh_end = 8, 22
+            user_reply = HANDOFF_USER_REPLY_OFF_HOURS.format(start=oh_start, end=oh_end)
+        else:
+            user_reply = HANDOFF_USER_REPLY
+        send_facebook_message(fb_user.facebook_id, user_reply)
+        db.session.add(Message(
+            facebook_user_id=fb_user.id,
+            sender='bot',
+            content=user_reply,
+        ))
+        db.session.commit()
 
     display_name = fb_user.name or fb_user.facebook_id
     phone_part = f"\n📞 {fb_user.phone}" if fb_user.phone else ''
@@ -1235,6 +1240,36 @@ def trigger_handoff(fb_user, reason, user_message):
     )
     send_telegram_notification(tg_text)
     return issue
+
+
+# Phrases that indicate the bot is deferring to staff. If the bot's own
+# response contains any of these, treat it as an implicit handoff (mute
+# the bot + create AdminIssue + Telegram ping) WITHOUT sending an extra
+# user-facing message — the bot's deferring reply IS the user message.
+_BOT_DEFERRAL_PHRASES = (
+    'мэргэжлийн ажилтан',
+    'манай ажилтан танд',
+    'манай ажилтан удахгүй',
+    'ажилтан танд эргэж',
+    'ажилтан тантай эргэж',
+    'ажилтантай холбог',
+    'тусгай ажилтан',
+)
+
+
+def bot_response_implies_handoff(bot_response):
+    """Return the matched phrase if the bot's reply means "I am deferring
+    to a human", else None. Used by the webhook to fire a handoff even
+    when the user's message didn't match an explicit keyword (e.g. the
+    customer asked about an unknown service and the bot chose to defer
+    per Rule 10б of the system prompt)."""
+    if not bot_response:
+        return None
+    text = bot_response.lower()
+    for phrase in _BOT_DEFERRAL_PHRASES:
+        if phrase in text:
+            return phrase
+    return None
 
 
 # ===================== AUDIT LOG =====================
