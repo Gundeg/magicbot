@@ -279,12 +279,32 @@ def business_unit_detail(bu_id):
     EVERY row of the matching type (i.e. a Course-typed BU shows every
     course in the catalog, not just courses 'owned' by this BU). This is
     acceptable today because Magic has one BU per product_type.
-
-    Each items query is wrapped in try/except so a partially-migrated DB
-    (e.g. course_link / service_link tables missing because Phase 1's
-    auto-bootstrap failed) doesn't 500 the whole page. We log the error,
-    show an empty items list, and let the admin still see / edit the BU.
     """
+    # Wrap the ENTIRE view so any error (including missing-column errors
+    # on the initial BusinessLine load) surfaces as a readable plain-text
+    # response instead of a generic 500. Only admins can hit this route
+    # (@admin_required above), so revealing tracebacks is acceptable.
+    try:
+        return _render_business_unit_detail(bu_id)
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f'business_unit_detail({bu_id}) FAILED: {type(e).__name__}: {e}')
+        print(tb)
+        from flask import Response
+        body = (
+            f"=== /business-units/{bu_id} ERROR ===\n\n"
+            f"{type(e).__name__}: {e}\n\n"
+            f"--- Traceback ---\n{tb}\n"
+            f"--- End of traceback ---\n\n"
+            f"This page is admin-only; only logged-in admins can see this. "
+            f"Copy the traceback above to share with the developer."
+        )
+        return Response(body, status=500, mimetype='text/plain; charset=utf-8')
+
+
+def _render_business_unit_detail(bu_id):
+    """The real implementation; see business_unit_detail() docstring."""
     line = BusinessLine.query.get_or_404(bu_id)
 
     items = []
