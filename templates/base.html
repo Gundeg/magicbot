@@ -354,7 +354,17 @@
         .mono-break        { font-family: monospace; font-size: 0.78rem; word-break: break-all; }
         .bg-paper-warn     { background: #fff8f8; }
         .scroll-300        { max-height: 300px; overflow-y: auto; }
+        .col-w-8           { width: 8%; }
+        .col-w-14          { width: 14%; }
+        .col-w-24          { width: 24%; }
         .col-w-45          { width: 45%; }
+        .col-max-280       { max-width: 280px; }
+        .preview-prompt-out {
+            max-height: 60vh;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            background: #f7f7f9;
+        }
         .progress-thin     { height: 8px; margin-top: 6px; }
         .biz-card-active   { border-color: #b2d8d8 !important; background: #f5fbfb; }
         .biz-card-paused   { border-color: #ddd !important; background: #fafafa; }
@@ -430,6 +440,10 @@
                 </div>
                 <a class="nav-link nav-sub {% if request.endpoint == 'software' %}active{% endif %}" href="{{ url_for('software') }}">
                     <i class="bi bi-box-seam"></i> Програм хангамж
+                </a>
+                {# Cross-line product catalog (Magic Finance + Microsoft + Kaspersky etc.) #}
+                <a class="nav-link nav-sub {% if request.endpoint == 'products' %}active{% endif %}" href="{{ url_for('products') }}">
+                    <i class="bi bi-collection"></i> Бүтээгдэхүүн ба License
                 </a>
                 {# Shared catalog items (cross-company) #}
                 <div class="nav-sub-header">

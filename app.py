@@ -127,13 +127,15 @@ def init_db():
     the oldest one so management routes remain usable.
     """
     from services import (advance_recurring_courses, ensure_schema,
-                          seed_courses_and_faqs, seed_handoff_keywords)
+                          seed_courses_and_faqs, seed_handoff_keywords,
+                          seed_products)
 
     with app.app_context():
         db.create_all()
         ensure_schema()
         seed_courses_and_faqs()
         seed_handoff_keywords()
+        seed_products()
         advance_recurring_courses()
 
         if not User.query.filter_by(username='admin').first():

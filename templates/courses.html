@@ -19,10 +19,12 @@
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-calendar-event"></i> Сургалтуудын жагсаалт</span>
         <div class="d-flex gap-2">
-            <button type="button" class="btn btn-sm btn-outline-light" id="refreshDatesBtn" title="Давтагдах сургалтуудын огноог шинэчлэх">
-                <i class="bi bi-arrow-clockwise"></i> Огноо шинэчлэх
+            <button type="button" class="btn btn-sm btn-outline-light" id="refreshDatesBtn"
+                    title="Давтагдах ангиудын огноог шинэчилж, өнгөрсөн ангиудыг архивлана">
+                <i class="bi bi-arrow-clockwise"></i> Огноо шинэчлэх / Архивлах
             </button>
-            <button type="button" class="btn btn-sm btn-light" id="addCourseBtn" data-bs-toggle="modal" data-bs-target="#courseModal">
+            <button type="button" class="btn btn-sm btn-light" id="addCourseBtn"
+                    data-bs-toggle="modal" data-bs-target="#courseModal">
                 <i class="bi bi-plus-circle"></i> Сургалт нэмэх
             </button>
         </div>
@@ -32,10 +34,12 @@
             <table class="table table-hover align-middle">
                 <thead>
                     <tr>
+                        <th>#</th>
                         <th>Нэр</th>
                         <th>Төрөл</th>
                         <th>Эхлэх огноо</th>
                         <th>Дуусах огноо</th>
+                        <th>Хугацаа</th>
                         <th>Цаг</th>
                         <th>Үнэ (₮)</th>
                         <th>Давтагдах</th>
@@ -46,20 +50,24 @@
                 <tbody id="coursesList">
                     {% for course in courses %}
                     <tr data-course-id="{{ course.id }}"
+                        data-course-number="{{ course.course_number or '' }}"
                         data-name="{{ course.name | e }}"
                         data-type="{{ course.course_type | e }}"
-                        data-start="{{ course.start_date.strftime('%Y-%m-%d') }}"
+                        data-start="{{ course.start_date.strftime('%Y-%m-%d') if course.start_date else '' }}"
                         data-end="{{ course.end_date.strftime('%Y-%m-%d') if course.end_date else '' }}"
                         data-time="{{ course.time | e }}"
                         data-price="{{ course.price | int }}"
+                        data-duration-days="{{ course.duration_days or '' }}"
                         data-description="{{ (course.description or '') | e }}"
                         data-recurring="{{ '1' if course.is_recurring else '0' }}"
                         data-active="{{ '1' if course.is_active else '0' }}"
                         data-status-note="{{ (course.status_note or '') | e }}">
+                        <td class="text-muted small">{{ course.course_number or '—' }}</td>
                         <td><strong>{{ course.name }}</strong></td>
                         <td><span class="badge bg-secondary">{{ course.course_type }}</span></td>
-                        <td>{{ course.start_date.strftime('%Y-%m-%d') }}</td>
+                        <td>{{ course.start_date.strftime('%Y-%m-%d') if course.start_date else '—' }}</td>
                         <td>{{ course.end_date.strftime('%Y-%m-%d') if course.end_date else '—' }}</td>
+                        <td>{{ (course.duration_days|string + ' хоног') if course.duration_days else '—' }}</td>
                         <td>{{ course.time }}</td>
                         <td>{{ "{:,.0f}".format(course.price) }}</td>
                         <td>
@@ -88,7 +96,8 @@
                             <button type="button" class="btn btn-sm {{ 'btn-outline-secondary' if course.is_active else 'btn-success' }} toggle-course"
                                     data-id="{{ course.id }}"
                                     data-active="{{ '1' if course.is_active else '0' }}"
-                                    title="{{ 'Түр зогсоох' if course.is_active else 'Идэвхжүүлэх' }}">
+                                    title="{{ 'Түр зогсоох' if course.is_active else 'Идэвхжүүлэх' }}"
+                                    aria-label="Идэвх солих">
                                 <i class="bi {{ 'bi-pause-circle' if course.is_active else 'bi-play-circle' }}"></i>
                             </button>
                             <button type="button" class="btn btn-sm btn-danger delete-course" data-id="{{ course.id }}"
@@ -99,7 +108,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="9" class="text-center text-muted py-4">Сургалт байхгүй байна.</td>
+                        <td colspan="11" class="text-center text-muted py-4">Сургалт байхгүй байна.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -120,7 +129,13 @@
                 <form id="courseForm">
                     <input type="hidden" id="courseId" value="">
                     <div class="row">
-                        <div class="col-md-8 mb-3">
+                        <div class="col-md-2 mb-3">
+                            <label for="courseNumber" class="form-label">Дугаар <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="courseNumber"
+                                   placeholder="1881" min="1" required>
+                            <small class="text-muted">Давтагдашгүй бүхэл тоо</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
                             <label for="courseName" class="form-label">Сургалтын нэр</label>
                             <input type="text" class="form-control" id="courseName" required>
                         </div>
@@ -135,10 +150,13 @@
                             </select>
                         </div>
                     </div>
-                    <div class="row">
+                    <div class="row" id="dateRow">
                         <div class="col-md-6 mb-3">
                             <label for="startDate" class="form-label">Эхлэх огноо</label>
-                            <input type="date" class="form-control" id="startDate" required>
+                            <input type="date" class="form-control" id="startDate">
+                            <small class="text-muted d-none" id="startDateHelp">
+                                100% Online анги нь өөрөө бүртгүүлсэн өдрөөс эхэлдэг тул огноо оруулах шаардлагагүй.
+                            </small>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label for="endDate" class="form-label">Дуусах огноо</label>
@@ -146,13 +164,19 @@
                         </div>
                     </div>
                     <div class="row">
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label for="courseTime" class="form-label">Цаг (жишээ: 10:00-13:00)</label>
                             <input type="text" class="form-control" id="courseTime" required>
                         </div>
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label for="coursePrice" class="form-label">Үнэ (₮)</label>
                             <input type="number" class="form-control" id="coursePrice" required>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="durationDays" class="form-label">Үргэлжлэх хугацаа (хоног)</label>
+                            <input type="number" class="form-control" id="durationDays"
+                                   placeholder="жишээ: 28, 365" min="0">
+                            <small class="text-muted">Заавал биш — тогтсон тохиолдолд бот хэрэглэгчид хэлнэ.</small>
                         </div>
                     </div>
                     <div class="mb-3">
@@ -210,19 +234,49 @@ document.getElementById('addCourseBtn').addEventListener('click', function() {
     document.getElementById('courseForm').reset();
     document.getElementById('courseId').value = '';
     document.getElementById('courseModalTitle').textContent = 'Сургалт нэмэх';
+    applyTypeRules();
 });
+
+// Self-paced courses have no fixed start/end date. When the admin picks
+// "100% Online", lock both date inputs so the row is consistent with what
+// build_system_prompt expects. The handler is wired on type change AND
+// reapplied when the modal opens for edit, so the lock state matches the
+// course the admin is editing — not whatever was selected last.
+function applyTypeRules() {
+    const isOnline = document.getElementById('courseType').value === '100% Online';
+    const startEl = document.getElementById('startDate');
+    const endEl = document.getElementById('endDate');
+    const help = document.getElementById('startDateHelp');
+    if (isOnline) {
+        startEl.value = '';
+        endEl.value = '';
+        startEl.disabled = true;
+        endEl.disabled = true;
+        startEl.required = false;
+        if (help) help.classList.remove('d-none');
+    } else {
+        startEl.disabled = false;
+        endEl.disabled = false;
+        startEl.required = true;
+        if (help) help.classList.add('d-none');
+    }
+}
+document.getElementById('courseType').addEventListener('change', applyTypeRules);
 
 document.getElementById('saveCourseBtn').addEventListener('click', function() {
     const courseId = document.getElementById('courseId').value;
+    const isOnline = document.getElementById('courseType').value === '100% Online';
     const data = {
         action: courseId ? 'edit' : 'add',
         id: courseId,
+        course_number: document.getElementById('courseNumber').value || null,
         name: document.getElementById('courseName').value,
         course_type: document.getElementById('courseType').value,
-        start_date: document.getElementById('startDate').value,
-        end_date: document.getElementById('endDate').value,
+        start_date: isOnline ? null : document.getElementById('startDate').value,
+        end_date: isOnline ? null : document.getElementById('endDate').value,
         time: document.getElementById('courseTime').value,
         price: document.getElementById('coursePrice').value,
+        duration_days: document.getElementById('durationDays').value || null,
         description: document.getElementById('courseDescription').value,
         is_recurring: document.getElementById('isRecurring').checked
     };
@@ -259,20 +313,28 @@ document.querySelectorAll('.edit-course').forEach(btn => {
     btn.addEventListener('click', function() {
         const row = document.querySelector(`tr[data-course-id="${this.dataset.id}"]`);
         document.getElementById('courseId').value = this.dataset.id;
+        document.getElementById('courseNumber').value = row.dataset.courseNumber || '';
         document.getElementById('courseName').value = row.dataset.name;
         document.getElementById('courseType').value = row.dataset.type;
         document.getElementById('startDate').value = row.dataset.start;
         document.getElementById('endDate').value = row.dataset.end;
         document.getElementById('courseTime').value = row.dataset.time;
         document.getElementById('coursePrice').value = row.dataset.price;
+        document.getElementById('durationDays').value = row.dataset.durationDays || '';
         document.getElementById('courseDescription').value = row.dataset.description;
         document.getElementById('isRecurring').checked = row.dataset.recurring === '1';
         document.getElementById('courseModalTitle').textContent = 'Сургалт засах';
+        applyTypeRules();
     });
 });
 
 document.getElementById('refreshDatesBtn').addEventListener('click', function() {
-    if (!confirm('Дуусгавар болсон давтагдах сургалтуудын огноог шинэчлэх үү?')) return;
+    if (!confirm(
+        'Үйлдлүүд:\n' +
+        '1) Давтагдах ангиуд: дараагийн эхлэх/дуусах огноог тооцоолно.\n' +
+        '2) Давтагдахгүй ангиуд: дуусах (эсвэл эхлэх) огноо өнгөрсөн бол идэвхгүй болгож архивлана.\n\n' +
+        'Үргэлжлүүлэх үү?'
+    )) return;
     const btn = this;
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Шинэчилж байна...';
@@ -284,12 +346,15 @@ document.getElementById('refreshDatesBtn').addEventListener('click', function() 
     .then(r => r.json())
     .then(result => {
         if (result.success) {
-            alert(`${result.updated} сургалтын огноо шинэчлэгдлээ.`);
+            alert(
+                `${result.updated || 0} давтагдах ангийн огноо шинэчлэгдлээ.\n` +
+                `${result.archived || 0} өнгөрсөн анги архивлагдлаа.`
+            );
             location.reload();
         } else {
             alert('Алдаа: ' + (result.error || 'Тодорхойгүй'));
             btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Огноо шинэчлэх';
+            btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Огноо шинэчлэх / Архивлах';
         }
     });
 });
@@ -298,14 +363,14 @@ document.getElementById('courseModal').addEventListener('hidden.bs.modal', funct
     document.getElementById('courseForm').reset();
     document.getElementById('courseId').value = '';
     document.getElementById('courseModalTitle').textContent = 'Сургалт нэмэх';
+    applyTypeRules();
 });
 
 document.querySelectorAll('.toggle-course').forEach(btn => {
     btn.addEventListener('click', function() {
         const id = this.dataset.id;
         const isActive = this.dataset.active === '1';
-        // Re-activating an inactive course is low-risk and has no story to tell —
-        // skip the modal and clear any stale pause-note in one click.
+        // Re-activating: skip the modal, clear stale pause-note.
         if (!isActive) {
             fetch('{{ url_for("courses") }}', {
                 method: 'POST',

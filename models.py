@@ -54,13 +54,21 @@ class Message(db.Model):
 class Course(db.Model):
     """Training course"""
     id = db.Column(db.Integer, primary_key=True)
+    # Admin-assigned external course number (e.g. 1881). Unique per Course;
+    # the same human-readable name can repeat across different schedules,
+    # so this is the stable identifier admins use to disambiguate.
+    course_number = db.Column(db.Integer, unique=True)
     name = db.Column(db.String(255), nullable=False)
-    course_type = db.Column(db.String(100), nullable=False)  # '100% Online', 'Hybrid', etc.
-    start_date = db.Column(db.DateTime, nullable=False)
+    # Restricted to the four allowed types, enforced in the admin POST.
+    course_type = db.Column(db.String(100), nullable=False)
+    # Nullable for self-paced '100% Online' courses where there is no fixed start.
+    start_date = db.Column(db.DateTime)
     end_date = db.Column(db.DateTime)
     time = db.Column(db.String(50), nullable=False)  # e.g., "10:00-13:00"
     price = db.Column(db.Float, nullable=False)
     description = db.Column(db.Text)
+    # Total course duration in days, when fixed. Quoted by the bot when set.
+    duration_days = db.Column(db.Integer)
     is_active = db.Column(db.Boolean, default=True)
     status_note = db.Column(db.String(255))  # reason for pause / admin note visible to AI
     is_recurring = db.Column(db.Boolean, default=False)
@@ -153,11 +161,84 @@ class BusinessLine(db.Model):
     description = db.Column(db.Text)
     action = db.Column(db.String(20), default='refer')  # 'answer' | 'refer'
     contact_info = db.Column(db.String(255))            # e.g. phone, email, dept
+    # Per-line fields the bot quotes verbatim. Kept separate from
+    # `contact_info` and the freeform `description` so admins can update
+    # one number/URL/address without rewriting the description blob.
+    address = db.Column(db.Text)
+    email = db.Column(db.String(200))
+    signup_form_url = db.Column(db.String(500))
+    signup_phone = db.Column(db.String(100))
+    # Training has both a registration form and an exam form (software-only
+    # learning path). Other lines leave this null.
+    exam_form_url = db.Column(db.String(500))
+    # Stats vary per line (training has 'students', software has 'users'),
+    # so each line carries its own three numbers instead of a single
+    # company-wide About Us block.
+    established_year = db.Column(db.Integer)
+    num_products_or_services = db.Column(db.Integer)
+    total_clients_or_users = db.Column(db.Integer)
     is_active = db.Column(db.Boolean, default=True)
     status_note = db.Column(db.String(255))  # reason for pause / admin note visible to AI
     sort_order = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Product(db.Model):
+    """A distinct product offered under a BusinessLine. Used when one line
+    sells several separable things (Magic Finance + Microsoft + Kaspersky
+    under the Program line). Training-style services use Course instead
+    since they need scheduling fields.
+
+    The bot does not quote prices; questions about purchase, support,
+    docs, etc. get answered with the matching ProductLink. Prices live
+    only in the request-form workflow operated by humans."""
+    id = db.Column(db.Integer, primary_key=True)
+    business_line_id = db.Column(
+        db.Integer, db.ForeignKey('business_line.id'), nullable=False
+    )
+    # Admin-input external code. Same disambiguation pattern as Course —
+    # the name can repeat (e.g. multiple Microsoft license SKUs) but the
+    # number stays unique across all Products.
+    product_number = db.Column(db.Integer, unique=True)
+    name = db.Column(db.String(200), nullable=False)
+    vendor = db.Column(db.String(120))
+    description = db.Column(db.Text)
+    # Promote one product per line to the top of the bot's mental list.
+    is_main_product = db.Column(db.Boolean, default=False)
+    is_active = db.Column(db.Boolean, default=True)
+    status_note = db.Column(db.String(255))
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    business_line = db.relationship(
+        'BusinessLine',
+        backref=db.backref('products', lazy=True, cascade='all, delete-orphan')
+    )
+
+
+class ProductLink(db.Model):
+    """One resource link attached to a Product — purchase form, support
+    ticket URL, manual, community forum, download page, etc.
+
+    `kind` is free-form so admins can add new categories without a code
+    deploy. The bot is told to match user intent semantically against
+    kind + label and quote the matching link, never invent one."""
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(
+        db.Integer, db.ForeignKey('product.id'), nullable=False
+    )
+    kind = db.Column(db.String(40), nullable=False)
+    label = db.Column(db.String(160))
+    url = db.Column(db.String(500), nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    product = db.relationship(
+        'Product',
+        backref=db.backref('links', lazy=True, cascade='all, delete-orphan',
+                           order_by='ProductLink.sort_order')
+    )
 
 
 class HandoffKeyword(db.Model):

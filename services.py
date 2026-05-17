@@ -25,8 +25,8 @@ from sqlalchemy.exc import IntegrityError
 from extensions import db
 from models import (
     AdminIssue, AuditEntry, BusinessLine, Course, FacebookUser, FAQ,
-    GeneralSetting, HandoffKeyword, Message, PagePost, TeamMember,
-    TrainingSnippet, User,
+    GeneralSetting, HandoffKeyword, Message, PagePost, Product, ProductLink,
+    TeamMember, TrainingSnippet, User,
 )
 
 
@@ -285,11 +285,66 @@ def ensure_schema():
         'is_recurring': 'is_recurring BOOLEAN DEFAULT 0',
         'schedule_template': 'schedule_template TEXT',
         'status_note': 'status_note VARCHAR(255)',
+        # Admin-assigned external code. Left nullable so existing rows don't
+        # block the migration; uniqueness is enforced by the admin POST.
+        'course_number': 'course_number INTEGER',
+        'duration_days': 'duration_days INTEGER',
     })
 
     add_columns('business_line', {
         'status_note': 'status_note VARCHAR(255)',
+        'address': 'address TEXT',
+        'email': 'email VARCHAR(200)',
+        'signup_form_url': 'signup_form_url VARCHAR(500)',
+        'signup_phone': 'signup_phone VARCHAR(100)',
+        'exam_form_url': 'exam_form_url VARCHAR(500)',
+        'established_year': 'established_year INTEGER',
+        'num_products_or_services': 'num_products_or_services INTEGER',
+        'total_clients_or_users': 'total_clients_or_users INTEGER',
     })
+
+    # Product + ProductLink were added after the initial schema; create them
+    # on existing DBs that never ran create_all() against the new tables.
+    if 'product' not in inspector.get_table_names():
+        with db.engine.begin() as conn:
+            try:
+                conn.exec_driver_sql(
+                    "CREATE TABLE product ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  business_line_id INTEGER NOT NULL REFERENCES business_line(id),"
+                    "  product_number INTEGER UNIQUE,"
+                    "  name VARCHAR(200) NOT NULL,"
+                    "  vendor VARCHAR(120),"
+                    "  description TEXT,"
+                    "  is_main_product BOOLEAN DEFAULT 0,"
+                    "  is_active BOOLEAN DEFAULT 1,"
+                    "  status_note VARCHAR(255),"
+                    "  sort_order INTEGER DEFAULT 0,"
+                    "  created_at DATETIME,"
+                    "  updated_at DATETIME"
+                    ")"
+                )
+                print("Schema migration: created product table")
+            except Exception as e:
+                print(f"Schema migration skipped (product table): {e}")
+    if 'product_link' not in inspector.get_table_names():
+        with db.engine.begin() as conn:
+            try:
+                conn.exec_driver_sql(
+                    "CREATE TABLE product_link ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  product_id INTEGER NOT NULL REFERENCES product(id),"
+                    "  kind VARCHAR(40) NOT NULL,"
+                    "  label VARCHAR(160),"
+                    "  url VARCHAR(500) NOT NULL,"
+                    "  is_active BOOLEAN DEFAULT 1,"
+                    "  sort_order INTEGER DEFAULT 0,"
+                    "  created_at DATETIME"
+                    ")"
+                )
+                print("Schema migration: created product_link table")
+            except Exception as e:
+                print(f"Schema migration skipped (product_link table): {e}")
 
     if 'handoff_keyword' not in inspector.get_table_names():
         with db.engine.begin() as conn:
@@ -491,6 +546,22 @@ def get_bot_persona():
     return get_setting('bot_persona', BOT_PERSONA)
 
 
+def get_main_office_address():
+    """Fallback address used by BusinessLines that don't set their own.
+    Single point of update when the head office moves."""
+    return get_setting('main_office_address', '')
+
+
+def get_main_office_phone():
+    """Fallback general phone used by BusinessLines whose contact_info is
+    blank (e.g. product lines that route through the central switchboard)."""
+    return get_setting('main_office_phone', '')
+
+
+ALLOWED_COURSE_TYPES = ('100% Online', 'Hybrid', 'Online with Teacher', 'Classroom')
+SELF_PACED_COURSE_TYPE = '100% Online'
+
+
 def get_handoff_sensitivity():
     """conservative | balanced | aggressive — read from settings, default conservative.
 
@@ -569,6 +640,88 @@ def _format_team_members():
     return "\n".join(lines)
 
 
+def _format_product_entry(p):
+    """One product under a business line, with its active ProductLinks
+    listed beneath it. Each link's `kind` is preserved so the bot can
+    semantically match user intent against it."""
+    head = "  • "
+    if p.product_number:
+        head += f"[#{p.product_number}] "
+    head += p.name
+    if p.is_main_product:
+        head += " ★main"
+    if p.vendor:
+        head += f" ({p.vendor})"
+    lines = [head]
+    if p.description:
+        lines.append(f"    Тайлбар: {p.description}")
+    if p.status_note:
+        lines.append(f"    Тэмдэглэл: {p.status_note}")
+    active_links = [l for l in p.links if l.is_active]
+    if active_links:
+        lines.append("    Холбоосууд:")
+        for l in sorted(active_links, key=lambda x: (x.sort_order, x.id)):
+            label = l.label or l.kind
+            lines.append(f"      - [{l.kind}] {label}: {l.url}")
+    return "\n".join(lines)
+
+
+def _format_business_line_entry(b):
+    """Single-line summary for a business line, with structured fields the
+    admin filled in (address, sign-up channels, stats, child products)
+    appended so the bot can quote them without parsing the freeform
+    description. Address and main phone fall back to the global
+    main_office_* settings when this line doesn't set its own."""
+    parts = [f"- {b.name}"]
+    if b.description:
+        parts.append(f": {b.description}")
+
+    extras = []
+    if b.established_year:
+        extras.append(f"үүсгэн байгуулагдсан: {b.established_year}")
+    if b.num_products_or_services:
+        extras.append(f"бүтээгдэхүүн/үйлчилгээ: {b.num_products_or_services}")
+    if b.total_clients_or_users:
+        extras.append(f"харилцагч/хэрэглэгч: {b.total_clients_or_users:,}")
+
+    address = b.address or get_main_office_address()
+    if address:
+        # Tag whether the line is at its own address or the shared head
+        # office, so the bot doesn't claim the line has a dedicated
+        # address when it actually shares the main one.
+        if b.address:
+            extras.append(f"хаяг: {address}")
+        else:
+            extras.append(f"хаяг (Гол оффис): {address}")
+
+    if b.contact_info:
+        extras.append(f"холбоо барих: {b.contact_info}")
+    else:
+        main_phone = get_main_office_phone()
+        if main_phone:
+            extras.append(f"холбоо барих (Гол оффис): {main_phone}")
+
+    if b.email:
+        extras.append(f"имэйл: {b.email}")
+    if b.signup_phone:
+        extras.append(f"бүртгэлийн утас: {b.signup_phone}")
+    if b.signup_form_url:
+        extras.append(f"бүртгэлийн линк: {b.signup_form_url}")
+    if b.exam_form_url:
+        extras.append(f"шалгалтын линк: {b.exam_form_url}")
+    if extras:
+        parts.append("\n  (" + "; ".join(extras) + ")")
+
+    # Child Products (e.g. Magic Finance + Microsoft + Kaspersky under
+    # the Program line). Sorted so the main product comes first.
+    products = [p for p in (b.products or []) if p.is_active]
+    if products:
+        products.sort(key=lambda p: (not p.is_main_product, p.sort_order, p.id))
+        parts.append("\n  Бүтээгдэхүүнүүд:\n" + "\n".join(_format_product_entry(p) for p in products))
+
+    return "".join(parts)
+
+
 def _format_business_lines():
     """Return (answer_block, refer_block, paused_block) — active lines split by
     action, plus a block for paused services so the bot knows not to sell them."""
@@ -581,14 +734,75 @@ def _format_business_lines():
             note = f" ({b.status_note})" if b.status_note else " (түр зогссон)"
             paused.append(f"- {b.name}{note}")
             continue
-        desc = b.description or ''
-        contact = f" (Холбоо барих: {b.contact_info})" if b.contact_info else ''
-        entry = f"- {b.name}: {desc}{contact}"
+        entry = _format_business_line_entry(b)
         if (b.action or 'refer') == 'answer':
             answer.append(entry)
         else:
             refer.append(entry)
     return "\n".join(answer), "\n".join(refer), "\n".join(paused)
+
+
+def _format_course_entry(c, today_date):
+    """Single line for a course in the canonical catalog block. Self-paced
+    courses (100% Online) skip start/end dates; courses with a known
+    duration_days quote it; admins' status_note is appended verbatim."""
+    head = f"- [#{c.course_number}] " if c.course_number else "- "
+    head += f"{c.name} ({c.course_type}): {int(c.price):,}₮"
+
+    bits = [f"цаг: {c.time}"]
+    if c.course_type != SELF_PACED_COURSE_TYPE:
+        if c.start_date:
+            bits.append(f"эхлэх: {c.start_date.strftime('%Y-%m-%d')}")
+        if c.end_date:
+            bits.append(f"дуусах: {c.end_date.strftime('%Y-%m-%d')}")
+    else:
+        bits.append("эхлэх: бүртгүүлсэн өдрөөс")
+    if c.duration_days:
+        bits.append(f"үргэлжлэх хугацаа: {c.duration_days} хоног")
+    line = head + " | " + ", ".join(bits)
+    if c.description:
+        line += f"\n  Тайлбар: {c.description}"
+    if c.status_note:
+        line += f"\n  Тэмдэглэл: {c.status_note}"
+    return line
+
+
+def _format_courses_canonical():
+    """Build the canonical course catalog block. Filters out non-recurring
+    courses whose start_date is already in the past — they're stale and the
+    bot should not be quoting them as upcoming. Sorts ascending so the
+    nearest class is offered first."""
+    today = datetime.utcnow().date()
+    active = Course.query.filter_by(is_active=True).all()
+
+    def is_quotable(c):
+        if c.course_type == SELF_PACED_COURSE_TYPE:
+            return True  # self-paced has no start date to be stale against
+        if c.is_recurring:
+            return True  # the refresh_dates flow keeps these current
+        if not c.start_date:
+            return True
+        return c.start_date.date() >= today
+
+    def sort_key(c):
+        # Nearest upcoming start first; self-paced/no-date sort last.
+        if not c.start_date:
+            return (1, datetime.max)
+        return (0, c.start_date)
+
+    quotable = sorted([c for c in active if is_quotable(c)], key=sort_key)
+    inactive_or_stale = [c for c in active if not is_quotable(c)]
+
+    active_text = "\n".join(_format_course_entry(c, today) for c in quotable)
+
+    paused_or_stale = []
+    inactive = Course.query.filter_by(is_active=False).all()
+    for c in inactive + inactive_or_stale:
+        note = c.status_note or "түр зогссон"
+        tag = f"#{c.course_number} " if c.course_number else ""
+        paused_or_stale.append(f"- {tag}{c.name}: {note}")
+
+    return active_text, "\n".join(paused_or_stale)
 
 
 def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name=''):
@@ -598,24 +812,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
     faqs = FAQ.query.all()
     faq_text = "\n".join([f"Q: {faq.question}\nA: {faq.answer}" for faq in faqs])
 
-    courses = Course.query.filter_by(is_active=True).all()
-    courses_text = "\n".join([
-        f"- {c.name} ({c.course_type}): {int(c.price):,}₮, эхлэх: {c.start_date.strftime('%Y-%m-%d')}, цаг: {c.time}"
-        + (f"\n  Тайлбар: {c.description}" if c.description else "")
-        for c in courses
-    ])
-
-    inactive_courses = Course.query.filter_by(is_active=False).all()
-    if inactive_courses:
-        paused_lines = []
-        for c in inactive_courses:
-            note = f" ({c.status_note})" if c.status_note else " (түр зогссон)"
-            paused_lines.append(f"- {c.name}{note}")
-        courses_text += (
-            "\n\nТҮР ЗОГССОН СУРГАЛТУУД (одоогоор бүртгэл хаалттай; "
-            "хэрэглэгч асуувал зогссон гэдгийг тодорхой хэлж, эргэж нээгдэх "
-            "талаар мэдэгдэнэ гэж хэлж болно):\n" + "\n".join(paused_lines)
-        )
+    courses_text, paused_courses = _format_courses_canonical()
 
     snippets_text = _format_training_snippets()
     team_text = _format_team_members()
@@ -647,69 +844,56 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
         if team_text else ''
     )
 
-    biz_section = """
-MAGIC GROUP-ЫН БҮТЭЦ (бот энэ бүтцийг бүрэн мэдэж, харилцагчийг зохих чиглэлд хөтлөнө):
-
-Magic Group нь дараах 3 охин компанитай:
-
-1. MAGIC CHOICE — Санхүүгийн болон бизнесийн сургалтын төв
-   Бүтээгдэхүүн: Сургалт (4 хэлбэр)
-   • Танхимын сургалт (Classroom) — өглөөний болон оройн ангитай
-   • 100% Онлайн сургалт (Online) — тасралтгүй явагдана, хэзээ ч элсэж болно
-   • Хибрид сургалт (Hybrid) — 3 хоног танхим + 2 хоног онлайн
-   • Багштай онлайн сургалт (Online with teacher) — багштай цагаа тогтоож уулздаг
-   Бүртгэл, худалдан авалт: бүртгэлийн форм эсвэл утасны дугаар үлдээх замаар
-
-2. MAGIC CONSULTING AUDIT ХХК — Мэргэшсэн зөвлөх, аудит
-   Бүтээгдэхүүн: Мэргэшсэн үйлчилгээ
-   • Санхүүгийн аудит (Financial audit)
-   • CPA үйлчилгээ (нягтлан бодогчийн мэргэшсэн туслалцаа)
-   Холбогдох: утасны дугаар үлдээж, ажилтантай уулзалт товлоно
-
-3. MAGIC CLOUD ХХК — Програм хангамж, лиценз
-   Бүтээгдэхүүн: Програм хангамжийн лиценз
-   • Magic Finance — санхүүгийн програм хангамж
-   • Microsoft лиценз
-   • Kaspersky лиценз
-   Холбогдох: судалгаа хийж, захиалга өгнө
-
-БОТЫН УДИРДАМЖ: Харилцагчийн хэрэгцээг нарийн тодруулж, зохих компанид хөтлөнө.
-Асуулт товч, хариулт тодорхой. Дарамт бүү үзүүл — харилцагч өөрөө шийдвэр гаргадаг.
-"""
-
-    db_biz_section = ''
-    if answer_lines or refer_lines or paused_services:
-        db_biz_section = "\nАДМИН БҮРТГЭЛИЙН НЭМЭЛТ МЭДЭЭЛЭЛ (дээрх бүтцийн дэлгэрэнгүй, ажилтны тохиргоо):\n"
+    biz_section = ''
+    if answer_lines or refer_lines:
+        biz_section = "\nКОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ:\n"
         if answer_lines:
-            db_biz_section += (
-                "Доорх чиглэлийн талаар асуувал ТОВЧ хариулж болно "
-                "(дэлгэрэнгүйг ажилтнаас лавлахыг санал болго):\n"
+            biz_section += (
+                "Доорх үйлчилгээний талаар асуувал ТОВЧ хариулж болно "
+                "(сонирхол хадгалж, дэлгэрэнгүйг ажилтнаас лавлахыг санал болго):\n"
                 f"{answer_lines}\n"
             )
         if refer_lines:
-            db_biz_section += (
-                "Доорх чиглэлийн талаар асуувал өөрөө хариулахгүй, "
-                "\"Манай тусгай ажилтан хариуцдаг. Утасны дугаараа үлдээгээрэй\" "
-                "гэж найрсагаар чиглүүл:\n"
+            biz_section += (
+                "Доорх үйлчилгээний талаар асуувал өөрөө хариулахгүй, "
+                "\"Энэ чиглэлийг манай тусгай ажилтан хариуцдаг. Утасны "
+                "дугаараа үлдээгээрэй, бид удахгүй холбогдоно\" гэж "
+                "найрсагаар чиглүүл:\n"
                 f"{refer_lines}\n"
             )
         if paused_services:
-            db_biz_section += (
+            biz_section += (
                 "Доорх үйлчилгээнүүд ОДООГООР ТҮР ЗОГССОН байна. "
-                "Хэрэглэгч асуувал зогссон гэдгийг шулуун хэлж, "
-                "дахин нээгдэх үед мэдэгдэнэ гэж хэлнэ үү:\n"
+                "Хэрэглэгч эдгээрийн талаар асуувал зогссон гэдгийг шулуун хэлж, "
+                "дахин нээгдэх үед мэдэгдэж болох эсэхийг тодруулна уу:\n"
                 f"{paused_services}\n"
             )
-    biz_section = biz_section + db_biz_section
+
+    allowed_types_line = ", ".join(f'"{t}"' for t in ALLOWED_COURSE_TYPES)
+    paused_courses_section = (
+        f"\nТҮР ЗОГССОН / ХУУЧИРСАН АНГИУД (бүртгэл нээлттэй биш; "
+        f"хэрэглэгч асуувал зогссон гэдгийг шулуун хэлж, эргэж нээгдэх үед "
+        f"мэдэгдэнэ гэж хэлж болно):\n{paused_courses}\n"
+        if paused_courses else ''
+    )
 
     system_prompt = f"""{persona}
 
-СУРГАЛТЫН ТӨВИЙН МЭДЭЭЛЭЛ:
+==========================
+ИДЭВХТЭЙ АНГИУДЫН АЛБАН ЁСНЫ ЖАГСААЛТ (CANONICAL — энэ жагсаалтаас л үнэн зөв):
+{courses_text}
+{paused_courses_section}
+ЭНЭ ЖАГСААЛТЫН ТУХАЙ ХАТУУ ДҮРЭМ:
+- Ангийн нэр, цаг, эхлэх/дуусах огноо, үнэ, үргэлжлэх хугацааны тухай асуулт ирвэл ЗӨВХӨН энэ жагсаалтаас хариул.
+- Жагсаалтад байхгүй цаг, үнэ, эсвэл огноо бүү зохио. Эргэлзвэл "Ажилтан танд эргэж лавлая" гэж хэлэн утас лав.
+- Ангийн төрөл нь дараах нэрсээс л байна: {allowed_types_line}.
+- Хэрэглэгч одоогийн ангийн цаг, огноо тохирохгүй гэвэл ЭНЭ ЖАГСААЛТААС өөр төрлийн (онлайн, оройн г.м.) эсвэл дараагийн нээгдсэн ангийг санал болго. Нэг анги л санал болгож үзээгүй мөртөө "өөр анги байхгүй" битгий хэл.
+- Анги тус бүрд [#NNNN] гэсэн дугаар бий бол хариултдаа дурдвал админд хяналт тавихад тус болно (хэрэглэгчид заавал биш).
+==========================
+
+СУРГАЛТЫН ТӨВИЙН ЕРӨНХИЙ МЭДЭЭЛЭЛ:
 {training}
 {snippets_section}{team_section}{biz_section}
-ИДЭВХТЭЙ АНГИУД:
-{courses_text}
-
 ТҮГЭЭМЭЛ АСУУЛТУУД:
 {faq_text}
 
@@ -717,14 +901,15 @@ Magic Group нь дараах 3 охин компанитай:
 
 ЧУХАЛ ДҮРМҮҮД:
 {session_rule}
-1. Хариулт товч (3 өгүүлбэрт багтаа), тодорхой. Урт жагсаалт оруулахаас зайлсхий.
-2. ГҮЙЦЭТГЭЛИЙН ТӨВӨГ: Харилцагчийн ХЭРЭГЦЭЭГ тодруулах нарийн асуулт тавь. Зохих компани/бүтээгдэхүүнд хөтлөх шалтгаан боловсруулж, ФУУЛЛАА үгүй ФУУЛГҮЙ дүүргэх.
-3. Бүртгэлийн линк болон утасны дугаар авах хүсэлтийг хэрэглэгч бэлэн болсон үед л санал болго. Дарамт бүү үзүүл.
-4. Хэрэглэгч утасны дугаар бичвэл баярлал илэрхийлж, "Манай ажилтан удахгүй тантай холбогдоно" гэж мэдэгд.
-5. Шийдэх боломжгүй асуудал тулгарвал "Манай ажилтан тантай эргэж холбогдож тодруулна" гэж хэл.
-6. Эмодзи 1-2-оос хэтрүүлэхгүй, байгалийн ярианы маяг барь.
-7. Нэг л үгээр (жишээ нь "Сургалт...") ижил эхлэлтэй өгүүлбэр дараалуулахаас зайлсхий.
-8. Magic Choice (сургалт), Magic Consulting Audit (аудит/CPA), Magic Cloud (лиценз) — гурвуулаа ТЭГШ ЧУХАЛ. Нэгийг нь давуу эрхтэй гэж бүү харь. Жагсаалтад байхгүй чиглэл бол "Ажилтантай холбоно уу?" гэж асааж дугаар ав."""
+1. Хариултыг товч (3 өгүүлбэрээс ихгүй) бөгөөд тодорхой бичнэ. Урт жагсаалт оруулахаас зайлсхий.
+2. Сургалтын давуу талыг хэт зар сурталчилгаа маягтай бус, итгэлтэй найз шиг зөвлөнө.
+3. Хэрэглэгч бүртгүүлэх хүсэлтэй болсон тохиолдолд л БҮРТГЭЛИЙН ЛИНК-ийг хариултдаа бичнэ. Үе шат хүрээгүй үед линкийг бүү тулга. Утасны дугаараа үлдээх хүсэлтийг ч найрсагаар нэмж асуу.
+4. Хэрэглэгч утасны дугаар бичсэн бол баярлал илэрхийлж, "Манай ажилтан удахгүй тантай холбогдоно" гэж мэдэгд.
+5. Шийдэх боломжгүй буюу мэдэхгүй асуудал тулгарвал "Энэ асуудлыг манай ажилтан тантай эргэж холбогдож тодруулна" гэж хэлэх.
+6. Эмодзи цөөн (1-2) хэрэглэж, илүү гар бичмэл маяг бүү аватарла.
+7. Өгүүлбэрүүдийн эхлэлийг сольж бай, "Сургалт..." гэх мэт ижил үгээр дандаа бүү эхэл.
+8. Сургалтаас өөр чиглэлийн (компанийн бусад үйлчилгээ) асуултанд дээрх "КОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ" хэсгийн дүрмийн дагуу хариулна. Жагсаалтад байхгүй чиглэл бол "Тантай ажилтан холбогдох уу?" гэж асууж дугаар лав.
+9. БҮТЭЭГДЭХҮҮНИЙ ДҮРЭМ: Бот бүтээгдэхүүн (Magic Finance, Microsoft license, Kaspersky г.м.)-ийн үнэ, санал хэлэхгүй. Худалдан авах, дэмжлэг (ticket), гарын авлага (manual), community, татах (download) гэх мэт асуулт ирэхэд тухайн бүтээгдэхүүний "Холбоосууд" жагсаалтаас хэрэглэгчийн санаатай таарах нэгийг сонгож, тэр линкийг өгөөд "манай ажилтан тантай холбогдож үнэ, нөхцөл нь дэлгэрэнгүй хэлэлцэнэ" гэж нэм. Жагсаалтад тохирох холбоос байхгүй бол үнэ зохиохгүйгээр ажилтантай холбогдох санал тавь."""
     return system_prompt
 
 
@@ -1002,6 +1187,142 @@ def log_admin_action(action, entity_type=None, entity_id=None, entity_label=None
         print(f"log_admin_action failed for {action!r}: {e}")
 
 
+# ===================== TRAINING-DATA LINTER =====================
+
+# Module-level regexes used by lint_training_data() to spot prices / phones /
+# URLs that drift between unstructured prose and the structured catalogs.
+_PRICE_RE = re.compile(r'(\d{1,3}(?:[, ]\d{3})+|\d{4,})\s*₮')
+_PHONE_RE = re.compile(r'\b\d{4}[\s-]?\d{4}\b')
+_URL_RE = re.compile(r'https?://[^\s)"\'<>]+')
+_PRICE_THRESHOLD = 1000  # ignore tiny numbers like "100% Online — 100"
+
+
+def _normalize_phone(s):
+    return re.sub(r'[\s-]', '', s)
+
+
+def _normalize_int(s):
+    return int(re.sub(r'[^\d]', '', s))
+
+
+def lint_training_data():
+    """Cross-reference unstructured prose (FAQ answers, persona, training
+    intro, snippets) against the structured catalogs (Course, BusinessLine).
+
+    Flags prices/phones/URLs that show up in prose but don't match any
+    structured field — usually a sign the prose got out of sync with the
+    catalog. Returns a list of findings ordered worst-first."""
+    findings = []
+
+    course_prices = {int(c.price) for c in Course.query.all() if c.price}
+    biz_phones = set()
+    biz_urls = set()
+    biz_text_prices = set()
+    for b in BusinessLine.query.all():
+        for field in (b.contact_info or '', b.signup_phone or ''):
+            for m in _PHONE_RE.finditer(field):
+                biz_phones.add(_normalize_phone(m.group()))
+        if b.signup_form_url:
+            biz_urls.add(b.signup_form_url.strip())
+        if b.description:
+            for m in _PRICE_RE.finditer(b.description):
+                try:
+                    biz_text_prices.add(_normalize_int(m.group(1)))
+                except ValueError:
+                    pass
+
+    expected_prices = course_prices | biz_text_prices
+
+    sources = []
+    for faq in FAQ.query.all():
+        sources.append(('FAQ', faq.id, faq.question or '', faq.answer or ''))
+    sources.append(('Persona', 0, 'bot_persona', get_bot_persona()))
+    sources.append(('Training', 0, 'training_content', get_training_content()))
+    for s in TrainingSnippet.query.filter_by(is_active=True).all():
+        sources.append(('Snippet', s.id, s.title or '', s.body or ''))
+
+    for kind, sid, label, text in sources:
+        if not text:
+            continue
+        for m in _PRICE_RE.finditer(text):
+            try:
+                value = _normalize_int(m.group(1))
+            except ValueError:
+                continue
+            if value < _PRICE_THRESHOLD:
+                continue
+            if value not in expected_prices:
+                findings.append({
+                    'severity': 'warning',
+                    'kind': 'price_drift',
+                    'source_kind': kind,
+                    'source_id': sid,
+                    'label': label[:80],
+                    'detail': (
+                        f'"{m.group()}" гэсэн үнэ ангийн каталог болон '
+                        'үйлчилгээний тайлбарт олдсонгүй.'
+                    ),
+                })
+        for m in _PHONE_RE.finditer(text):
+            ph_norm = _normalize_phone(m.group())
+            if ph_norm not in biz_phones:
+                findings.append({
+                    'severity': 'warning',
+                    'kind': 'phone_drift',
+                    'source_kind': kind,
+                    'source_id': sid,
+                    'label': label[:80],
+                    'detail': (
+                        f'"{m.group()}" дугаар үйлчилгээний contact_info / '
+                        'signup_phone-д бүртгэлтэй биш.'
+                    ),
+                })
+        for m in _URL_RE.finditer(text):
+            url = m.group().rstrip('.,);')
+            if url not in biz_urls:
+                findings.append({
+                    'severity': 'info',
+                    'kind': 'url_drift',
+                    'source_kind': kind,
+                    'source_id': sid,
+                    'label': label[:80],
+                    'detail': (
+                        f'{url} линк үйлчилгээний signup_form_url-д бүртгэлтэй биш.'
+                    ),
+                })
+
+    today = datetime.utcnow().date()
+    for c in Course.query.filter_by(is_active=True).all():
+        if c.course_type != SELF_PACED_COURSE_TYPE and not c.is_recurring:
+            ref = c.end_date or c.start_date
+            if ref and ref.date() < today:
+                findings.append({
+                    'severity': 'error',
+                    'kind': 'stale_course',
+                    'source_kind': 'Course',
+                    'source_id': c.id,
+                    'label': c.name[:80],
+                    'detail': (
+                        f'Идэвхтэй боловч огноо ({ref.strftime("%Y-%m-%d")}) өнгөрсөн. '
+                        '"Огноо шинэчлэх / Архивлах" товчийг дарна уу.'
+                    ),
+                })
+        if c.course_type == SELF_PACED_COURSE_TYPE and (c.start_date or c.end_date):
+            findings.append({
+                'severity': 'warning',
+                'kind': 'self_paced_has_dates',
+                'source_kind': 'Course',
+                'source_id': c.id,
+                'label': c.name[:80],
+                'detail': '100% Online анги нь огноотой байх ёсгүй. Засаж дахин хадгална уу.',
+            })
+
+    severity_order = {'error': 0, 'warning': 1, 'info': 2}
+    findings.sort(key=lambda f: (severity_order.get(f['severity'], 9),
+                                  f['source_kind'], f['source_id']))
+    return findings
+
+
 # ===================== SEED / RECURRING =====================
 
 def advance_recurring_courses():
@@ -1027,6 +1348,96 @@ def advance_recurring_courses():
         db.session.commit()
         print(f"Recurring courses: advanced {updated} course(s).")
     return updated
+
+
+def archive_past_courses():
+    """Flip non-recurring, non-self-paced active Courses whose end_date (or
+    start_date when no end is set) has already passed to is_active=False.
+
+    Run from the admin "Refresh dates" button so a one-click pass keeps the
+    bot from quoting last month's classroom session as if it were upcoming.
+    Returns how many courses were flipped."""
+    now = datetime.utcnow()
+    archived = 0
+    candidates = Course.query.filter_by(is_active=True, is_recurring=False).all()
+    for course in candidates:
+        if course.course_type == SELF_PACED_COURSE_TYPE:
+            continue
+        reference = course.end_date or course.start_date
+        if not reference:
+            continue
+        if reference < now:
+            course.is_active = False
+            if not course.status_note:
+                course.status_note = (
+                    f"Автомат архивлагдсан ({reference.strftime('%Y-%m-%d')}-ны "
+                    "огноо өнгөрсний дараа). Шинээр нээх бол огноог шинэчилнэ үү."
+                )
+            archived += 1
+    if archived:
+        db.session.commit()
+        print(f"Archived {archived} past course(s).")
+    return archived
+
+
+def seed_products():
+    """Seed 3 starter Products under the Program / Magic Finance business
+    line so admins have rows to edit-in-place rather than create from
+    scratch. Idempotent: skipped when Products already exist, or when
+    SEED_DEFAULTS=false (i.e. non-MagicBot deployments)."""
+    if os.environ.get('SEED_DEFAULTS', 'true').strip().lower() != 'true':
+        return
+    if Product.query.count() > 0:
+        return
+
+    # Match in Python because SQLite's ILIKE doesn't case-fold Cyrillic
+    # correctly, which would otherwise miss names like "Программ ба License".
+    needles = ('magic finance', 'программ', 'software', 'magic cloud')
+    program_line = None
+    for line in BusinessLine.query.all():
+        if any(n in (line.name or '').lower() for n in needles):
+            program_line = line
+            break
+    if not program_line:
+        print("seed_products: no program/software BusinessLine found — skipping.")
+        return
+
+    starters = [
+        {
+            'product_number': 2001,
+            'name': 'Magic Finance',
+            'vendor': 'Magic Cloud LLC',
+            'description': (
+                'Санхүү, татварын тайлан гаргахад зориулсан программ. 90 орчим '
+                'төрлийн тайлан гаргах боломжтой (Санхүүгийн, Татварын, '
+                'Удирдлагын, Туслах). Сургалтын төгсөгчдөд үнэгүй license '
+                'олгоно: Танхим (100% танхим) ба Багштай онлайн → 1 жил; '
+                'Хосолсон ба 100% Онлайн → 6 сар.'
+            ),
+            'is_main_product': True,
+            'sort_order': 0,
+        },
+        {
+            'product_number': 2002,
+            'name': 'Microsoft license',
+            'vendor': 'Microsoft',
+            'description': 'Microsoft программ хангамжийн license. Дэлгэрэнгүйг ажилтнаас лавлана уу.',
+            'is_main_product': False,
+            'sort_order': 1,
+        },
+        {
+            'product_number': 2003,
+            'name': 'Kaspersky license',
+            'vendor': 'Kaspersky',
+            'description': 'Kaspersky аюулгүй байдлын программ хангамжийн license. Дэлгэрэнгүйг ажилтнаас лавлана уу.',
+            'is_main_product': False,
+            'sort_order': 2,
+        },
+    ]
+    for s in starters:
+        db.session.add(Product(business_line_id=program_line.id, **s))
+    db.session.commit()
+    print(f"Seeded {len(starters)} starter products under '{program_line.name}'.")
 
 
 _DEFAULT_HANDOFF_KEYWORDS_EXPLICIT = [

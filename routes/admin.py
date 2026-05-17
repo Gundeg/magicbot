@@ -20,13 +20,17 @@ from app import app
 from auth import admin_required, super_admin_required
 from extensions import db
 from models import (AdminIssue, AuditEntry, BusinessLine, Course, FacebookUser,
-                    FAQ, GeneralSetting, HandoffKeyword, Message, Service,
-                    Software, TeamMember, TrainingSnippet, User)
-from services import (BOT_PERSONA, FACEBOOK_ACCESS_TOKEN, FACEBOOK_APP_SECRET,
-                      TRAINING_CONTENT, advance_recurring_courses,
-                      classify_conversation, get_handoff_poll_payload,
-                      get_setting, get_sound_alerts_enabled,
-                      get_telegram_chat_ids, log_admin_action,
+                    FAQ, GeneralSetting, HandoffKeyword, Message, Product,
+                    ProductLink, Service, Software, TeamMember,
+                    TrainingSnippet, User)
+from services import (ALLOWED_COURSE_TYPES, BOT_PERSONA,
+                      FACEBOOK_ACCESS_TOKEN, FACEBOOK_APP_SECRET,
+                      SELF_PACED_COURSE_TYPE, TRAINING_CONTENT,
+                      advance_recurring_courses, archive_past_courses,
+                      build_system_prompt, classify_conversation,
+                      get_handoff_poll_payload, get_setting,
+                      get_sound_alerts_enabled, get_telegram_chat_ids,
+                      lint_training_data, log_admin_action,
                       refresh_facebook_user_name)
 
 
@@ -143,6 +147,86 @@ def dashboard():
 
 # ===================== COURSES =====================
 
+def _parse_course_payload(data, existing=None):
+    """Validate + coerce the JSON payload from the course modal into model
+    fields. Returns (kwargs, error_message_or_None). Centralized so add/edit
+    share the same checks: course_type allow-list, unique course_number,
+    self-paced rule (no start/end date for 100% Online)."""
+    name = (data.get('name') or '').strip()
+    if not name:
+        return None, 'Сургалтын нэр шаардлагатай.'
+
+    course_type = (data.get('course_type') or '').strip()
+    if course_type not in ALLOWED_COURSE_TYPES:
+        return None, (
+            f'course_type "{course_type}" зөвшөөрөгдөөгүй. '
+            f'Дараахаас сонгоно уу: {", ".join(ALLOWED_COURSE_TYPES)}'
+        )
+
+    is_self_paced = course_type == SELF_PACED_COURSE_TYPE
+
+    raw_number = data.get('course_number')
+    if raw_number in (None, '', 'null'):
+        return None, (
+            'Курсын дугаар (course_number) шаардлагатай. Жишээ: 1881. '
+            'Адилхан нэртэй ангиудыг ялгахад ашиглана.'
+        )
+    try:
+        course_number = int(raw_number)
+    except (TypeError, ValueError):
+        return None, 'course_number бүхэл тоо байх ёстой.'
+    clash = Course.query.filter_by(course_number=course_number).first()
+    if clash and (existing is None or clash.id != existing.id):
+        return None, f'#{course_number} дугаартай анги аль хэдийн бүртгэлтэй (id={clash.id}).'
+
+    raw_duration = data.get('duration_days')
+    duration_days = None
+    if raw_duration not in (None, '', 'null'):
+        try:
+            duration_days = int(raw_duration)
+            if duration_days < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return None, 'duration_days эерэг бүхэл тоо байх ёстой.'
+
+    if is_self_paced:
+        start_date = None
+        end_date = None
+    else:
+        start_raw = data.get('start_date')
+        if not start_raw:
+            return None, 'Эхлэх огноо шаардлагатай (зөвхөн 100% Online анги хоосон үлдээнэ).'
+        try:
+            start_date = datetime.fromisoformat(start_raw)
+        except ValueError:
+            return None, 'start_date YYYY-MM-DD форматтай байна.'
+        end_raw = data.get('end_date')
+        end_date = None
+        if end_raw:
+            try:
+                end_date = datetime.fromisoformat(end_raw)
+            except ValueError:
+                return None, 'end_date YYYY-MM-DD форматтай байна.'
+
+    try:
+        price = float(data.get('price') or 0)
+    except (TypeError, ValueError):
+        return None, 'price тоон утга байх ёстой.'
+
+    return {
+        'name': name,
+        'course_type': course_type,
+        'course_number': course_number,
+        'start_date': start_date,
+        'end_date': end_date,
+        'time': (data.get('time') or '').strip(),
+        'price': price,
+        'description': data.get('description'),
+        'duration_days': duration_days,
+        'is_recurring': bool(data.get('is_recurring')),
+    }, None
+
+
 @app.route('/admin/courses', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -152,35 +236,25 @@ def courses():
         action = data.get('action')
 
         if action == 'add':
-            end_raw = data.get('end_date')
-            course = Course(
-                name=data.get('name'),
-                course_type=data.get('course_type'),
-                start_date=datetime.fromisoformat(data.get('start_date')),
-                end_date=datetime.fromisoformat(end_raw) if end_raw else None,
-                time=data.get('time'),
-                price=float(data.get('price')),
-                description=data.get('description'),
-                is_recurring=bool(data.get('is_recurring')),
-            )
+            fields, err = _parse_course_payload(data)
+            if err:
+                return jsonify({'success': False, 'error': err}), 400
+            course = Course(**fields)
             db.session.add(course)
             db.session.commit()
             return jsonify({'success': True, 'id': course.id})
 
         elif action == 'edit':
             course = Course.query.get(data.get('id'))
-            if course:
-                end_raw = data.get('end_date')
-                course.name = data.get('name')
-                course.course_type = data.get('course_type')
-                course.start_date = datetime.fromisoformat(data.get('start_date'))
-                course.end_date = datetime.fromisoformat(end_raw) if end_raw else None
-                course.time = data.get('time')
-                course.price = float(data.get('price'))
-                course.description = data.get('description')
-                course.is_recurring = bool(data.get('is_recurring'))
-                db.session.commit()
-                return jsonify({'success': True})
+            if not course:
+                return jsonify({'success': False, 'error': 'Анги олдсонгүй.'}), 404
+            fields, err = _parse_course_payload(data, existing=course)
+            if err:
+                return jsonify({'success': False, 'error': err}), 400
+            for key, value in fields.items():
+                setattr(course, key, value)
+            db.session.commit()
+            return jsonify({'success': True})
 
         elif action == 'toggle':
             course = Course.query.get(data.get('id'))
@@ -206,8 +280,13 @@ def courses():
                 return jsonify({'success': True})
 
         elif action == 'refresh_dates':
-            updated = advance_recurring_courses()
-            return jsonify({'success': True, 'updated': updated})
+            advanced = advance_recurring_courses()
+            archived = archive_past_courses()
+            return jsonify({
+                'success': True,
+                'updated': advanced,
+                'archived': archived,
+            })
 
     courses_rows = Course.query.all()
     return render_template('courses.html', courses=courses_rows)
@@ -755,6 +834,30 @@ def business_lines():
             line.action = 'answer' if data.get('line_action') == 'answer' else 'refer'
             line.contact_info = (data.get('contact_info') or '').strip() or None
             line.status_note = (data.get('status_note') or '').strip() or None
+            line.address = (data.get('address') or '').strip() or None
+            line.email = (data.get('email') or '').strip() or None
+            line.signup_form_url = (data.get('signup_form_url') or '').strip() or None
+            line.signup_phone = (data.get('signup_phone') or '').strip() or None
+            line.exam_form_url = (data.get('exam_form_url') or '').strip() or None
+
+            def _opt_int(field):
+                raw = data.get(field)
+                if raw in (None, '', 'null'):
+                    return None
+                try:
+                    return int(raw)
+                except (TypeError, ValueError):
+                    return 'invalid'
+
+            for field in ('established_year', 'num_products_or_services',
+                          'total_clients_or_users'):
+                value = _opt_int(field)
+                if value == 'invalid':
+                    db.session.rollback()
+                    return jsonify({'success': False,
+                                    'error': f'{field} бүхэл тоо байх ёстой.'}), 400
+                setattr(line, field, value)
+
             if not line.name:
                 db.session.rollback()
                 return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
@@ -791,6 +894,194 @@ def business_lines():
              .order_by(BusinessLine.sort_order.asc(), BusinessLine.id.asc())
              .all())
     return render_template('business_lines.html', lines=lines)
+
+
+# ===================== PRODUCTS =====================
+
+def _parse_product_payload(data, existing=None):
+    """Validate + coerce the JSON payload from the product modal. Returns
+    (kwargs_for_product, links_list, error). The links_list replaces the
+    Product's existing ProductLink rows wholesale on save."""
+    name = (data.get('name') or '').strip()
+    if not name:
+        return None, None, 'Бүтээгдэхүүний нэр шаардлагатай.'
+
+    bl_id = data.get('business_line_id')
+    try:
+        bl_id = int(bl_id)
+    except (TypeError, ValueError):
+        return None, None, 'business_line_id шаардлагатай.'
+    if not BusinessLine.query.get(bl_id):
+        return None, None, 'Сонгосон бизнесийн чиглэл олдсонгүй.'
+
+    raw_number = data.get('product_number')
+    if raw_number in (None, '', 'null'):
+        return None, None, (
+            'Бүтээгдэхүүний дугаар (product_number) шаардлагатай. '
+            'Жишээ: 2001. Давтагдашгүй бүхэл тоо.'
+        )
+    try:
+        product_number = int(raw_number)
+    except (TypeError, ValueError):
+        return None, None, 'product_number бүхэл тоо байх ёстой.'
+    clash = Product.query.filter_by(product_number=product_number).first()
+    if clash and (existing is None or clash.id != existing.id):
+        return None, None, (
+            f'#{product_number} дугаартай бүтээгдэхүүн аль хэдийн бүртгэлтэй '
+            f'(id={clash.id}).'
+        )
+
+    raw_links = data.get('links') or []
+    if not isinstance(raw_links, list):
+        return None, None, 'links талбар жагсаалт байх ёстой.'
+    links = []
+    for i, link in enumerate(raw_links):
+        kind = (link.get('kind') or '').strip()
+        url = (link.get('url') or '').strip()
+        if not kind and not url:
+            continue  # let admin leave empty rows
+        if not kind or not url:
+            return None, None, f'Холбоос #{i+1}: kind болон URL хоёулаа шаардлагатай.'
+        links.append({
+            'kind': kind[:40],
+            'label': (link.get('label') or '').strip()[:160] or None,
+            'url': url[:500],
+            'is_active': bool(link.get('is_active', True)),
+            'sort_order': int(link.get('sort_order') or i),
+        })
+
+    return {
+        'business_line_id': bl_id,
+        'product_number': product_number,
+        'name': name,
+        'vendor': (data.get('vendor') or '').strip() or None,
+        'description': (data.get('description') or '').strip() or None,
+        'is_main_product': bool(data.get('is_main_product')),
+    }, links, None
+
+
+@app.route('/admin/products', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def products():
+    """CRUD for Products and their child ProductLinks. One POST round-trip
+    saves a Product plus its full link list — simpler than tracking link
+    ids on the client. Toggle/delete are separate actions like Courses."""
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        action = data.get('action')
+
+        if action == 'add':
+            fields, links, err = _parse_product_payload(data)
+            if err:
+                return jsonify({'success': False, 'error': err}), 400
+            product = Product(**fields)
+            db.session.add(product)
+            db.session.flush()
+            for link in links:
+                db.session.add(ProductLink(product_id=product.id, **link))
+            db.session.commit()
+            log_admin_action(
+                'product.create', 'product', product.id, product.name,
+                detail=f'#{product.product_number} нэмсэн ({len(links)} холбоос)'
+            )
+            return jsonify({'success': True, 'id': product.id})
+
+        if action == 'edit':
+            product = Product.query.get(data.get('id'))
+            if not product:
+                return jsonify({'success': False, 'error': 'Бүтээгдэхүүн олдсонгүй.'}), 404
+            fields, links, err = _parse_product_payload(data, existing=product)
+            if err:
+                return jsonify({'success': False, 'error': err}), 400
+            for key, value in fields.items():
+                setattr(product, key, value)
+            ProductLink.query.filter_by(product_id=product.id).delete()
+            for link in links:
+                db.session.add(ProductLink(product_id=product.id, **link))
+            db.session.commit()
+            log_admin_action(
+                'product.edit', 'product', product.id, product.name,
+                detail=f'Засварласан ({len(links)} холбоос)'
+            )
+            return jsonify({'success': True})
+
+        if action == 'toggle':
+            product = Product.query.get(data.get('id'))
+            if not product:
+                return jsonify({'success': False}), 404
+            product.is_active = not product.is_active
+            product.status_note = (data.get('status_note') or '').strip() or None
+            db.session.commit()
+            log_admin_action(
+                'product.toggle', 'product', product.id, product.name,
+                detail=('Идэвхжүүлсэн' if product.is_active else 'Түр зогсоосон') +
+                       (f". Тэмдэглэл: {product.status_note}" if product.status_note else '')
+            )
+            return jsonify({'success': True, 'is_active': product.is_active})
+
+        if action == 'delete':
+            product = Product.query.get(data.get('id'))
+            if not product:
+                return jsonify({'success': False}), 404
+            label, pid = product.name, product.id
+            db.session.delete(product)
+            db.session.commit()
+            log_admin_action('product.delete', 'product', pid, label, detail='Устгасан')
+            return jsonify({'success': True})
+
+        return jsonify({'success': False, 'error': 'unknown action'}), 400
+
+    all_products = (Product.query
+                    .options(joinedload(Product.business_line),
+                             joinedload(Product.links))
+                    .order_by(Product.business_line_id.asc(),
+                              Product.sort_order.asc(),
+                              Product.id.asc())
+                    .all())
+    # Pre-serialize each product's links to a plain dict list. Jinja2's dict
+    # literal can't contain a Python list comprehension, so building the
+    # data-product JSON inline in the template fails to parse.
+    for p in all_products:
+        p._links_json = [
+            {
+                'kind': l.kind,
+                'label': l.label or '',
+                'url': l.url,
+                'is_active': bool(l.is_active),
+                'sort_order': l.sort_order,
+            }
+            for l in p.links
+        ]
+    lines = BusinessLine.query.order_by(BusinessLine.sort_order.asc(),
+                                        BusinessLine.id.asc()).all()
+    return render_template('products.html', products=all_products, business_lines=lines)
+
+
+# ===================== TRAINING PREVIEW + LINT =====================
+
+@app.route('/admin/training/preview')
+@login_required
+@admin_required
+def training_preview():
+    """Return the fully-assembled system prompt the AI sees right now.
+    Lets admins spot bad data (duplicate courses, contradictory FAQs,
+    stale snippets) without having to ping the Messenger bot for real."""
+    return jsonify({
+        'prompt': build_system_prompt(
+            session_state='new',
+            funnel_stage='curious',
+            user_first_name='',
+        ),
+    })
+
+
+@app.route('/admin/training/lint')
+@login_required
+@admin_required
+def training_lint():
+    """Run the heuristic consistency check and return findings."""
+    return jsonify({'findings': lint_training_data()})
 
 
 # ===================== HANDOFF KEYWORDS =====================
