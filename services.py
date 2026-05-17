@@ -50,7 +50,26 @@ if not FACEBOOK_APP_SECRET:
         "unverified. Live-mode deploys MUST set this or Facebook traffic can be "
         "forged."
     )
+# Loaded at import time as a fallback; the live value is fetched by
+# get_google_form_url() which also checks the DB setting written from
+# the admin panel (Business Management -> General Information).
 GOOGLE_FORM_URL = os.environ.get('GOOGLE_FORM_URL', '')
+
+
+def get_google_form_url():
+    """Self-service registration link the bot can quote. Priority order:
+       1) Admin-panel value (GeneralSetting key 'google_form_url')
+       2) GOOGLE_FORM_URL env var (set at import time)
+       3) Empty string — the prompt drops the registration block entirely.
+
+    Was previously hard-wired to env-var only, which meant admin changes
+    in /business-management/general were silently ignored by the bot
+    even though they showed up in the form.
+    """
+    db_value = get_setting('google_form_url', '')
+    if db_value and db_value.strip():
+        return db_value.strip()
+    return GOOGLE_FORM_URL
 
 # Training content fallback chain: env → file → tiny default. The DB row in
 # GeneralSetting('training_content') takes precedence at runtime; see
@@ -952,9 +971,23 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
     team_text = _format_team_members()
     answer_lines, refer_lines, paused_services = _format_business_lines()
 
-    registration_block = (
-        f"БҮРТГЭЛИЙН ЛИНК:\n{GOOGLE_FORM_URL}\n" if GOOGLE_FORM_URL else ""
-    )
+    google_form_url = get_google_form_url()
+    if google_form_url:
+        registration_block = (
+            f"БҮРТГЭЛИЙН ЛИНК (ӨӨРӨӨ БӨГЛӨЖ БҮРТГҮҮЛЭХ ЗАМ):\n"
+            f"{google_form_url}\n"
+            f"Энэ нь хэрэглэгчийн ӨӨРИЙН биеэр одоо бөглөж бүртгүүлж "
+            f"болох форм. Хэрэглэгч 'шууд бүртгүүлж болох уу?', "
+            f"'яаж бүртгүүлэх вэ?', 'би одоо бүртгүүлмээр байна' гэх "
+            f"мэт асуувал ЭНЭ ЛИНКИЙГ ҮНДСЭН ХАРИУЛТ БОЛГОЖ ӨГ. "
+            f"Хэрэглэгчид 'утсаа үлдээ' гэж шаардахгүйгээр, форм "
+            f"бөглөж бүртгүүлэх нь биеэ дааж шууд бүртгүүлэх "
+            f"бодит сонголт юм. Утасны дугаар үлдээх нь ХОЁР ДАХЬ "
+            f"сонголт (ажилтан тантай эргэж холбогдоно) — хоёуланг "
+            f"нь нэг хариултанд оруулж, хэрэглэгчид сонгох эрхийг өг.\n"
+        )
+    else:
+        registration_block = ""
 
     if user_first_name:
         name_block = (
@@ -1109,10 +1142,17 @@ F. ӨМНӨХ ХАРИЛЦАА ГҮН:
 1. Хариултыг товч (3 өгүүлбэрээс ихгүй) бөгөөд тодорхой бичнэ. Урт жагсаалт оруулахаас зайлсхий.
 2. Сургалтын давуу талыг хэт зар сурталчилгаа маягтай бус, итгэлтэй найз шиг зөвлөнө.
 3. БҮРТГЭЛИЙН ЛИНК + УТАС ЗЭРЭГ САНАЛ — ЗӨВХӨН ДАРААХ ҮЕД АШИГЛА:
-   (а) Хэрэглэгч өөрөө "бүртгүүлмээр", "холбогдмоор", "ажилтантай яримаар" гэх мэт тодорхой шилжих хүсэл илэрхийлсэн;
+   (а) Хэрэглэгч өөрөө "бүртгүүлмээр", "холбогдмоор", "ажилтантай яримаар", "шууд бүртгүүлж болох уу?", "яаж бүртгүүлэх вэ?" гэх мэт тодорхой шилжих хүсэл илэрхийлсэн;
    (б) Хэрэглэгч pricing/ready үе шатанд ороод үнийн дэлгэрэнгүй асуусан;
    (в) Сургалтаас өөр чиглэлийн үйлчилгээ (audit, consulting, бүтээгдэхүүн г.м.)-ийн талаарх асуулт, хариулт нь "manai mergejilten" зэрэг чиглүүлгийн хариулт байх үед.
-   Эдгээр үед БҮРТГЭЛИЙН ЛИНК (байвал) + "эсвэл утасны дугаараа үлдээгээрэй" гэсэн хоёр сонголтыг ЗЭРЭГ өг.
+
+   Эдгээр үед БҮРТГЭЛИЙН ЛИНК (байвал) + "эсвэл утасны дугаараа үлдээгээрэй" гэсэн ХОЁР СОНГОЛТЫГ ЗЭРЭГ өг.
+
+   ОНЦГОЙ КЕЙС — "шууд бүртгүүлж болох уу?" / "одоо яаж бүртгүүлэх вэ?" гэх мэт:
+   Хариулт нь "Болохгүй, утсаа үлдээх ёстой" БҮҮ БАЙ. Тогтсон форм бий бол ШУУД ҮЗҮҮЛЭХ ХЭРЭГТЭЙ — энэ нь өөрийн биеэр бүртгүүлэх бодит зам. Жишээ хариулт: "Тийм ээ, та одоо энэ форм-оор шууд бүртгүүлж болно: [LINK]. Эсвэл утасны дугаараа үлдээвэл бүртгэлийн ажилтан тантай холбогдож бүртгэлийг хийнэ. Аль нь танд таатай вэ?"
+
+   Хэрэглэгч "одоохондоо утсаа үлдээмээргүй байна" гэвэл шахаж бүү давт. Форм линкийг үзүүлж "хэдийд хүсвэл энэ замаар өөрөө бүртгүүлж болно" гэж тайвшруулна уу.
+
    Дискавери (curious/exploring_courses) шатанд хэзээ утас/линк тавихыг өмнөх FUNNEL RULE тодорхойлсон — давтан энд бүү бич.
 4. Хэрэглэгч утасны дугаар бичсэн бол баярлал илэрхийлж, "Манай ажилтан удахгүй тантай холбогдоно" гэж мэдэгд.
 5. Шийдэх боломжгүй буюу мэдэхгүй асуудал тулгарвал "Энэ асуудлыг манай ажилтан тантай эргэж холбогдож тодруулна" гэж хэлээд Дүрэм 3-ын дагуу хоёр сонголтыг өг.
@@ -1962,7 +2002,7 @@ def _nudge_message_for(user):
         name_prefix = f"{fname} аа, "
 
     if stage == 'ready':
-        link = GOOGLE_FORM_URL or ''
+        link = get_google_form_url()
         link_line = f"\n\nБүртгэлийн линк: {link}" if link else ""
         return (
             f"{name_prefix}та бүртгүүлэх талаар бодож үзсэн байх. "
