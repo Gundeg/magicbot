@@ -278,36 +278,64 @@ def business_unit_detail(bu_id):
     Until Course/Service gain a business_line_id FK, the items grid lists
     EVERY row of the matching type (i.e. a Course-typed BU shows every
     course in the catalog, not just courses 'owned' by this BU). This is
-    acceptable today because Magic has one BU per product_type."""
+    acceptable today because Magic has one BU per product_type.
+
+    Each items query is wrapped in try/except so a partially-migrated DB
+    (e.g. course_link / service_link tables missing because Phase 1's
+    auto-bootstrap failed) doesn't 500 the whole page. We log the error,
+    show an empty items list, and let the admin still see / edit the BU.
+    """
     line = BusinessLine.query.get_or_404(bu_id)
 
     items = []
     if line.product_type == 'Course':
-        items = (Course.query
-                 .options(joinedload(Course.links))
-                 .order_by(Course.is_active.desc(),
-                           Course.start_date.asc().nullsfirst(),
-                           Course.id.asc())
-                 .all())
+        try:
+            items = (Course.query
+                     .options(joinedload(Course.links))
+                     .order_by(Course.is_active.desc(),
+                               Course.start_date.asc().nullsfirst(),
+                               Course.id.asc())
+                     .all())
+        except Exception as e:
+            # Fall back to a links-free query if course_link doesn't
+            # exist yet (Phase 1 auto-bootstrap incomplete on prod).
+            print(f'business_unit_detail Course query fallback: {e}')
+            items = Course.query.order_by(Course.id.asc()).all()
     elif line.product_type == 'Service':
-        items = (Service.query
-                 .options(joinedload(Service.links))
-                 .order_by(Service.is_active.desc(),
-                           Service.sort_order.asc(),
-                           Service.id.asc())
-                 .all())
+        try:
+            items = (Service.query
+                     .options(joinedload(Service.links))
+                     .order_by(Service.is_active.desc(),
+                               Service.sort_order.asc(),
+                               Service.id.asc())
+                     .all())
+        except Exception as e:
+            print(f'business_unit_detail Service query fallback: {e}')
+            items = Service.query.order_by(Service.id.asc()).all()
     elif line.product_type == 'Product':
-        items = (Product.query
-                 .options(joinedload(Product.links))
-                 .filter_by(business_line_id=line.id)
-                 .order_by(Product.is_active.desc(),
-                           Product.sort_order.asc(),
-                           Product.id.asc())
-                 .all())
+        try:
+            items = (Product.query
+                     .options(joinedload(Product.links))
+                     .filter_by(business_line_id=line.id)
+                     .order_by(Product.is_active.desc(),
+                               Product.sort_order.asc(),
+                               Product.id.asc())
+                     .all())
+        except Exception as e:
+            print(f'business_unit_detail Product query fallback: {e}')
+            items = (Product.query
+                     .filter_by(business_line_id=line.id)
+                     .order_by(Product.id.asc())
+                     .all())
 
     # Pre-serialize each item's links so the JS modal can fill the link
     # editor without a second round-trip. Same shape across types.
+    # Defensive against missing `links` attribute / table.
     for item in items:
+        try:
+            links_seq = item.links or []
+        except Exception:
+            links_seq = []
         item._links_json = [
             {
                 'description': l.description,
@@ -316,8 +344,12 @@ def business_unit_detail(bu_id):
                 'is_active': bool(l.is_active),
                 'sort_order': l.sort_order,
             }
-            for l in (item.links or [])
+            for l in links_seq
         ]
+        if not hasattr(item, 'links') or item.links is None:
+            # Make sure the template's `item.links | selectattr('is_active')`
+            # works even if the relationship couldn't load.
+            item.links = []
 
     return render_template(
         'business/unit_detail.html',
