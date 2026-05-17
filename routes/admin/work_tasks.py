@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timedelta
 
 import requests
-from flask import jsonify, render_template, request
+from flask import jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy.orm import joinedload
 
@@ -105,141 +105,24 @@ def dashboard():
                            health=health)
 
 
-# ===================== LEADS =====================
+# ===================== LEADS / ISSUES (legacy URLs) =====================
+# The standalone Leads and Issues pages were merged into Work Tasks below;
+# these endpoints now redirect with the appropriate tab pre-selected so
+# external bookmarks and `url_for('leads')` / `url_for('issues')` in
+# templates keep working.
 
 @app.route('/admin/leads')
 @login_required
 @admin_required
 def leads():
-    """Two buckets in one page:
-      1) Confirmed leads — dropped a phone number (is_lead=True).
-      2) Hot prospects — reached the 'pricing' or 'ready' funnel stage but haven't
-         shared a phone yet.
-    """
-    confirmed = (FacebookUser.query
-                 .filter_by(is_lead=True)
-                 .order_by(FacebookUser.created_at.desc())
-                 .all())
-
-    confirmed_msg_counts = dict(
-        db.session.query(Message.facebook_user_id, db.func.count(Message.id))
-        .filter(Message.facebook_user_id.in_([l.id for l in confirmed]))
-        .group_by(Message.facebook_user_id)
-        .all()
-    ) if confirmed else {}
-
-    last_msg_subq = (db.session.query(
-        Message.facebook_user_id.label('uid'),
-        db.func.max(Message.created_at).label('last_at'),
-    ).group_by(Message.facebook_user_id).subquery())
-
-    msg_count_subq = (db.session.query(
-        Message.facebook_user_id.label('uid'),
-        db.func.count(Message.id).label('msg_count'),
-    ).group_by(Message.facebook_user_id).subquery())
-
-    last_user_msg_subq = (db.session.query(
-        Message.facebook_user_id.label('uid'),
-        db.func.max(Message.id).label('last_user_msg_id'),
-    ).filter(Message.sender == 'user')
-     .group_by(Message.facebook_user_id).subquery())
-
-    hot_rows = (db.session.query(
-        FacebookUser,
-        last_msg_subq.c.last_at,
-        msg_count_subq.c.msg_count,
-        last_user_msg_subq.c.last_user_msg_id,
-    ).join(last_msg_subq, FacebookUser.id == last_msg_subq.c.uid)
-     .outerjoin(msg_count_subq, FacebookUser.id == msg_count_subq.c.uid)
-     .outerjoin(last_user_msg_subq, FacebookUser.id == last_user_msg_subq.c.uid)
-     .filter(FacebookUser.is_lead == False)  # noqa: E712
-     .filter(FacebookUser.funnel_stage.in_(['pricing', 'ready']))
-     .order_by(last_msg_subq.c.last_at.desc())
-     .all())
-
-    msg_ids = [row[3] for row in hot_rows if row[3]]
-    content_by_id = {}
-    if msg_ids:
-        for m in Message.query.filter(Message.id.in_(msg_ids)).all():
-            content_by_id[m.id] = m.content or ''
-
-    hot_prospects = []
-    for user, last_at, msg_count, last_user_msg_id in hot_rows:
-        hot_prospects.append({
-            'user': user,
-            'last_at': last_at,
-            'last_message': content_by_id.get(last_user_msg_id, ''),
-            'message_count': msg_count or 0,
-        })
-
-    return render_template(
-        'leads.html',
-        leads=confirmed,
-        hot_prospects=hot_prospects,
-        confirmed_msg_counts=confirmed_msg_counts,
-    )
+    return redirect(url_for('work_tasks', tab='leads'), code=301)
 
 
-# ===================== ISSUES =====================
-
-@app.route('/admin/issues', methods=['GET', 'POST'])
+@app.route('/admin/issues')
 @login_required
 @admin_required
 def issues():
-    if request.method == 'POST':
-        data = request.get_json()
-        action = data.get('action')
-
-        if action == 'update_status':
-            issue = AdminIssue.query.get(data.get('id'))
-            if issue:
-                new_status = data.get('status')
-                old_status = issue.status
-                if new_status:
-                    issue.status = new_status
-                    if new_status == 'resolved':
-                        issue.resolved_at = datetime.utcnow()
-                issue.updated_by_id = current_user.id
-                issue.updated_at = datetime.utcnow()
-                notes = (data.get('notes') or '').strip()
-                if notes:
-                    issue.notes = notes
-                db.session.commit()
-                if new_status and new_status != old_status:
-                    log_admin_action(
-                        'issue.status_change', 'issue', issue.id,
-                        (issue.facebook_user.name if issue.facebook_user else None) or f'#{issue.id}',
-                        detail=f'{old_status} → {new_status}'
-                    )
-                return jsonify({'success': True})
-
-        if action == 'unmute':
-            user_id = data.get('user_id')
-            user = FacebookUser.query.get(user_id)
-            if not user:
-                return jsonify({'success': False, 'error': 'user not found'}), 404
-            user.bot_muted_until = None
-            db.session.commit()
-            log_admin_action(
-                'bot.unmute', 'facebook_user', user.id, user.name or user.facebook_id,
-                detail='Ботыг гараар асаасан'
-            )
-            return jsonify({'success': True})
-
-        return jsonify({'success': False, 'error': 'unknown action'}), 400
-
-    issues_rows = (AdminIssue.query
-                   .options(joinedload(AdminIssue.facebook_user))
-                   .filter_by(status='open')
-                   .order_by(AdminIssue.created_at.desc())
-                   .all())
-    now = datetime.utcnow()
-    muted_users = (FacebookUser.query
-                   .filter(FacebookUser.bot_muted_until != None)  # noqa: E711
-                   .filter(FacebookUser.bot_muted_until > now)
-                   .order_by(FacebookUser.bot_muted_until.asc())
-                   .all())
-    return render_template('issues.html', issues=issues_rows, muted_users=muted_users, now=now)
+    return redirect(url_for('work_tasks', tab='open_issues'), code=301)
 
 
 # ===================== LOGS =====================
@@ -297,15 +180,27 @@ def conversation(user_id):
     )
 
 
-# ===================== INBOX =====================
+# ===================== WORK TASKS =====================
+# The unified daily-work queue. Five tabs: Hot Prospects (people who showed
+# buying signals but haven't dropped a phone), Leads (people who did),
+# Open Issues (every unresolved AdminIssue), Aging Issues (open > N hours),
+# and Muted Users (bot paused for them).
 
-@app.route('/admin/inbox', methods=['GET', 'POST'])
+VALID_WORK_TASKS_TABS = ('hot_prospects', 'leads', 'open_issues', 'aging', 'muted')
+
+
+@app.route('/admin/inbox')
 @login_required
 @admin_required
 def inbox():
-    """Unified daily-work queue."""
-    now = datetime.utcnow()
+    return redirect(url_for('work_tasks'), code=301)
 
+
+@app.route('/admin/work-tasks', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def work_tasks():
+    """Unified daily-work queue. See module docstring."""
     if request.method == 'POST':
         data = request.get_json() or {}
         action = data.get('action')
@@ -319,7 +214,7 @@ def inbox():
             log_admin_action(
                 'lead.mark_contacted', 'facebook_user', user.id,
                 user.name or user.facebook_id,
-                detail='Inbox-оос холбогдсон гэж тэмдэглэв'
+                detail='Work Tasks-аас холбогдсон гэж тэмдэглэв'
             )
             return jsonify({'success': True})
 
@@ -335,8 +230,32 @@ def inbox():
             log_admin_action(
                 'issue.status_change', 'issue', issue.id,
                 (issue.facebook_user.name if issue.facebook_user else None) or f'#{issue.id}',
-                detail='Inbox-оос шийдсэн'
+                detail='Work Tasks-аас шийдсэн'
             )
+            return jsonify({'success': True})
+
+        if action == 'update_status':
+            issue = AdminIssue.query.get(data.get('id'))
+            if not issue:
+                return jsonify({'success': False}), 404
+            new_status = data.get('status')
+            old_status = issue.status
+            if new_status:
+                issue.status = new_status
+                if new_status == 'resolved':
+                    issue.resolved_at = datetime.utcnow()
+            issue.updated_by_id = current_user.id
+            issue.updated_at = datetime.utcnow()
+            notes = (data.get('notes') or '').strip()
+            if notes:
+                issue.notes = notes
+            db.session.commit()
+            if new_status and new_status != old_status:
+                log_admin_action(
+                    'issue.status_change', 'issue', issue.id,
+                    (issue.facebook_user.name if issue.facebook_user else None) or f'#{issue.id}',
+                    detail=f'{old_status} → {new_status}'
+                )
             return jsonify({'success': True})
 
         if action == 'unmute':
@@ -347,14 +266,21 @@ def inbox():
             db.session.commit()
             log_admin_action(
                 'bot.unmute', 'facebook_user', user.id, user.name or user.facebook_id,
-                detail='Inbox-оос ботыг асаасан'
+                detail='Work Tasks-аас ботыг асаасан'
             )
             return jsonify({'success': True})
 
         return jsonify({'success': False, 'error': 'unknown action'}), 400
 
+    now = datetime.utcnow()
+    tab = request.args.get('tab', 'hot_prospects')
+    if tab not in VALID_WORK_TASKS_TABS:
+        tab = 'hot_prospects'
+
     hot_stages_raw = get_setting('hot_prospect_stages', 'pricing,ready') or 'pricing,ready'
     hot_stages = [s.strip() for s in hot_stages_raw.split(',') if s.strip()]
+
+    # --- Tab 1: hot prospects (no phone yet, in pricing/ready funnel) ---
     hot_prospects = (FacebookUser.query
                      .filter_by(is_lead=False)
                      .filter(FacebookUser.funnel_stage.in_(hot_stages))
@@ -366,6 +292,28 @@ def inbox():
                      .limit(50)
                      .all())
 
+    # --- Tab 2: confirmed leads (dropped a phone). Reuse the rich shape
+    # the old leads.html used: per-lead message counts + last user message.
+    leads_rows = (FacebookUser.query
+                  .filter_by(is_lead=True)
+                  .order_by(FacebookUser.created_at.desc())
+                  .all())
+    leads_msg_counts = dict(
+        db.session.query(Message.facebook_user_id, db.func.count(Message.id))
+        .filter(Message.facebook_user_id.in_([l.id for l in leads_rows]))
+        .group_by(Message.facebook_user_id)
+        .all()
+    ) if leads_rows else {}
+
+    # --- Tab 3: every open issue (not just aging) ---
+    open_issues = (AdminIssue.query
+                   .options(joinedload(AdminIssue.facebook_user))
+                   .filter_by(status='open')
+                   .order_by(AdminIssue.created_at.desc())
+                   .limit(100)
+                   .all())
+
+    # --- Tab 4: aging issues (subset older than INBOX_AGING_HOURS) ---
     aging_threshold = now - timedelta(hours=INBOX_AGING_HOURS)
     aging_issues = (AdminIssue.query
                     .options(joinedload(AdminIssue.facebook_user))
@@ -375,6 +323,7 @@ def inbox():
                     .limit(50)
                     .all())
 
+    # --- Tab 5: muted users (bot temporarily silenced) ---
     muted_users = (FacebookUser.query
                    .filter(FacebookUser.bot_muted_until != None)  # noqa: E711
                    .filter(FacebookUser.bot_muted_until > now)
@@ -383,8 +332,12 @@ def inbox():
                    .all())
 
     return render_template(
-        'inbox.html',
+        'work_tasks.html',
+        tab=tab,
         hot_prospects=hot_prospects,
+        leads=leads_rows,
+        leads_msg_counts=leads_msg_counts,
+        open_issues=open_issues,
         aging_issues=aging_issues,
         muted_users=muted_users,
         aging_hours=INBOX_AGING_HOURS,

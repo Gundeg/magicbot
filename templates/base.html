@@ -400,14 +400,8 @@
                 <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
                     <i class="bi bi-speedometer2"></i> Хяналтын самбар
                 </a>
-                <a class="nav-link {% if request.endpoint == 'inbox' %}active{% endif %}" href="{{ url_for('inbox') }}">
-                    <i class="bi bi-inbox-fill"></i> Ажлын дараалал
-                </a>
-                <a class="nav-link {% if request.endpoint == 'leads' %}active{% endif %}" href="{{ url_for('leads') }}">
-                    <i class="bi bi-person-plus"></i> Харилцагчид
-                </a>
-                <a class="nav-link {% if request.endpoint == 'issues' %}active{% endif %}" href="{{ url_for('issues') }}">
-                    <i class="bi bi-exclamation-circle"></i> Асуудлууд
+                <a class="nav-link {% if request.endpoint in ('work_tasks', 'inbox', 'leads', 'issues') %}active{% endif %}" href="{{ url_for('work_tasks') }}">
+                    <i class="bi bi-list-check"></i> Ажлын даалгавар
                 </a>
                 <a class="nav-link {% if request.endpoint == 'logs' or request.endpoint == 'conversation' %}active{% endif %}" href="{{ url_for('logs') }}">
                     <i class="bi bi-chat-left-text"></i> Мессежийн түүх

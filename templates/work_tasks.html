@@ -1,0 +1,538 @@
+{% extends "base.html" %}
+
+{% block title %}Ажлын даалгавар - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Ажлын даалгавар (Work Tasks){% endblock %}
+
+{% block extra_css %}
+<style>
+    .wt-tabs .nav-link { padding: 8px 14px; }
+    .wt-tabs .nav-link .count {
+        background: #e9ecef; color: #495057;
+        border-radius: 999px;
+        padding: 1px 8px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        margin-left: 6px;
+    }
+    .wt-tabs .nav-link.active .count { background: var(--brand); color: white; }
+    .wt-row {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 8px;
+        border-left: 4px solid transparent;
+    }
+    .wt-row.warm    { border-left-color: #e65100; }
+    .wt-row.urgent  { border-left-color: #dc3545; }
+    .wt-row.muted   { border-left-color: #6c5ce7; }
+    .wt-row.cool    { border-left-color: #198754; }
+    .wt-row .who    { flex: 0 0 180px; min-width: 0; }
+    .wt-row .who strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.9rem; }
+    .wt-row .who .small { color: #888; font-size: 0.72rem; }
+    .wt-row .what   { flex: 1; min-width: 0; font-size: 0.85rem; color: #444; }
+    .wt-row .what .preview {
+        color: #666;
+        overflow: hidden; text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+    }
+    .wt-row .when   { flex: 0 0 130px; font-size: 0.75rem; color: #888; text-align: right; }
+    .wt-row .actions { flex: 0 0 auto; display: flex; gap: 6px; }
+    .wt-empty {
+        background: white;
+        border-radius: 8px;
+        padding: 22px;
+        text-align: center;
+        color: #888;
+        font-size: 0.88rem;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .wt-empty i { font-size: 1.8rem; opacity: 0.35; display: block; margin-bottom: 8px; }
+    @media (max-width: 768px) {
+        .wt-row { flex-wrap: wrap; }
+        .wt-row .who, .wt-row .what { flex: 1 1 100%; }
+        .wt-row .when { flex: 1 1 auto; text-align: left; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div id="wtToastContainer" class="position-fixed bottom-0 end-0 p-3 toast-stack"></div>
+
+<div class="alert alert-light border d-flex gap-2 align-items-start py-2 mb-3 fs-85">
+    <i class="bi bi-list-check mt-1 flex-shrink-0 text-brand"></i>
+    <div>
+        Энэ хуудас өнөөдөр <strong>таны хүн оролцох ёстой</strong> бүх зүйлийг нэг газар цуглуулна:
+        халуун сонирхогчид, утсаа үлдээсэн лидүүд, нээлттэй асуудлууд, удаан хариулагдаагүй ажил,
+        болон handoff авсан хэрэглэгчид.
+    </div>
+</div>
+
+<ul class="nav nav-tabs wt-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if tab == 'hot_prospects' %}active{% endif %}"
+                data-bs-toggle="tab" data-bs-target="#hotTab" type="button" role="tab">
+            <i class="bi bi-fire text-warm"></i> Халуун сонирхогч
+            <span class="count">{{ hot_prospects|length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if tab == 'leads' %}active{% endif %}"
+                data-bs-toggle="tab" data-bs-target="#leadsTab" type="button" role="tab">
+            <i class="bi bi-person-check"></i> Лидүүд
+            <span class="count">{{ leads|length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if tab == 'open_issues' %}active{% endif %}"
+                data-bs-toggle="tab" data-bs-target="#openIssuesTab" type="button" role="tab">
+            <i class="bi bi-exclamation-circle"></i> Нээлттэй асуудлууд
+            <span class="count">{{ open_issues|length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if tab == 'aging' %}active{% endif %}"
+                data-bs-toggle="tab" data-bs-target="#agingTab" type="button" role="tab">
+            <i class="bi bi-hourglass-split text-danger"></i> Удаан асуудлууд
+            <span class="count">{{ aging_issues|length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if tab == 'muted' %}active{% endif %}"
+                data-bs-toggle="tab" data-bs-target="#mutedTab" type="button" role="tab">
+            <i class="bi bi-volume-mute"></i> Бот зогссон
+            <span class="count">{{ muted_users|length }}</span>
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+
+    {# ── Tab 1: Hot prospects ────────────────────────────────────── #}
+    <div class="tab-pane fade {% if tab == 'hot_prospects' %}show active{% endif %}" id="hotTab" role="tabpanel">
+        {% if hot_prospects %}
+            {% for u in hot_prospects %}
+            <div class="wt-row warm" data-user-id="{{ u.id }}">
+                <div class="who">
+                    <strong>{{ u.name or 'Unknown' }}</strong>
+                    <span class="small">{{ u.funnel_stage or 'curious' }} · {{ u.conversation_topic or 'ангилаагүй' }}</span>
+                </div>
+                <div class="what">
+                    <div class="preview">Үнэ/бүртгэлийн шатанд орсон ч утасны дугаар үлдээгээгүй.</div>
+                </div>
+                <div class="when">
+                    Сүүлд: {{ u.updated_at.strftime('%m/%d %H:%M') }}
+                </div>
+                <div class="actions">
+                    <button type="button" class="btn btn-sm btn-outline-primary contact-btn" data-id="{{ u.id }}" title="Холбогдсон гэж тэмдэглэх">
+                        <i class="bi bi-check2"></i> Холбогдсон
+                    </button>
+                    <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=u.id) }}" title="Яриаг бүхэлд нь үзэх">
+                        <i class="bi bi-eye"></i>
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="wt-empty">
+                <i class="bi bi-emoji-smile"></i>
+                Халуун сонирхогч одоогоор алга. Үнэ/бүртгэлийн шатанд орсон шинэ хэрэглэгч гарангуут энд гарч ирнэ.
+            </div>
+        {% endif %}
+    </div>
+
+    {# ── Tab 2: Confirmed leads (rich table from old leads.html) ──── #}
+    <div class="tab-pane fade {% if tab == 'leads' %}show active{% endif %}" id="leadsTab" role="tabpanel">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-people"></i> Утсаа үлдээсэн лидүүд</span>
+                <div>
+                    <button type="button" class="btn btn-sm btn-light" id="classifyBtn"
+                            title="AI ашиглан харилцааг ангилах">
+                        <i class="bi bi-magic"></i> Ангилах
+                    </button>
+                    <button type="button" class="btn btn-sm btn-light" id="backfillBtn"
+                            title="Facebook-аас нэрийг дахин татах (Unknown гэсэн бүх хэрэглэгчид)">
+                        <i class="bi bi-arrow-clockwise"></i> Нэр шинэчлэх
+                    </button>
+                    <button type="button" class="btn btn-sm btn-light" id="exportBtn">
+                        <i class="bi bi-download"></i> CSV
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <input type="text" class="form-control mb-3" id="leadsSearchInput"
+                       placeholder="Нэр эсвэл утсаар хайх..." aria-label="Лидийг нэр эсвэл утсаар хайх">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Нэр</th>
+                                <th>Утас</th>
+                                <th>Төлөв</th>
+                                <th>Үе шат</th>
+                                <th>Сонирхол</th>
+                                <th>Бүртгэгдсэн</th>
+                                <th>Мессеж</th>
+                                <th><span class="visually-hidden">Үйлдэл</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="leadsList">
+                            {% for lead in leads %}
+                            <tr data-lead-id="{{ lead.id }}">
+                                <td>{{ lead.name or 'Unknown' }}</td>
+                                <td>
+                                    {% if lead.phone %}
+                                        <a href="tel:{{ lead.phone }}">{{ lead.phone }}</a>
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if lead.lead_status == 'new' %}
+                                        <span class="badge bg-info">Шинэ</span>
+                                    {% elif lead.lead_status == 'contacted' %}
+                                        <span class="badge bg-warning text-dark">Холбогдсон</span>
+                                    {% elif lead.lead_status == 'converted' %}
+                                        <span class="badge bg-success">Бүртгүүлсэн</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ lead.lead_status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td><span class="badge bg-light text-muted border">{{ lead.funnel_stage or 'curious' }}</span></td>
+                                <td>
+                                    {% set topic = lead.conversation_topic %}
+                                    {% if topic == 'general' %}
+                                        <span class="badge bg-info">Ерөнхий</span>
+                                    {% elif topic == 'not_related' %}
+                                        <span class="badge bg-secondary">Холбоогүй</span>
+                                    {% elif topic == 'other_request' %}
+                                        <span class="badge bg-warning text-dark">Бусад</span>
+                                    {% elif topic %}
+                                        <span class="badge bg-brand">{{ topic }}</span>
+                                    {% else %}
+                                        <span class="text-muted small">—</span>
+                                    {% endif %}
+                                </td>
+                                <td><small>{{ lead.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                                <td><span class="badge bg-secondary">{{ leads_msg_counts.get(lead.id, 0) }}</span></td>
+                                <td>
+                                    <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=lead.id) }}" title="Ярианы түүх">
+                                        <i class="bi bi-chat-square-dots"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="8" class="text-center text-muted py-4">
+                                    Одоогоор утсаа үлдээсэн лид алга. Халуун сонирхогчдыг эхний табаас хар.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Tab 3: Open issues (every open AdminIssue) ──────────────── #}
+    <div class="tab-pane fade {% if tab == 'open_issues' %}show active{% endif %}" id="openIssuesTab" role="tabpanel">
+        {% if open_issues %}
+            {% for issue in open_issues %}
+            {% set age_hours = ((now - issue.created_at).total_seconds() // 3600) | int %}
+            <div class="wt-row {% if age_hours >= aging_hours %}urgent{% else %}cool{% endif %}" data-issue-id="{{ issue.id }}">
+                <div class="who">
+                    <strong>{{ issue.facebook_user.name or 'Unknown' }}</strong>
+                    <span class="small">
+                        {% if issue.issue_type == 'unresolved_query' %}Шийдэгдээгүй
+                        {% elif issue.issue_type == 'complaint' %}Гомдол
+                        {% elif issue.issue_type == 'suggestion' %}Санал
+                        {% elif issue.issue_type == 'handoff' %}Handoff
+                        {% else %}{{ issue.issue_type }}{% endif %}
+                    </span>
+                </div>
+                <div class="what">
+                    <div class="preview">{{ issue.content[:160] }}</div>
+                    {% if issue.notes %}
+                        <div class="text-muted small mt-1"><i class="bi bi-sticky"></i> {{ issue.notes[:80] }}</div>
+                    {% endif %}
+                </div>
+                <div class="when">
+                    {{ age_hours }} цаг өмнө<br>
+                    <span class="text-muted">{{ issue.created_at.strftime('%m/%d %H:%M') }}</span>
+                </div>
+                <div class="actions">
+                    <button type="button" class="btn btn-sm btn-outline-success resolve-btn" data-id="{{ issue.id }}" title="Шийдсэн гэж тэмдэглэх">
+                        <i class="bi bi-check2-circle"></i> Шийдэх
+                    </button>
+                    <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=issue.facebook_user.id) }}" title="Яриаг бүхэлд нь үзэх">
+                        <i class="bi bi-eye"></i>
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="wt-empty">
+                <i class="bi bi-check-circle"></i>
+                Нээлттэй асуудал алга. Бүх асуудал шийдэгдсэн.
+            </div>
+        {% endif %}
+    </div>
+
+    {# ── Tab 4: Aging issues (open > aging_hours) ────────────────── #}
+    <div class="tab-pane fade {% if tab == 'aging' %}show active{% endif %}" id="agingTab" role="tabpanel">
+        <p class="text-muted small mb-3">
+            {{ aging_hours }} цагаас илүү хариу аваагүй нээлттэй асуудлууд.
+        </p>
+        {% if aging_issues %}
+            {% for issue in aging_issues %}
+            {% set age_hours = ((now - issue.created_at).total_seconds() // 3600) | int %}
+            <div class="wt-row urgent" data-issue-id="{{ issue.id }}">
+                <div class="who">
+                    <strong>{{ issue.facebook_user.name or 'Unknown' }}</strong>
+                    <span class="small">
+                        {% if issue.issue_type == 'unresolved_query' %}Шийдэгдээгүй
+                        {% elif issue.issue_type == 'complaint' %}Гомдол
+                        {% elif issue.issue_type == 'suggestion' %}Санал
+                        {% elif issue.issue_type == 'handoff' %}Handoff
+                        {% else %}{{ issue.issue_type }}{% endif %}
+                    </span>
+                </div>
+                <div class="what">
+                    <div class="preview">{{ issue.content[:160] }}</div>
+                    {% if issue.notes %}
+                        <div class="text-muted small mt-1"><i class="bi bi-sticky"></i> {{ issue.notes[:80] }}</div>
+                    {% endif %}
+                </div>
+                <div class="when">
+                    {{ age_hours }} цаг өмнө<br>
+                    <span class="text-muted">{{ issue.created_at.strftime('%m/%d %H:%M') }}</span>
+                </div>
+                <div class="actions">
+                    <button type="button" class="btn btn-sm btn-outline-success resolve-btn" data-id="{{ issue.id }}" title="Шийдсэн гэж тэмдэглэх">
+                        <i class="bi bi-check2-circle"></i> Шийдэх
+                    </button>
+                    <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=issue.facebook_user.id) }}" title="Яриаг бүхэлд нь үзэх">
+                        <i class="bi bi-eye"></i>
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="wt-empty">
+                <i class="bi bi-check-circle"></i>
+                {{ aging_hours }} цагаас хуучин нээлттэй асуудал алга. Сайн ажиллаж байна.
+            </div>
+        {% endif %}
+    </div>
+
+    {# ── Tab 5: Muted users ──────────────────────────────────────── #}
+    <div class="tab-pane fade {% if tab == 'muted' %}show active{% endif %}" id="mutedTab" role="tabpanel">
+        {% if muted_users %}
+            {% for u in muted_users %}
+            {% set mins_left = ((u.bot_muted_until - now).total_seconds() / 60) | round(0, 'floor') | int %}
+            <div class="wt-row muted" data-user-id="{{ u.id }}">
+                <div class="who">
+                    <strong>{{ u.name or 'Unknown' }}</strong>
+                    <span class="small">{{ u.phone or 'утасгүй' }}</span>
+                </div>
+                <div class="what">
+                    <div class="preview">Бот хариулахаа зогсоосон. Хүн дамжуулах ёстой.</div>
+                </div>
+                <div class="when">
+                    ~{{ mins_left }} мин үлдсэн<br>
+                    <span class="text-muted">{{ u.bot_muted_until.strftime('%m/%d %H:%M') }}</span>
+                </div>
+                <div class="actions">
+                    <button type="button" class="btn btn-sm btn-outline-success unmute-btn" data-id="{{ u.id }}" title="Ботыг асаах">
+                        <i class="bi bi-volume-up"></i> Bot асаах
+                    </button>
+                    <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=u.id) }}" title="Яриаг бүхэлд нь үзэх">
+                        <i class="bi bi-eye"></i>
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="wt-empty">
+                <i class="bi bi-robot"></i>
+                Бот чимээгүй болгосон хэрэглэгч алга. Бүх ярианд бот хариулж байна.
+            </div>
+        {% endif %}
+    </div>
+
+</div>
+
+<script>
+(function () {
+    const workTasksUrl = '{{ url_for("work_tasks") }}';
+    const classifyUrl = '{{ url_for("classify_conversations_backfill") }}';
+    const backfillUrl = '{{ url_for("backfill_names") }}';
+
+    function toast(msg, ok) {
+        const c = document.getElementById('wtToastContainer');
+        const el = document.createElement('div');
+        el.className = 'toast align-items-center text-white border-0 show shadow mb-2';
+        el.style.background = ok ? 'var(--brand-dark)' : '#dc3545';
+        el.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">${msg}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Хаах"></button>
+            </div>`;
+        c.appendChild(el);
+        setTimeout(() => el.remove(), 4000);
+    }
+
+    function post(payload) {
+        return fetch(workTasksUrl, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        }).then(r => r.json());
+    }
+
+    function fadeAndRemove(node) {
+        node.style.transition = 'opacity 0.3s, transform 0.3s';
+        node.style.opacity = '0';
+        node.style.transform = 'translateX(10px)';
+        setTimeout(() => node.remove(), 300);
+    }
+
+    document.querySelectorAll('.contact-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.disabled = true;
+            post({action: 'mark_contacted', user_id: btn.dataset.id}).then(r => {
+                if (r.success) {
+                    toast('Холбогдсон гэж тэмдэглэлээ.', true);
+                    fadeAndRemove(btn.closest('.wt-row'));
+                } else {
+                    toast('Алдаа гарлаа.', false);
+                    btn.disabled = false;
+                }
+            });
+        });
+    });
+
+    document.querySelectorAll('.resolve-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.disabled = true;
+            post({action: 'resolve_issue', id: btn.dataset.id}).then(r => {
+                if (r.success) {
+                    toast('Асуудлыг шийдсэн гэж тэмдэглэлээ.', true);
+                    fadeAndRemove(btn.closest('.wt-row'));
+                } else {
+                    toast('Алдаа гарлаа.', false);
+                    btn.disabled = false;
+                }
+            });
+        });
+    });
+
+    document.querySelectorAll('.unmute-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.disabled = true;
+            post({action: 'unmute', user_id: btn.dataset.id}).then(r => {
+                if (r.success) {
+                    toast('Ботыг асааллаа.', true);
+                    fadeAndRemove(btn.closest('.wt-row'));
+                } else {
+                    toast('Алдаа гарлаа.', false);
+                    btn.disabled = false;
+                }
+            });
+        });
+    });
+
+    // Leads tab: local search filter
+    const searchInput = document.getElementById('leadsSearchInput');
+    if (searchInput) {
+        searchInput.addEventListener('keyup', function () {
+            const query = this.value.toLowerCase();
+            document.querySelectorAll('#leadsList tr').forEach(row => {
+                row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none';
+            });
+        });
+    }
+
+    // Leads tab: classify / backfill / export buttons
+    const classifyBtn = document.getElementById('classifyBtn');
+    if (classifyBtn) {
+        classifyBtn.addEventListener('click', function () {
+            const btn = this;
+            btn.disabled = true;
+            const original = btn.innerHTML;
+            btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Ангилж байна...';
+            fetch(classifyUrl, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {'Content-Type': 'application/json'},
+            })
+            .then(r => r.json())
+            .then(d => {
+                alert(`Оролдсон: ${d.attempted}\nАнгилагдсан: ${d.classified}\n\nХуудсыг шинэчилж байна...`);
+                location.reload();
+            })
+            .catch(e => alert('Алдаа: ' + e))
+            .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+        });
+    }
+
+    const backfillBtn = document.getElementById('backfillBtn');
+    if (backfillBtn) {
+        backfillBtn.addEventListener('click', function () {
+            const btn = this;
+            btn.disabled = true;
+            const original = btn.innerHTML;
+            btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Шинэчилж байна...';
+            fetch(backfillUrl, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {'Content-Type': 'application/json'},
+            })
+                .then(r => r.json())
+                .then(d => {
+                    alert(
+                        `Оролдсон: ${d.attempted}\n` +
+                        `Шинэчилсэн: ${d.updated}\n` +
+                        `Үлдсэн Unknown: ${d.remaining_unknown_after}\n\n` +
+                        (d.updated > 0 ? 'Хуудсыг шинэчилж байна...' :
+                         'Нэр шинэчилсэнгүй. Render-ийн log-оос Facebook-ийн алдааг шалгана уу.')
+                    );
+                    if (d.updated > 0) location.reload();
+                })
+                .catch(e => alert('Алдаа: ' + e))
+                .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+        });
+    }
+
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', function () {
+            const rows = Array.from(document.querySelectorAll('#leadsList tr'))
+                .filter(r => r.dataset.leadId)
+                .map(row => {
+                    const c = row.querySelectorAll('td');
+                    return [c[0].textContent.trim(), c[1].textContent.trim(), c[2].textContent.trim(),
+                            c[3].textContent.trim(), c[4].textContent.trim()];
+                });
+            let csv = 'Name,Phone,Status,Stage,Topic\n';
+            rows.forEach(r => { csv += r.map(v => `"${v.replace(/"/g, '""')}"`).join(',') + '\n'; });
+            const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+            const a = document.createElement('a');
+            a.href = window.URL.createObjectURL(blob);
+            a.download = 'leads.csv';
+            a.click();
+        });
+    }
+})();
+</script>
+
+{% endblock %}
