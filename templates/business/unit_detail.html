@@ -1,0 +1,544 @@
+{% extends "base.html" %}
+
+{% block title %}{{ line.name }} - Бизнесийн нэгж{% endblock %}
+{% block page_title %}{{ line.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .detail-card {
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        margin-bottom: 16px;
+        overflow: hidden;
+    }
+    .detail-card-head {
+        padding: 12px 18px;
+        background: #f8f9fa;
+        cursor: pointer;
+        display: flex; align-items: center; gap: 10px;
+        border-bottom: 1px solid #e9ecef;
+        font-weight: 600;
+    }
+    .detail-card-head .toggle-icon { transition: transform 0.2s; }
+    .detail-card-head[aria-expanded="false"] .toggle-icon { transform: rotate(-90deg); }
+    .detail-card-body { padding: 16px 18px; font-size: 0.88rem; }
+    .detail-card-body dt { font-weight: 600; color: #495057; }
+    .detail-card-body dd { margin-bottom: 8px; }
+    .type-pill {
+        font-size: 0.72rem; padding: 2px 10px; border-radius: 999px;
+        background: #e7f5ff; color: #1971c2; font-weight: 600;
+    }
+    .type-pill.type-Course   { background: #fff4e6; color: #d9480f; }
+    .type-pill.type-Service  { background: #f3f0ff; color: #5f3dc4; }
+    .type-pill.type-Product  { background: #e7f5ff; color: #1971c2; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="udToastContainer" class="position-fixed bottom-0 end-0 p-3 toast-stack"></div>
+
+<nav class="mb-3" aria-label="breadcrumb">
+    <ol class="breadcrumb mb-0 small">
+        <li class="breadcrumb-item"><a href="{{ url_for('business_management_units') }}">Бизнесийн нэгжүүд</a></li>
+        <li class="breadcrumb-item active" aria-current="page">{{ line.name }}</li>
+    </ol>
+</nav>
+
+{# ── BU detail card (collapsible) ────────────────────────────────── #}
+<div class="detail-card">
+    <div class="detail-card-head" data-bs-toggle="collapse" data-bs-target="#detailBody"
+         aria-expanded="{{ 'false' if items else 'true' }}">
+        <i class="bi bi-chevron-down toggle-icon"></i>
+        <span class="type-pill type-{{ line.product_type }}">{{ line.product_type }}</span>
+        <span class="flex-grow-1">Нэгжийн мэдээлэл</span>
+        {% if not line.is_active %}<span class="badge bg-secondary">Түр зогссон</span>{% endif %}
+        <a href="{{ url_for('business_management_units') }}" class="btn btn-sm btn-outline-secondary"
+           onclick="event.stopPropagation();">
+            <i class="bi bi-pencil"></i> Засах
+        </a>
+    </div>
+    <div class="collapse {% if not items %}show{% endif %}" id="detailBody">
+        <div class="detail-card-body">
+            <div class="row g-3">
+                {% if line.description %}
+                <div class="col-12">
+                    <dt>Тайлбар</dt><dd>{{ line.description }}</dd>
+                </div>
+                {% endif %}
+                <div class="col-md-4">
+                    <dt>Ботын хариу</dt>
+                    <dd>{{ 'Товч хариулна (answer)' if line.action == 'answer' else 'Ажилтанд дамжуулна (refer)' }}</dd>
+                </div>
+                {% if line.contact_info %}
+                <div class="col-md-4"><dt>Холбоо барих</dt><dd>{{ line.contact_info }}</dd></div>
+                {% endif %}
+                {% if line.email %}
+                <div class="col-md-4"><dt>Имэйл</dt><dd>{{ line.email }}</dd></div>
+                {% endif %}
+                {% if line.address %}
+                <div class="col-md-6"><dt>Хаяг</dt><dd>{{ line.address }}</dd></div>
+                {% endif %}
+                {% if line.established_year %}
+                <div class="col-md-3"><dt>Үүсгэн байгуулагдсан</dt><dd>{{ line.established_year }}</dd></div>
+                {% endif %}
+                {% if line.status_note %}
+                <div class="col-12"><dt>Статусын тэмдэглэл</dt><dd class="text-danger">{{ line.status_note }}</dd></div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Items section ──────────────────────────────────────────────── #}
+<div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+    <h5 class="mb-0">
+        {% if line.product_type == 'Course' %}
+            <i class="bi bi-calendar-event"></i> Сургалтууд
+        {% elif line.product_type == 'Service' %}
+            <i class="bi bi-file-earmark-text"></i> Үйлчилгээнүүд
+        {% else %}
+            <i class="bi bi-box-seam"></i> Бүтээгдэхүүнүүд
+        {% endif %}
+        <span class="badge bg-secondary ms-1">{{ items|length }}</span>
+    </h5>
+    <button type="button" class="btn btn-brand btn-sm" data-bs-toggle="modal" data-bs-target="#itemModal" id="addItemBtn">
+        <i class="bi bi-plus-lg"></i>
+        {% if line.product_type == 'Course' %}Сургалт нэмэх
+        {% elif line.product_type == 'Service' %}Үйлчилгээ нэмэх
+        {% else %}Бүтээгдэхүүн нэмэх{% endif %}
+    </button>
+</div>
+
+{% if items %}
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        {% if line.product_type == 'Course' %}
+                            <th>#</th><th>Нэр</th><th>Төрөл</th><th>Огноо</th><th>Цаг</th><th>Үнэ</th>
+                        {% elif line.product_type == 'Service' %}
+                            <th>Нэр</th><th>Тайлбар</th><th>Үнэ</th><th>Хугацаа</th>
+                        {% else %}
+                            <th>#</th><th>Нэр</th><th>Брэнд</th><th>Гол</th>
+                        {% endif %}
+                        <th>Холбоос</th><th>Төлөв</th><th class="text-end">Үйлдэл</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    {% set active_links = item.links | selectattr('is_active') | list %}
+                    <tr data-item-id="{{ item.id }}"
+                        data-item='{{ ({
+                            "id": item.id,
+                            "name": item.name,
+                            "description": item.description or "",
+                            "links": item._links_json
+                        } | tojson | e) if line.product_type == 'Service' else (
+                            {
+                                "id": item.id,
+                                "course_number": item.course_number,
+                                "name": item.name,
+                                "course_type": item.course_type,
+                                "start_date": item.start_date.strftime('%Y-%m-%d') if item.start_date else "",
+                                "end_date": item.end_date.strftime('%Y-%m-%d') if item.end_date else "",
+                                "time": item.time or "",
+                                "price": item.price or 0,
+                                "duration_days": item.duration_days,
+                                "is_recurring": item.is_recurring,
+                                "description": item.description or "",
+                                "links": item._links_json
+                            } | tojson | e) if line.product_type == 'Course' else (
+                            {
+                                "id": item.id,
+                                "product_number": item.product_number,
+                                "name": item.name,
+                                "vendor": item.vendor or "",
+                                "description": item.description or "",
+                                "is_main_product": item.is_main_product,
+                                "business_line_id": item.business_line_id,
+                                "links": item._links_json
+                            } | tojson | e) }}'>
+                        {% if line.product_type == 'Course' %}
+                            <td class="text-muted small">{{ item.course_number or '—' }}</td>
+                            <td><strong>{{ item.name }}</strong>
+                                {% if item.description %}<div class="text-muted small text-truncate col-max-280">{{ item.description }}</div>{% endif %}
+                            </td>
+                            <td><span class="badge bg-light text-dark border">{{ item.course_type }}</span></td>
+                            <td class="small">
+                                {% if item.start_date %}{{ item.start_date.strftime('%Y-%m-%d') }}{% endif %}
+                                {% if item.end_date %}<br>→ {{ item.end_date.strftime('%Y-%m-%d') }}{% endif %}
+                                {% if not item.start_date %}<span class="text-muted">—</span>{% endif %}
+                            </td>
+                            <td class="small">{{ item.time or '—' }}</td>
+                            <td class="small">{{ '{:,.0f}'.format(item.price) if item.price else '—' }}</td>
+                        {% elif line.product_type == 'Service' %}
+                            <td><strong>{{ item.name }}</strong></td>
+                            <td class="text-muted small col-max-320">
+                                {{ (item.description or '')[:160] }}{% if item.description and item.description|length > 160 %}…{% endif %}
+                            </td>
+                            <td class="small">{{ '{:,.0f}'.format(item.price) if item.price else '—' }}</td>
+                            <td class="small">{{ item.duration or '—' }}</td>
+                        {% else %}
+                            <td class="text-muted small">{{ item.product_number or '—' }}</td>
+                            <td><strong>{{ item.name }}</strong>
+                                {% if item.description %}<div class="text-muted small text-truncate col-max-280">{{ item.description }}</div>{% endif %}
+                            </td>
+                            <td class="small">{{ item.vendor or '—' }}</td>
+                            <td>{% if item.is_main_product %}<span class="badge bg-warning text-dark">★ Гол</span>{% else %}—{% endif %}</td>
+                        {% endif %}
+                        <td><span class="badge bg-light text-dark border" title="Идэвхтэй холбоос">{{ active_links|length }}</span></td>
+                        <td>
+                            {% if item.is_active %}
+                                <span class="badge bg-success">Идэвхтэй</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Зогссон</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-sm btn-warning edit-item" data-id="{{ item.id }}"
+                                    data-bs-toggle="modal" data-bs-target="#itemModal" title="Засах">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm {{ 'btn-outline-secondary' if item.is_active else 'btn-success' }} toggle-item"
+                                    data-id="{{ item.id }}" title="Идэвх солих">
+                                <i class="bi {{ 'bi-pause-circle' if item.is_active else 'bi-play-circle' }}"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-danger delete-item" data-id="{{ item.id }}"
+                                    data-name="{{ item.name }}" title="Устгах">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-light border text-center py-5">
+    <i class="bi bi-collection" style="font-size: 2rem; opacity: 0.3;"></i>
+    <div class="mt-2 text-muted">
+        Энэ нэгжид одоогоор нэмэгдсэн зүйл алга.
+    </div>
+    <button type="button" class="btn btn-brand mt-3" data-bs-toggle="modal" data-bs-target="#itemModal">
+        <i class="bi bi-plus-lg"></i> Эхний зүйл нэмэх
+    </button>
+</div>
+{% endif %}
+
+{# ── Add/Edit item modal (type-aware) ──────────────────────────── #}
+<div class="modal fade" id="itemModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="itemModalTitle">Шинэ зүйл</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
+            </div>
+            <div class="modal-body">
+                <form id="itemForm" class="row g-3" autocomplete="off">
+                    <input type="hidden" id="itemId">
+
+                    {% if line.product_type == 'Course' %}
+                        <div class="col-md-3">
+                            <label class="form-label">Курсын дугаар <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="f_course_number" required>
+                        </div>
+                        <div class="col-md-9">
+                            <label class="form-label">Нэр <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="f_name" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Төрөл <span class="text-danger">*</span></label>
+                            <select class="form-select" id="f_course_type" required>
+                                {% for ct in ALLOWED_COURSE_TYPES %}
+                                    <option value="{{ ct }}">{{ ct }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Эхлэх огноо</label>
+                            <input type="date" class="form-control" id="f_start_date">
+                            <div class="form-text">100% Online сургалт хоосон үлдээх.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Дуусах огноо</label>
+                            <input type="date" class="form-control" id="f_end_date">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Цаг</label>
+                            <input type="text" class="form-control" id="f_time" placeholder="10:00-13:00">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Үнэ</label>
+                            <input type="number" class="form-control" id="f_price" step="1000">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Хугацаа (өдөр)</label>
+                            <input type="number" class="form-control" id="f_duration_days" min="0">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Тайлбар</label>
+                            <textarea class="form-control" id="f_description" rows="2"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="f_is_recurring">
+                                <label class="form-check-label" for="f_is_recurring">Давтан явагдах сургалт</label>
+                            </div>
+                        </div>
+
+                    {% elif line.product_type == 'Service' %}
+                        <div class="col-12">
+                            <label class="form-label">Нэр <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="f_name" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Тайлбар</label>
+                            <textarea class="form-control" id="f_description" rows="3"></textarea>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Үнэ (заавал биш)</label>
+                            <input type="number" class="form-control" id="f_price" step="1000">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Хугацаа</label>
+                            <input type="text" class="form-control" id="f_duration" placeholder="1-2 долоо хоног">
+                        </div>
+
+                    {% else %}{# Product #}
+                        <input type="hidden" id="f_business_line_id" value="{{ line.id }}">
+                        <div class="col-md-3">
+                            <label class="form-label">Дугаар <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="f_product_number" required>
+                        </div>
+                        <div class="col-md-9">
+                            <label class="form-label">Нэр <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="f_name" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Брэнд</label>
+                            <input type="text" class="form-control" id="f_vendor">
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="f_is_main_product">
+                                <label class="form-check-label" for="f_is_main_product">Гол бүтээгдэхүүн (нэгжийн дотор хамгийн чухал)</label>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Тайлбар</label>
+                            <textarea class="form-control" id="f_description" rows="3"></textarea>
+                        </div>
+                    {% endif %}
+
+                    <div class="col-12">
+                        {% include "business/partials/_links_editor.html" %}
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Болих</button>
+                <button type="button" class="btn btn-brand" id="saveItemBtn">
+                    <i class="bi bi-save"></i> Хадгалах
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const PRODUCT_TYPE = '{{ line.product_type }}';
+    const ITEM_URL = (
+        PRODUCT_TYPE === 'Course'   ? '{{ url_for("courses") }}' :
+        PRODUCT_TYPE === 'Service'  ? '{{ url_for("services") }}' :
+                                       '{{ url_for("products") }}'
+    );
+
+    function toast(msg, ok) {
+        const c = document.getElementById('udToastContainer');
+        const el = document.createElement('div');
+        el.className = 'toast align-items-center text-white border-0 show shadow mb-2';
+        el.style.background = ok ? 'var(--brand-dark)' : '#dc3545';
+        el.innerHTML = `<div class="d-flex">
+            <div class="toast-body">${msg}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>`;
+        c.appendChild(el);
+        setTimeout(() => el.remove(), 4000);
+    }
+
+    function post(payload) {
+        return fetch(ITEM_URL, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('meta[name=csrf-token]')?.content || ''},
+            body: JSON.stringify(payload),
+        }).then(r => r.json());
+    }
+
+    function escapeHtml(s) {
+        return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+    }
+
+    // ── Link editor ───────────────────────────────────────
+    function buildLinkRow(link) {
+        link = link || {description: '', url: '', note: '', is_active: true};
+        const tr = document.createElement('tr');
+        tr.className = 'link-row';
+        tr.innerHTML = `
+            <td><input type="text" class="form-control form-control-sm link-description" placeholder="Бүртгэлийн форм" value="${escapeHtml(link.description || '')}"></td>
+            <td><input type="url" class="form-control form-control-sm link-url" placeholder="https://..." value="${escapeHtml(link.url || '')}"></td>
+            <td><input type="text" class="form-control form-control-sm link-note" placeholder="Дотоод тэмдэглэл" value="${escapeHtml(link.note || '')}"></td>
+            <td class="text-center"><input type="checkbox" class="form-check-input link-active" ${link.is_active !== false ? 'checked' : ''}></td>
+            <td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger remove-link"><i class="bi bi-x-lg"></i></button></td>`;
+        tr.querySelector('.remove-link').addEventListener('click', () => {
+            tr.remove();
+            toggleLinksEmptyRow();
+        });
+        return tr;
+    }
+    function toggleLinksEmptyRow() {
+        const body = document.getElementById('linksBody');
+        const empty = document.getElementById('linksEmptyRow');
+        if (!empty) return;
+        empty.style.display = body.querySelectorAll('tr.link-row').length > 0 ? 'none' : '';
+    }
+    function clearLinks() {
+        document.getElementById('linksBody').querySelectorAll('tr.link-row').forEach(tr => tr.remove());
+        toggleLinksEmptyRow();
+    }
+    function addLink(link) {
+        document.getElementById('linksBody').appendChild(buildLinkRow(link));
+        toggleLinksEmptyRow();
+    }
+    function collectLinks() {
+        return Array.from(document.querySelectorAll('#linksBody tr.link-row')).map((tr, idx) => ({
+            description: tr.querySelector('.link-description').value.trim(),
+            url: tr.querySelector('.link-url').value.trim(),
+            note: tr.querySelector('.link-note').value.trim(),
+            is_active: tr.querySelector('.link-active').checked,
+            sort_order: idx,
+        }));
+    }
+    document.getElementById('addLinkBtn').addEventListener('click', () => addLink({}));
+
+    // ── Form fill / collect (type-specific) ─────────────────
+    function fillForm(item) {
+        item = item || {};
+        document.getElementById('itemId').value = item.id || '';
+        const setVal = (id, v) => { const e = document.getElementById(id); if (e) e.value = (v === null || v === undefined) ? '' : v; };
+        const setChk = (id, v) => { const e = document.getElementById(id); if (e) e.checked = !!v; };
+
+        if (PRODUCT_TYPE === 'Course') {
+            setVal('f_course_number', item.course_number);
+            setVal('f_name', item.name);
+            setVal('f_course_type', item.course_type || '');
+            setVal('f_start_date', item.start_date || '');
+            setVal('f_end_date', item.end_date || '');
+            setVal('f_time', item.time);
+            setVal('f_price', item.price);
+            setVal('f_duration_days', item.duration_days);
+            setVal('f_description', item.description);
+            setChk('f_is_recurring', item.is_recurring);
+        } else if (PRODUCT_TYPE === 'Service') {
+            setVal('f_name', item.name);
+            setVal('f_description', item.description);
+            setVal('f_price', item.price);
+            setVal('f_duration', item.duration);
+        } else {
+            setVal('f_product_number', item.product_number);
+            setVal('f_name', item.name);
+            setVal('f_vendor', item.vendor);
+            setVal('f_description', item.description);
+            setChk('f_is_main_product', item.is_main_product);
+        }
+
+        clearLinks();
+        (item.links || []).forEach(addLink);
+    }
+
+    function collectPayload() {
+        const id = document.getElementById('itemId').value;
+        const base = {action: id ? 'edit' : 'add', id: id || undefined, links: collectLinks()};
+
+        if (PRODUCT_TYPE === 'Course') {
+            return Object.assign(base, {
+                course_number: document.getElementById('f_course_number').value || null,
+                name: document.getElementById('f_name').value.trim(),
+                course_type: document.getElementById('f_course_type').value,
+                start_date: document.getElementById('f_start_date').value || null,
+                end_date: document.getElementById('f_end_date').value || null,
+                time: document.getElementById('f_time').value.trim(),
+                price: parseFloat(document.getElementById('f_price').value) || 0,
+                duration_days: document.getElementById('f_duration_days').value || null,
+                description: document.getElementById('f_description').value.trim(),
+                is_recurring: document.getElementById('f_is_recurring').checked,
+            });
+        } else if (PRODUCT_TYPE === 'Service') {
+            return Object.assign(base, {
+                name: document.getElementById('f_name').value.trim(),
+                description: document.getElementById('f_description').value.trim(),
+                price: document.getElementById('f_price').value || null,
+                duration: document.getElementById('f_duration').value.trim(),
+            });
+        } else {
+            return Object.assign(base, {
+                business_line_id: document.getElementById('f_business_line_id').value,
+                product_number: document.getElementById('f_product_number').value || null,
+                name: document.getElementById('f_name').value.trim(),
+                vendor: document.getElementById('f_vendor').value.trim(),
+                description: document.getElementById('f_description').value.trim(),
+                is_main_product: document.getElementById('f_is_main_product').checked,
+            });
+        }
+    }
+
+    // ── Wire up buttons ────────────────────────────────────
+    document.getElementById('addItemBtn').addEventListener('click', () => {
+        document.getElementById('itemModalTitle').textContent = 'Шинэ зүйл';
+        fillForm({});
+    });
+
+    document.querySelectorAll('.edit-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const row = btn.closest('tr');
+            const item = JSON.parse(row.dataset.item);
+            document.getElementById('itemModalTitle').textContent = (item.name || '—') + ' — засах';
+            fillForm(item);
+        });
+    });
+
+    document.getElementById('saveItemBtn').addEventListener('click', () => {
+        const payload = collectPayload();
+        if (!payload.name) { toast('Нэр шаардлагатай.', false); return; }
+        post(payload).then(r => {
+            if (r.success) location.reload();
+            else toast(r.error || 'Алдаа гарлаа.', false);
+        });
+    });
+
+    document.querySelectorAll('.toggle-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+            post({action: 'toggle', id: btn.dataset.id}).then(r => {
+                if (r.success) location.reload();
+                else toast(r.error || 'Алдаа гарлаа.', false);
+            });
+        });
+    });
+
+    document.querySelectorAll('.delete-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (!confirm(`"${btn.dataset.name}"-г устгах уу?`)) return;
+            post({action: 'delete', id: btn.dataset.id}).then(r => {
+                if (r.success) location.reload();
+                else toast(r.error || 'Алдаа гарлаа.', false);
+            });
+        });
+    });
+})();
+</script>
+{% endblock %}

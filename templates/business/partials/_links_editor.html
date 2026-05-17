@@ -1,0 +1,41 @@
+{# Shared multi-link editor used inside the item modal on the BU drill-in
+   page. The same partial is rendered for Course, Service, and Product
+   items. Rows have three editable fields plus an active toggle.
+
+   Producer: business_unit_detail() (routes/admin/business.py) — passes the
+   item's pre-serialized links as `data-links` on the trigger button.
+
+   Consumer JS lives in templates/business/unit_detail.html — it reads
+   data-links, calls addLinkRow() per row, and on save it gathers the rows
+   into a `links` array posted to /admin/courses, /admin/services, or
+   /admin/products depending on the BU's product_type. The receiving
+   handlers wholesale-replace the link rows for the item.
+#}
+<label class="form-label mt-2">Холбоосууд (тоо ямар ч байж болно)</label>
+<p class="text-muted small mb-2">
+    <code>description</code> — хэрэглэгчид харагдах нэр (жишээ нь "Бүртгэлийн форм").
+    <code>URL</code> — холбоосын хаяг. <code>note</code> — зөвхөн админд харагдах дотоод тэмдэглэл.
+</p>
+<div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" id="linksTable">
+        <thead class="table-light">
+            <tr>
+                <th class="col-w-24">Тайлбар</th>
+                <th>URL</th>
+                <th class="col-w-24">Тэмдэглэл (дотоод)</th>
+                <th class="col-w-8 text-center">Идэвхтэй</th>
+                <th class="col-w-8"><span class="visually-hidden">Үйлдэл</span></th>
+            </tr>
+        </thead>
+        <tbody id="linksBody">
+            <tr id="linksEmptyRow">
+                <td colspan="5" class="text-center text-muted small py-3">
+                    Одоогоор холбоос алга. Доорх "Холбоос нэмэх" товчоор нэмнэ үү.
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+<button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="addLinkBtn">
+    <i class="bi bi-plus-lg"></i> Холбоос нэмэх
+</button>

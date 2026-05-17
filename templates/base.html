@@ -408,40 +408,23 @@
                 </a>
             </nav>
 
-            {# ── ZONE 2 — Catalog: content the bot quotes (changes weekly) #}
-            <div class="nav-section">Каталог</div>
+            {# ── ZONE 2 — Business Management: what we sell + who sells it #}
+            <div class="nav-section">Бизнесийн удирдлага</div>
             <nav class="nav flex-column">
-                <a class="nav-link {% if request.endpoint == 'business_lines' %}active{% endif %}" href="{{ url_for('business_lines') }}">
+                <a class="nav-link {% if request.endpoint == 'business_management_general' %}active{% endif %}"
+                   href="{{ url_for('business_management_general') }}">
+                    <i class="bi bi-info-circle"></i> Ерөнхий мэдээлэл
+                </a>
+                <a class="nav-link {% if request.endpoint in ('business_management_units', 'business_unit_detail', 'business_lines', 'courses', 'services', 'products') %}active{% endif %}"
+                   href="{{ url_for('business_management_units') }}">
                     <i class="bi bi-diagram-3"></i> Бизнесийн нэгжүүд
                 </a>
-                {# Magic Choice → Courses #}
-                <div class="nav-sub-header">
-                    <i class="bi bi-mortarboard-fill"></i> Magic Choice
-                </div>
-                <a class="nav-link nav-sub {% if request.endpoint == 'courses' %}active{% endif %}" href="{{ url_for('courses') }}">
-                    <i class="bi bi-calendar-event"></i> Сургалтууд
+                <a class="nav-link {% if request.endpoint in ('business_management_employees', 'team') %}active{% endif %}"
+                   href="{{ url_for('business_management_employees') }}">
+                    <i class="bi bi-people"></i> Ажилтнууд
                 </a>
-                {# Magic Consulting Audit → Services #}
-                <div class="nav-sub-header">
-                    <i class="bi bi-clipboard2-check-fill"></i> Magic Consulting Audit
-                </div>
-                <a class="nav-link nav-sub {% if request.endpoint == 'services' %}active{% endif %}" href="{{ url_for('services') }}">
-                    <i class="bi bi-file-earmark-text"></i> Үйлчилгээнүүд
-                </a>
-                {# Magic Cloud now lives as a Product-typed business line — its software
-                   rows were migrated to product rows in Phase 1. Reach them from the
-                   Products page or (Phase 4) the Magic Cloud business unit drill-in. #}
-                {# Cross-line product catalog (Magic Finance + Microsoft + Kaspersky etc.) #}
-                <a class="nav-link nav-sub {% if request.endpoint == 'products' %}active{% endif %}" href="{{ url_for('products') }}">
-                    <i class="bi bi-collection"></i> Бүтээгдэхүүн ба License
-                </a>
-                {# Shared catalog items (cross-company) #}
-                <div class="nav-sub-header">
-                    <i class="bi bi-stack"></i> Хамтын
-                </div>
-                <a class="nav-link nav-sub {% if request.endpoint == 'team' %}active{% endif %}" href="{{ url_for('team') }}">
-                    <i class="bi bi-people"></i> Баг
-                </a>
+                {# FAQ moves to Bot Management in Phase 5; until then it stays
+                   reachable from the legacy /admin/faq URL. #}
                 <a class="nav-link nav-sub {% if request.endpoint == 'faq' %}active{% endif %}" href="{{ url_for('faq') }}">
                     <i class="bi bi-question-circle"></i> Түгээмэл асуулт
                 </a>

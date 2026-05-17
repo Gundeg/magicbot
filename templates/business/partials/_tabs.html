@@ -1,0 +1,22 @@
+{# Tab nav shared across the three Business Management pages.
+   `active_tab` is one of 'general' | 'units' | 'employees'. #}
+<ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'general' %}active{% endif %}"
+           href="{{ url_for('business_management_general') }}">
+            <i class="bi bi-info-circle"></i> Ерөнхий мэдээлэл
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'units' %}active{% endif %}"
+           href="{{ url_for('business_management_units') }}">
+            <i class="bi bi-diagram-3"></i> Бизнесийн нэгжүүд
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'employees' %}active{% endif %}"
+           href="{{ url_for('business_management_employees') }}">
+            <i class="bi bi-people"></i> Ажилтнууд
+        </a>
+    </li>
+</ul>

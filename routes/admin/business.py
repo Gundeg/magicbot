@@ -1,22 +1,338 @@
-"""Business catalog: business lines, courses, services, software, products, team.
+"""Business catalog: business lines, courses, services, products, team.
 
-Phase 4 will reorganize these under a new Business Management section with
-tabs (General / Units / Employees) and a BU drill-in page. Phase 1 folds
-Software into Product and unifies the link model across all item types.
+Phase 4 organizes these under a Business Management section with three tabs
+(General Information / Business Units / Employees) plus a per-BU drill-in
+page at /business-units/<id>. The drill-in renders an items grid whose form
+schema is chosen by the BU's `product_type` (Course | Service | Product).
+Every item type uses the same multi-link editor (description / url / note).
+
+Legacy URLs (/admin/business-lines, /admin/courses, /admin/services,
+/admin/products, /admin/team) remain as redirects or compatibility views
+until Phase 6 deletes them.
 """
-from flask import jsonify, render_template, request
+from datetime import datetime
+
+from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required
 from sqlalchemy.orm import joinedload
 
 from app import app
 from auth import admin_required
-from datetime import datetime
 from extensions import db
-from models import (BusinessLine, Course, Product, ProductLink, Service,
-                    TeamMember)
+from models import (BusinessLine, Course, CourseLink, GeneralSetting, Product,
+                    ProductLink, Service, ServiceLink, TeamMember)
 from services import (ALLOWED_COURSE_TYPES, SELF_PACED_COURSE_TYPE,
                       advance_recurring_courses, archive_past_courses,
                       log_admin_action)
+
+
+def _parse_links_payload(raw_links):
+    """Validate the `links` array from any item modal (Course / Service /
+    Product). Returns (cleaned_links, error_message_or_None). Empty rows
+    (no description AND no URL) are silently dropped so the admin can leave
+    a half-finished row without breaking the save."""
+    if raw_links is None:
+        return [], None
+    if not isinstance(raw_links, list):
+        return None, 'links талбар жагсаалт байх ёстой.'
+    cleaned = []
+    for i, link in enumerate(raw_links):
+        description = (link.get('description') or '').strip()
+        url = (link.get('url') or '').strip()
+        if not description and not url:
+            continue
+        if not description or not url:
+            return None, f'Холбоос #{i+1}: description болон URL хоёулаа шаардлагатай.'
+        cleaned.append({
+            'description': description[:200],
+            'url': url[:500],
+            'note': (link.get('note') or '').strip() or None,
+            'is_active': bool(link.get('is_active', True)),
+            'sort_order': int(link.get('sort_order') or i),
+        })
+    return cleaned, None
+
+
+# Settings keys that belong on the General Information tab. Phase 2 of the
+# admin IA reorg redistributed Settings; this is the Business Management
+# half. Bot config keys (handoff, hours, telegram) live in Bot Settings.
+BUSINESS_GENERAL_KEYS = (
+    'center_name',
+    'center_description',
+    'center_phone',
+    'center_email',
+    'center_address',
+    'main_office_address',
+    'main_office_phone',
+    'google_form_url',
+)
+
+
+# ===================== BUSINESS MANAGEMENT — tab landing pages =====================
+
+@app.route('/business-management')
+@login_required
+@admin_required
+def business_management():
+    return redirect(url_for('business_management_general'))
+
+
+@app.route('/business-management/general', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def business_management_general():
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        # Reject keys that don't belong on this tab so a stale or malicious
+        # client can't dump arbitrary settings via the General form.
+        allowed = {k: v for k, v in data.items() if k in BUSINESS_GENERAL_KEYS}
+        for key, value in allowed.items():
+            row = GeneralSetting.query.filter_by(key=key).first()
+            if row:
+                row.value = value
+            else:
+                row = GeneralSetting(key=key, value=value)
+                db.session.add(row)
+        db.session.commit()
+        log_admin_action(
+            'settings.save', 'setting', None, ', '.join(sorted(allowed.keys()))[:255],
+            detail=f'{len(allowed)} business-general key шинэчилсэн'
+        )
+        return jsonify({'success': True, 'saved': sorted(allowed.keys())})
+
+    settings_dict = {
+        s.key: s.value for s in GeneralSetting.query.filter(
+            GeneralSetting.key.in_(BUSINESS_GENERAL_KEYS)
+        ).all()
+    }
+    return render_template(
+        'business/general.html',
+        active_tab='general',
+        settings=settings_dict,
+        keys=BUSINESS_GENERAL_KEYS,
+    )
+
+
+@app.route('/business-management/units', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def business_management_units():
+    """List + CRUD for Business Units. Click a row's name to drill into
+    /business-units/<id> for that unit's items."""
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        action = data.get('action')
+
+        if action in ('add', 'edit'):
+            if action == 'add':
+                line = BusinessLine(is_active=True)
+                db.session.add(line)
+            else:
+                line = BusinessLine.query.get(data.get('id'))
+                if not line:
+                    return jsonify({'success': False}), 404
+            line.name = (data.get('name') or '').strip()
+            line.description = (data.get('description') or '').strip() or None
+            line.action = 'answer' if data.get('line_action') == 'answer' else 'refer'
+            line.contact_info = (data.get('contact_info') or '').strip() or None
+            line.status_note = (data.get('status_note') or '').strip() or None
+            line.address = (data.get('address') or '').strip() or None
+            line.email = (data.get('email') or '').strip() or None
+            pt = (data.get('product_type') or 'Product').strip()
+            if pt not in ('Course', 'Service', 'Product'):
+                db.session.rollback()
+                return jsonify({'success': False,
+                                'error': 'product_type Course/Service/Product байх ёстой.'}), 400
+            line.product_type = pt
+            raw_year = data.get('established_year')
+            if raw_year in (None, '', 'null'):
+                line.established_year = None
+            else:
+                try:
+                    line.established_year = int(raw_year)
+                except (TypeError, ValueError):
+                    db.session.rollback()
+                    return jsonify({'success': False,
+                                    'error': 'established_year бүхэл тоо байх ёстой.'}), 400
+            if not line.name:
+                db.session.rollback()
+                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
+            db.session.commit()
+            return jsonify({'success': True, 'id': line.id})
+
+        if action == 'toggle':
+            line = BusinessLine.query.get(data.get('id'))
+            if not line:
+                return jsonify({'success': False}), 404
+            line.is_active = not line.is_active
+            line.status_note = (data.get('status_note') or '').strip() or None
+            db.session.commit()
+            log_admin_action(
+                'business_line.toggle', 'business_line', line.id, line.name,
+                detail=('Идэвхжүүлсэн' if line.is_active else 'Түр зогсоосон') +
+                       (f". Тэмдэглэл: {line.status_note}" if line.status_note else '')
+            )
+            return jsonify({'success': True, 'is_active': line.is_active})
+
+        if action == 'delete':
+            line = BusinessLine.query.get(data.get('id'))
+            if not line:
+                return jsonify({'success': False}), 404
+            label, lid = line.name, line.id
+            db.session.delete(line)
+            db.session.commit()
+            log_admin_action('business_line.delete', 'business_line', lid, label, detail='Устгасан')
+            return jsonify({'success': True})
+
+        return jsonify({'success': False, 'error': 'unknown action'}), 400
+
+    lines = (BusinessLine.query
+             .order_by(BusinessLine.sort_order.asc(), BusinessLine.id.asc())
+             .all())
+    # Compute per-BU item counts for the row summary. Until Course/Service
+    # gain a business_line_id FK (deferred), we use product_type as the
+    # filter: a Course-typed BU's count is the total number of Courses.
+    counts = {
+        'Course': Course.query.count(),
+        'Service': Service.query.count(),
+    }
+    return render_template(
+        'business/units.html',
+        active_tab='units',
+        lines=lines,
+        item_counts=counts,
+    )
+
+
+@app.route('/business-management/employees', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def business_management_employees():
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        action = data.get('action')
+
+        if action == 'add':
+            member = TeamMember(
+                name=(data.get('name') or '').strip(),
+                role=(data.get('role') or '').strip() or None,
+                specialty=(data.get('specialty') or '').strip() or None,
+                bio=(data.get('bio') or '').strip() or None,
+                is_active=True,
+            )
+            if not member.name:
+                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
+            db.session.add(member)
+            db.session.commit()
+            return jsonify({'success': True, 'id': member.id})
+
+        if action == 'edit':
+            member = TeamMember.query.get(data.get('id'))
+            if not member:
+                return jsonify({'success': False}), 404
+            member.name = (data.get('name') or '').strip()
+            member.role = (data.get('role') or '').strip() or None
+            member.specialty = (data.get('specialty') or '').strip() or None
+            member.bio = (data.get('bio') or '').strip() or None
+            if not member.name:
+                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
+            db.session.commit()
+            return jsonify({'success': True})
+
+        if action == 'toggle':
+            member = TeamMember.query.get(data.get('id'))
+            if not member:
+                return jsonify({'success': False}), 404
+            member.is_active = not member.is_active
+            db.session.commit()
+            return jsonify({'success': True, 'is_active': member.is_active})
+
+        if action == 'delete':
+            member = TeamMember.query.get(data.get('id'))
+            if not member:
+                return jsonify({'success': False}), 404
+            db.session.delete(member)
+            db.session.commit()
+            return jsonify({'success': True})
+
+        return jsonify({'success': False, 'error': 'unknown action'}), 400
+
+    members = (TeamMember.query
+               .order_by(TeamMember.sort_order.asc(), TeamMember.id.asc())
+               .all())
+    return render_template(
+        'business/employees.html',
+        active_tab='employees',
+        members=members,
+    )
+
+
+# ===================== BU drill-in page =====================
+
+@app.route('/business-units/<int:bu_id>', methods=['GET'])
+@login_required
+@admin_required
+def business_unit_detail(bu_id):
+    """Per-BU page: collapsible detail card at top, items grid below.
+
+    Until Course/Service gain a business_line_id FK, the items grid lists
+    EVERY row of the matching type (i.e. a Course-typed BU shows every
+    course in the catalog, not just courses 'owned' by this BU). This is
+    acceptable today because Magic has one BU per product_type."""
+    line = BusinessLine.query.get_or_404(bu_id)
+
+    items = []
+    if line.product_type == 'Course':
+        items = (Course.query
+                 .options(joinedload(Course.links))
+                 .order_by(Course.is_active.desc(),
+                           Course.start_date.asc().nullsfirst(),
+                           Course.id.asc())
+                 .all())
+    elif line.product_type == 'Service':
+        items = (Service.query
+                 .options(joinedload(Service.links))
+                 .order_by(Service.is_active.desc(),
+                           Service.sort_order.asc(),
+                           Service.id.asc())
+                 .all())
+    elif line.product_type == 'Product':
+        items = (Product.query
+                 .options(joinedload(Product.links))
+                 .filter_by(business_line_id=line.id)
+                 .order_by(Product.is_active.desc(),
+                           Product.sort_order.asc(),
+                           Product.id.asc())
+                 .all())
+
+    # Pre-serialize each item's links so the JS modal can fill the link
+    # editor without a second round-trip. Same shape across types.
+    for item in items:
+        item._links_json = [
+            {
+                'description': l.description,
+                'url': l.url,
+                'note': l.note or '',
+                'is_active': bool(l.is_active),
+                'sort_order': l.sort_order,
+            }
+            for l in (item.links or [])
+        ]
+
+    return render_template(
+        'business/unit_detail.html',
+        line=line,
+        items=items,
+        ALLOWED_COURSE_TYPES=ALLOWED_COURSE_TYPES,
+        SELF_PACED_COURSE_TYPE=SELF_PACED_COURSE_TYPE,
+    )
+
+
+# Legacy item-CRUD endpoints (/admin/courses, /admin/services, /admin/products,
+# /admin/business-lines, /admin/team) stay below in this file. The new
+# Business Management pages POST to those same endpoints, so we don't need
+# parallel handlers. Phase 6 will delete them once nothing else references
+# them by URL.
 
 
 # ===================== COURSES =====================
@@ -113,8 +429,14 @@ def courses():
             fields, err = _parse_course_payload(data)
             if err:
                 return jsonify({'success': False, 'error': err}), 400
+            links, link_err = _parse_links_payload(data.get('links'))
+            if link_err:
+                return jsonify({'success': False, 'error': link_err}), 400
             course = Course(**fields)
             db.session.add(course)
+            db.session.flush()
+            for link in links:
+                db.session.add(CourseLink(course_id=course.id, **link))
             db.session.commit()
             return jsonify({'success': True, 'id': course.id})
 
@@ -125,8 +447,15 @@ def courses():
             fields, err = _parse_course_payload(data, existing=course)
             if err:
                 return jsonify({'success': False, 'error': err}), 400
+            links, link_err = _parse_links_payload(data.get('links'))
+            if link_err:
+                return jsonify({'success': False, 'error': link_err}), 400
             for key, value in fields.items():
                 setattr(course, key, value)
+            # Wholesale replace links on edit, same pattern as Product.
+            CourseLink.query.filter_by(course_id=course.id).delete()
+            for link in links:
+                db.session.add(CourseLink(course_id=course.id, **link))
             db.session.commit()
             return jsonify({'success': True})
 
@@ -187,11 +516,24 @@ def services():
             item.name = (data.get('name') or '').strip()
             item.description = (data.get('description') or '').strip() or None
             price_raw = data.get('price')
-            item.price = float(price_raw) if price_raw not in (None, '') else None
+            try:
+                item.price = float(price_raw) if price_raw not in (None, '') else None
+            except (TypeError, ValueError):
+                db.session.rollback()
+                return jsonify({'success': False, 'error': 'price тоон утга байх ёстой.'}), 400
             item.duration = (data.get('duration') or '').strip() or None
             if not item.name:
                 db.session.rollback()
                 return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
+            links, link_err = _parse_links_payload(data.get('links'))
+            if link_err:
+                db.session.rollback()
+                return jsonify({'success': False, 'error': link_err}), 400
+            db.session.flush()
+            # Wholesale replace links — same pattern as Product / Course.
+            ServiceLink.query.filter_by(service_id=item.id).delete()
+            for link in links:
+                db.session.add(ServiceLink(service_id=item.id, **link))
             db.session.commit()
             return jsonify({'success': True, 'id': item.id})
 

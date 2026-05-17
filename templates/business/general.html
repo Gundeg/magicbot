@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Ерөнхий мэдээлэл - Бизнесийн удирдлага{% endblock %}
+{% block page_title %}Бизнесийн удирдлага{% endblock %}
+
+{% block content %}
+{% include "business/partials/_tabs.html" %}
+
+<div id="bgToastContainer" class="position-fixed bottom-0 end-0 p-3 toast-stack"></div>
+
+<div class="alert alert-light border d-flex gap-2 align-items-start py-2 mb-3 fs-85">
+    <i class="bi bi-building mt-1 flex-shrink-0 text-brand"></i>
+    <div>
+        Энэ хэсэгт компанийн нийтлэг мэдээлэл хадгална: гол оффисын хаяг/утас, сургалтын
+        төвийн нэр, бүртгэлийн форм гэх мэт. Бот эдгээрийг өөрийн хариултанд иш татна.
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-info-circle"></i> Компанийн ерөнхий мэдээлэл
+    </div>
+    <div class="card-body">
+        <form id="generalForm" class="row g-3" autocomplete="off">
+            <div class="col-md-6">
+                <label class="form-label" for="center_name">Сургалтын төвийн нэр</label>
+                <input type="text" class="form-control" id="center_name" name="center_name"
+                       value="{{ settings.center_name or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="center_phone">Төвийн утас</label>
+                <input type="text" class="form-control" id="center_phone" name="center_phone"
+                       value="{{ settings.center_phone or '' }}">
+            </div>
+            <div class="col-md-12">
+                <label class="form-label" for="center_description">Төвийн тайлбар</label>
+                <textarea class="form-control" id="center_description" name="center_description"
+                          rows="3">{{ settings.center_description or '' }}</textarea>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="center_email">Төвийн имэйл</label>
+                <input type="email" class="form-control" id="center_email" name="center_email"
+                       value="{{ settings.center_email or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="center_address">Төвийн хаяг</label>
+                <input type="text" class="form-control" id="center_address" name="center_address"
+                       value="{{ settings.center_address or '' }}">
+            </div>
+
+            <div class="col-12"><hr class="my-2"></div>
+
+            <div class="col-md-6">
+                <label class="form-label" for="main_office_address">Гол оффисын хаяг</label>
+                <input type="text" class="form-control" id="main_office_address" name="main_office_address"
+                       value="{{ settings.main_office_address or '' }}">
+                <div class="form-text">Бизнесийн нэгж өөрийн хаяггүй бол энэ хаяг ашиглагдана.</div>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="main_office_phone">Гол оффисын утас</label>
+                <input type="text" class="form-control" id="main_office_phone" name="main_office_phone"
+                       value="{{ settings.main_office_phone or '' }}">
+            </div>
+
+            <div class="col-12"><hr class="my-2"></div>
+
+            <div class="col-md-12">
+                <label class="form-label" for="google_form_url">Нийтлэг бүртгэлийн форм (URL)</label>
+                <input type="url" class="form-control" id="google_form_url" name="google_form_url"
+                       value="{{ settings.google_form_url or '' }}">
+                <div class="form-text">Бот зориуд салангид холбоосгүй сургалт/үйлчилгээний хувьд эндэх линкийг иш татна.</div>
+            </div>
+
+            <div class="col-12 text-end">
+                <button type="submit" class="btn btn-brand">
+                    <i class="bi bi-save"></i> Хадгалах
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+(function () {
+    const url = '{{ url_for("business_management_general") }}';
+    const form = document.getElementById('generalForm');
+
+    function toast(msg, ok) {
+        const c = document.getElementById('bgToastContainer');
+        const el = document.createElement('div');
+        el.className = 'toast align-items-center text-white border-0 show shadow mb-2';
+        el.style.background = ok ? 'var(--brand-dark)' : '#dc3545';
+        el.innerHTML = `<div class="d-flex">
+            <div class="toast-body">${msg}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>`;
+        c.appendChild(el);
+        setTimeout(() => el.remove(), 4000);
+    }
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const data = {};
+        new FormData(form).forEach((v, k) => { data[k] = v; });
+        fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('meta[name=csrf-token]')?.content || ''},
+            body: JSON.stringify(data),
+        }).then(r => r.json()).then(r => {
+            if (r.success) toast('Хадгалсан: ' + (r.saved || []).join(', '), true);
+            else toast(r.error || 'Алдаа гарлаа', false);
+        }).catch(e => toast('Алдаа: ' + e, false));
+    });
+})();
+</script>
+{% endblock %}
