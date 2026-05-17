@@ -18,7 +18,7 @@ from models import AdminIssue, BusinessLine, FacebookUser, Message
 from services import (FACEBOOK_ACCESS_TOKEN, FACEBOOK_APP_SECRET,
                       classify_conversation, get_handoff_poll_payload,
                       get_setting, get_telegram_chat_ids, log_admin_action,
-                      refresh_facebook_user_name)
+                      refresh_facebook_user_name, take_over_chat)
 
 
 # How old an open issue must be before it surfaces on the Inbox as "aging".
@@ -226,13 +226,23 @@ def work_tasks():
             issue.resolved_at = datetime.utcnow()
             issue.updated_by_id = current_user.id
             issue.updated_at = datetime.utcnow()
+            # If the bot was muted via "Take Over" for this user, resolving
+            # the issue is the staff's "I'm done" signal — restore the bot
+            # so future messages from this customer are handled normally.
+            # Doesn't matter if the customer messages the bot a year later;
+            # this ensures a closed handoff issue doesn't leave the bot
+            # silenced indefinitely.
+            unmuted = False
+            if issue.facebook_user and issue.facebook_user.bot_muted_until:
+                issue.facebook_user.bot_muted_until = None
+                unmuted = True
             db.session.commit()
             log_admin_action(
                 'issue.status_change', 'issue', issue.id,
                 (issue.facebook_user.name if issue.facebook_user else None) or f'#{issue.id}',
-                detail='Work Tasks-аас шийдсэн'
+                detail='Work Tasks-аас шийдсэн' + (' + ботыг асаасан' if unmuted else '')
             )
-            return jsonify({'success': True})
+            return jsonify({'success': True, 'bot_unmuted': unmuted})
 
         if action == 'update_status':
             issue = AdminIssue.query.get(data.get('id'))
@@ -269,6 +279,26 @@ def work_tasks():
                 detail='Work Tasks-аас ботыг асаасан'
             )
             return jsonify({'success': True})
+
+        if action == 'take_over':
+            # Staff is taking over this chat — mute the bot for `hours`
+            # so the customer talks to the staff member directly via
+            # Facebook Page Inbox without bot interference. Default 4h
+            # if the admin didn't supply a duration.
+            issue = AdminIssue.query.get(data.get('id'))
+            if not issue or not issue.facebook_user:
+                return jsonify({'success': False, 'error': 'issue олдсонгүй'}), 404
+            try:
+                hours = int(data.get('hours') or 4)
+            except (TypeError, ValueError):
+                hours = 4
+            take_over_chat(issue.facebook_user, hours, actor_username=current_user.username)
+            log_admin_action(
+                'bot.take_over', 'facebook_user', issue.facebook_user.id,
+                issue.facebook_user.name or issue.facebook_user.facebook_id,
+                detail=f'{current_user.username} ботыг {hours}ц зогсоож яриаг хариуцлаа'
+            )
+            return jsonify({'success': True, 'muted_for_hours': hours})
 
         return jsonify({'success': False, 'error': 'unknown action'}), 400
 

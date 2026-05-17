@@ -270,6 +270,10 @@
                     <span class="text-muted">{{ issue.created_at.strftime('%m/%d %H:%M') }}</span>
                 </div>
                 <div class="actions">
+                    <button type="button" class="btn btn-sm btn-outline-warning takeover-btn" data-id="{{ issue.id }}"
+                            title="Би яриаг хариуцаж байна — ботыг 4 цаг зогсоох">
+                        <i class="bi bi-person-raised-hand"></i> Хариуцах
+                    </button>
                     <button type="button" class="btn btn-sm btn-outline-success resolve-btn" data-id="{{ issue.id }}" title="Шийдсэн гэж тэмдэглэх">
                         <i class="bi bi-check2-circle"></i> Шийдэх
                     </button>
@@ -317,6 +321,10 @@
                     <span class="text-muted">{{ issue.created_at.strftime('%m/%d %H:%M') }}</span>
                 </div>
                 <div class="actions">
+                    <button type="button" class="btn btn-sm btn-outline-warning takeover-btn" data-id="{{ issue.id }}"
+                            title="Би яриаг хариуцаж байна — ботыг 4 цаг зогсоох">
+                        <i class="bi bi-person-raised-hand"></i> Хариуцах
+                    </button>
                     <button type="button" class="btn btn-sm btn-outline-success resolve-btn" data-id="{{ issue.id }}" title="Шийдсэн гэж тэмдэглэх">
                         <i class="bi bi-check2-circle"></i> Шийдэх
                     </button>
@@ -415,6 +423,28 @@
                     fadeAndRemove(btn.closest('.wt-row'));
                 } else {
                     toast('Алдаа гарлаа.', false);
+                    btn.disabled = false;
+                }
+            });
+        });
+    });
+
+    document.querySelectorAll('.takeover-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const hours = prompt('Хэдэн цагийн турш ботыг зогсоох вэ? (анхдагч: 4)', '4');
+            if (hours === null) return;
+            const n = parseInt(hours, 10);
+            if (isNaN(n) || n < 1 || n > 168) {
+                toast('1-168 цагийн хооронд тоо оруулна уу.', false);
+                return;
+            }
+            btn.disabled = true;
+            post({action: 'take_over', id: btn.dataset.id, hours: n}).then(r => {
+                if (r.success) {
+                    toast(`Бот ${r.muted_for_hours}ц зогссон. Та хариуцаж байна.`, true);
+                    fadeAndRemove(btn.closest('.wt-row'));
+                } else {
+                    toast(r.error || 'Алдаа гарлаа.', false);
                     btn.disabled = false;
                 }
             });

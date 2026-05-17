@@ -17,8 +17,9 @@ from services import (PHONE_RE, bot_response_implies_handoff,
                       check_rate_limit, classify_conversation,
                       classify_session, detect_funnel_stage, first_name_of,
                       generate_bot_response, get_facebook_user_info,
-                      refresh_facebook_user_name, send_facebook_message,
-                      should_handoff, trigger_handoff,
+                      is_in_handoff, refresh_facebook_user_name,
+                      send_facebook_message, should_handoff,
+                      trigger_handoff,
                       verify_facebook_signature, FACEBOOK_APP_SECRET,
                       RATE_LIMIT_REPLY)
 
@@ -104,17 +105,35 @@ def webhook():
                     db.session.commit()
 
                     now = datetime.utcnow()
+                    # Three states for the bot's relationship to this user:
+                    #   1) Normal           — no handoff, no mute. Bot does
+                    #      its usual sales/help thing.
+                    #   2) Advisory mode    — open handoff AdminIssue. Bot
+                    #      keeps replying with full catalog help but won't
+                    #      push for phone/registration again. Drives
+                    #      handoff_pending=True into the prompt.
+                    #   3) Staff takeover   — bot_muted_until in the future
+                    #      (set explicitly via the admin "Take Over"
+                    #      button). Bot is silent so staff can chat
+                    #      directly via Facebook Page Inbox without bot
+                    #      interference.
                     if fb_user.bot_muted_until and fb_user.bot_muted_until > now:
+                        # State 3: staff is handling this person, silent drop.
                         continue
-
                     if fb_user.bot_muted_until and fb_user.bot_muted_until <= now:
+                        # Mute window expired; reset and continue normally.
                         fb_user.bot_muted_until = None
                         db.session.commit()
+                    handoff_pending = is_in_handoff(fb_user)
 
-                    handoff, reason = should_handoff(message_text, fb_user)
-                    if handoff:
-                        trigger_handoff(fb_user, reason, message_text)
-                        continue
+                    # Skip the keyword-handoff check if the user is already
+                    # in advisory mode — they've been routed to staff
+                    # already, no need to trigger again.
+                    if not handoff_pending:
+                        handoff, reason = should_handoff(message_text, fb_user)
+                        if handoff:
+                            trigger_handoff(fb_user, reason, message_text)
+                            continue
 
                     history = Message.query.filter_by(facebook_user_id=fb_user.id).order_by(Message.created_at).all()
                     conversation = [
@@ -128,6 +147,7 @@ def webhook():
                         session_state=session_state,
                         funnel_stage=fb_user.funnel_stage or 'curious',
                         user_first_name=first_name_of(fb_user.name),
+                        handoff_pending=handoff_pending,
                     )
 
                     bot_msg = Message(
@@ -146,14 +166,18 @@ def webhook():
                     # standard handoff user-message since the bot already
                     # sent one. Catches every staff-deferral path,
                     # whether or not a user keyword matched earlier.
-                    deferral_phrase = bot_response_implies_handoff(bot_response)
-                    if deferral_phrase:
-                        trigger_handoff(
-                            fb_user,
-                            f'bot_deferral:{deferral_phrase}',
-                            message_text,
-                            send_user_message=False,
-                        )
+                    # Skipped in advisory mode: the user is already in
+                    # handoff and the advisory rule should keep the bot
+                    # from emitting deferral phrases anyway.
+                    if not handoff_pending:
+                        deferral_phrase = bot_response_implies_handoff(bot_response)
+                        if deferral_phrase:
+                            trigger_handoff(
+                                fb_user,
+                                f'bot_deferral:{deferral_phrase}',
+                                message_text,
+                                send_user_message=False,
+                            )
 
                     try:
                         classify_conversation(fb_user)

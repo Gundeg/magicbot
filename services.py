@@ -313,6 +313,7 @@ def ensure_schema():
         'last_nudge_at': 'last_nudge_at DATETIME',
         'bot_muted_until': 'bot_muted_until DATETIME',
         'conversation_topic': 'conversation_topic VARCHAR(100)',
+        'last_mute_ack_at': 'last_mute_ack_at DATETIME',
     })
 
     add_columns('admin_issue', {
@@ -640,13 +641,50 @@ def get_handoff_sensitivity():
 
 
 def get_mute_duration_hours():
-    """How long the bot stays silent after a handoff is triggered."""
-    raw = (get_setting('mute_duration_hours', '2') or '2').strip()
+    """How long the bot stays silent after a handoff is triggered.
+
+    Default is 0 (no auto-mute): bot enters advisory mode after handoff
+    and continues helping the customer. Staff manually takes over via
+    the admin "Take Over" button when ready. Set this to >0 only if you
+    want the bot to also fall silent automatically on every handoff."""
+    raw = (get_setting('mute_duration_hours', '0') or '0').strip()
     try:
         hours = int(raw)
     except ValueError:
-        hours = 2
+        hours = 0
     return max(0, min(hours, 168))  # clamp 0..7 days
+
+
+def is_in_handoff(fb_user):
+    """True if there's an open handoff AdminIssue for this user. Used to
+    drive advisory mode in the bot prompt — distinct from bot_muted_until
+    which only fires when a staff member has manually taken over the
+    chat."""
+    if fb_user is None:
+        return False
+    return AdminIssue.query.filter_by(
+        facebook_user_id=fb_user.id,
+        issue_type='handoff',
+        status='open',
+    ).first() is not None
+
+
+def take_over_chat(fb_user, hours, actor_username=None):
+    """Staff "I'm taking over this conversation" action. Mutes the bot
+    for `hours`, transitions the open handoff issue to 'in_progress',
+    and logs the action. Called from the admin Work Tasks UI."""
+    hours = max(1, min(int(hours or 4), 168))
+    fb_user.bot_muted_until = datetime.utcnow() + timedelta(hours=hours)
+    issue = AdminIssue.query.filter_by(
+        facebook_user_id=fb_user.id,
+        issue_type='handoff',
+        status='open',
+    ).order_by(AdminIssue.created_at.desc()).first()
+    if issue:
+        issue.status = 'in_progress'
+        issue.updated_at = datetime.utcnow()
+    db.session.commit()
+    return issue
 
 
 def get_telegram_chat_ids():
@@ -893,8 +931,9 @@ def _format_current_time_block():
     )
 
 
-def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name=''):
-    """Build system prompt with training, FAQ, session-state and funnel context."""
+def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name='', handoff_pending=False):
+    """Build system prompt with training, FAQ, session-state, funnel,
+    and (optionally) handoff-advisory context."""
     training = get_training_content()
     persona = get_bot_persona()
     current_time_block = _format_current_time_block()
@@ -1000,7 +1039,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
 
 {registration_block}{name_block}{funnel_rule}
 
-БОРЛУУЛАЛТЫН ЗАН ҮЙЛ (туршлагатай зөвлөгчийн загвар — найрсаг, тулгахгүй):
+{(HANDOFF_ADVISORY_RULE + chr(10) + chr(10)) if handoff_pending else ''}БОРЛУУЛАЛТЫН ЗАН ҮЙЛ (туршлагатай зөвлөгчийн загвар — найрсаг, тулгахгүй):
 
 A. ИДЭВХТЭЙ СОНСОЛТ:
    Хэрэглэгчийн өгсөн гол үг/санааг хариултынхаа эхэнд 1 өгүүлбэрээр буцааж
@@ -1139,14 +1178,40 @@ def analyze_and_comment_on_post(post_content):
 
 # ===================== HANDOFF FLOW =====================
 
+# Better wording for the first reply when handoff fires: explicit ETA,
+# phone-shortcut, and warm tone. The bot stays available to keep chatting
+# afterward (advisory mode — see HANDOFF_ADVISORY_RULE below).
 HANDOFF_USER_REPLY = (
-    "Таны асуултыг манай ажилтан хариуцаж авлаа. Удахгүй холбогдох болно. "
-    "Түр хүлээгээрэй 🙏"
+    "Таны асуултыг хүлээж авлаа 🙏 Манай ажилтанд дамжуулсан тул удахгүй "
+    "(ажлын цагт ердийн 10-30 минутын дотор) тантай эргэж холбогдох болно. "
+    "Та энэ хооронд асуулт асууж, надтай үргэлжлүүлэн ярилцаж болно — "
+    "ажилтан ирэхэд тантай шууд холбогдоно."
 )
 HANDOFF_USER_REPLY_OFF_HOURS = (
-    "Таны мессежийг хүлээн авлаа. Одоогоор ажлын цаг биш байна. "
-    "Манай ажилтан маргааш ажлын цагт ({start}:00 – {end}:00) тантай холбогдох болно. "
-    "Уучлаарай, тав тухтай амраарай 🌙"
+    "Таны мессежийг хүлээж авлаа 🌙 Одоогоор ажлын цаг ({start}:00 – {end}:00) "
+    "дууссан тул ажилтан маргааш ажлын цагт хариулна. Та энэ хооронд асуулт "
+    "асууж, надтай үргэлжлүүлэн ярилцаж болно."
+)
+
+# Injected into the system prompt when the user is in a handoff window
+# (bot_muted_until > now). Tells the bot to keep helping the customer
+# without re-routing them to staff again — that step has already fired.
+HANDOFF_ADVISORY_RULE = (
+    "ХАНДОФФ ХҮЛЭЭЛТИЙН ГОРИМ (advisory):\n"
+    "Энэ хэрэглэгч аль хэдийн ажилтанд дамжуулагдсан. Ажилтан удахгүй "
+    "(ажлын цагт ~10-30 минутын дотор) тантай холбогдох болно.\n"
+    "Энэ горимд:\n"
+    "  • Хэрэглэгчийн шинэ асуултанд ердийн адил тусла — анги, үнэ, "
+    "хуваарь, сургалтын агуулга, FAQ-ийн бусад асуултын талаар үргэлж "
+    "хариул.\n"
+    "  • Гэхдээ 'утасны дугаараа үлдээгээрэй', 'ажилтан тантай эргэж "
+    "холбогдоно', 'манай мэргэжлийн ажилтан' гэх мэт чиглүүлгийг ДАХИН "
+    "БҮҮ ТАВЬ — хэрэглэгч аль хэдийн дараалалд орсон.\n"
+    "  • Хариултын төгсгөлд богино сануулга нэмж болно ("
+    "жишээ: 'Ажилтан удахгүй холбогдоно — энэ хооронд яриагаа үргэлжлүүл'). "
+    "Хэдхэн хариултанд нэг л удаа давтаж, спам бүү бол.\n"
+    "  • Хэрэв хэрэглэгч 'хэзээ хариулах вэ?', 'хэн хариулдаг вэ?' гэх "
+    "мэт асуулт асуувал ажлын цагийн доторх ETA-г шулуун хэлж тайвшруул."
 )
 
 
@@ -1277,13 +1342,21 @@ def invalidate_handoff_poll_cache():
 
 
 def trigger_handoff(fb_user, reason, user_message, send_user_message=True):
-    """Run the full handoff flow: mute the bot for the configured window,
-    create an AdminIssue, ping admins via Telegram, optionally send the
-    user a polite waiting message. Safe to call inside the webhook handler.
+    """Signal that this customer needs staff attention: create an AdminIssue
+    (with type='handoff'), ping Telegram, and optionally send the user a
+    polite waiting message. The bot stays in advisory mode after this — it
+    keeps helping the customer without re-routing them to staff — until
+    either a staff member manually "takes over" the chat (separate action
+    that sets bot_muted_until) or the admin marks the issue resolved.
 
     Pass `send_user_message=False` when the bot has already sent the
-    customer a deferring reply (see _bot_response_implies_handoff) so the
-    user doesn't receive two back-to-back messages."""
+    customer a deferring reply (see bot_response_implies_handoff) so the
+    user doesn't receive two back-to-back messages.
+
+    Auto-mute on handoff is opt-in via the mute_duration_hours setting:
+    leave it at 0 (default) for the staff-takeover workflow where the
+    bot stays available; set it > 0 only if you want immediate silence
+    after every handoff."""
     hours = get_mute_duration_hours()
     if hours > 0:
         fb_user.bot_muted_until = datetime.utcnow() + timedelta(hours=hours)

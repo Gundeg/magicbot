@@ -32,6 +32,10 @@ class FacebookUser(db.Model):
     funnel_stage = db.Column(db.String(30), default='curious')
     # Last time we sent a proactive nudge (kept null until first nudge fires)
     last_nudge_at = db.Column(db.DateTime)
+    # Last time we sent a "still in queue" reassurance during a handoff
+    # mute window. Used to rate-limit the auto-ack so the user feels
+    # acknowledged without getting spammed.
+    last_mute_ack_at = db.Column(db.DateTime)
     # When set and > now(), the bot will not auto-reply to this user — a human
     # has been pinged and should take over. Cleared automatically once expired.
     bot_muted_until = db.Column(db.DateTime)
