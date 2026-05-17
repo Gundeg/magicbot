@@ -408,60 +408,31 @@
                 </a>
             </nav>
 
-            {# ── ZONE 2 — Business Management: what we sell + who sells it #}
-            <div class="nav-section">Бизнесийн удирдлага</div>
+            {# ── Section parents collapsed to a single link each.
+               Within-section navigation uses the tabs partial that each
+               section's templates include at the top of their content
+               (templates/business/partials/_tabs.html, bot/.../_tabs.html,
+               system/.../_tabs.html). Sidebar shows a single entry per
+               section, the active state lights up whenever the admin is
+               on ANY page belonging to that section. #}
+
+            <div class="nav-section">Бизнес & бот</div>
             <nav class="nav flex-column">
-                <a class="nav-link {% if request.endpoint == 'business_management_general' %}active{% endif %}"
+                <a class="nav-link {% if request.endpoint in ('business_management', 'business_management_general', 'business_management_units', 'business_management_employees', 'business_unit_detail', 'business_lines', 'courses', 'services', 'products', 'team') %}active{% endif %}"
                    href="{{ url_for('business_management_general') }}">
-                    <i class="bi bi-info-circle"></i> Ерөнхий мэдээлэл
+                    <i class="bi bi-building"></i> Бизнесийн удирдлага
                 </a>
-                <a class="nav-link {% if request.endpoint in ('business_management_units', 'business_unit_detail', 'business_lines', 'courses', 'services', 'products') %}active{% endif %}"
-                   href="{{ url_for('business_management_units') }}">
-                    <i class="bi bi-diagram-3"></i> Бизнесийн нэгжүүд
-                </a>
-                <a class="nav-link {% if request.endpoint in ('business_management_employees', 'team') %}active{% endif %}"
-                   href="{{ url_for('business_management_employees') }}">
-                    <i class="bi bi-people"></i> Ажилтнууд
-                </a>
-            </nav>
-
-            {# ── ZONE 3 — Bot Management: tune the AI #}
-            <div class="nav-section">Ботын удирдлага</div>
-            <nav class="nav flex-column">
-                <a class="nav-link {% if request.endpoint in ('bot_management_training', 'training') %}active{% endif %}"
-                   href="{{ url_for('bot_management_training') }}">
-                    <i class="bi bi-cpu"></i> AI сургалт
-                </a>
-                <a class="nav-link {% if request.endpoint in ('bot_management_handover', 'handoff_keywords') %}active{% endif %}"
-                   href="{{ url_for('bot_management_handover') }}">
-                    <i class="bi bi-tags"></i> Дамжуулах түлхүүр үгс
-                </a>
-                <a class="nav-link {% if request.endpoint in ('bot_management_faqs', 'faq') %}active{% endif %}"
-                   href="{{ url_for('bot_management_faqs') }}">
-                    <i class="bi bi-question-circle"></i> FAQ
-                </a>
-                <a class="nav-link {% if request.endpoint in ('bot_management_settings', 'settings') %}active{% endif %}"
+                <a class="nav-link {% if request.endpoint in ('bot_management', 'bot_management_training', 'bot_management_handover', 'bot_management_faqs', 'bot_management_settings', 'training', 'handoff_keywords', 'faq', 'settings') %}active{% endif %}"
                    href="{{ url_for('bot_management_settings') }}">
-                    <i class="bi bi-sliders"></i> Ботын тохиргоо
+                    <i class="bi bi-robot"></i> Ботын удирдлага
                 </a>
             </nav>
 
-            {# ── ZONE 4 — System: setup, touched rarely #}
-            {# Settings link removed: the page is now split across
-               Business Management → General Info (business fields) and
-               Bot Management → Bot Settings (bot-config fields). The
-               legacy /admin/settings URL still works with a deprecation
-               banner for any in-flight client code. #}
             <div class="nav-section">Систем</div>
             <nav class="nav flex-column">
-                <a class="nav-link {% if request.endpoint == 'admins' %}active{% endif %}" href="{{ url_for('admins') }}">
-                    <i class="bi bi-shield-lock"></i> Админ хэрэглэгчид
-                </a>
-                <a class="nav-link {% if request.endpoint == 'audit_log' %}active{% endif %}" href="{{ url_for('audit_log') }}">
-                    <i class="bi bi-clock-history"></i> Үйлдлийн түүх
-                </a>
-                <a class="nav-link {% if request.endpoint == 'docs' %}active{% endif %}" href="{{ url_for('docs') }}">
-                    <i class="bi bi-file-text"></i> Баримт бичиг
+                <a class="nav-link {% if request.endpoint in ('admins', 'audit_log', 'docs') %}active{% endif %}"
+                   href="{{ url_for('admins') }}">
+                    <i class="bi bi-gear-wide-connected"></i> Систем
                 </a>
             </nav>
 

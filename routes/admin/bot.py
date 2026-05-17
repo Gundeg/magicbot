@@ -44,7 +44,10 @@ BOT_SETTINGS_KEYS = (
 @login_required
 @admin_required
 def bot_management():
-    return redirect(url_for('bot_management_training'))
+    # Lands on Bot Settings tab — admins tune handoff sensitivity /
+    # Telegram alerts / office hours more often than they retrain the
+    # persona, so the most-touched tab is the most useful default.
+    return redirect(url_for('bot_management_settings'))
 
 
 @app.route('/bot-management/training')
