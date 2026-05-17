@@ -65,18 +65,14 @@
                 <div class="card-header">Гарчиг</div>
                 <div class="card-body doc-toc small">
                     <a href="#m-overview">1. Танилцуулга</a>
-                    <a href="#m-dashboard">2. Dashboard</a>
-                    <a href="#m-leads">3. Лидүүд</a>
-                    <a href="#m-issues">4. Handoff & Issues</a>
-                    <a href="#m-logs">5. Чатын лог</a>
-                    <a href="#m-courses">6. Сургалтын анги</a>
-                    <a href="#m-faq">7. FAQ</a>
-                    <a href="#m-training">8. Ботын сургалт</a>
-                    <a href="#m-team">9. Багийн гишүүд</a>
-                    <a href="#m-business">10. Бусад үйлчилгээ</a>
-                    <a href="#m-settings">11. Settings</a>
-                    <a href="#m-admins">12. Админ хэрэглэгчид</a>
-                    <a href="#m-troubleshooting">13. Алдааны шийдэл</a>
+                    <a href="#m-dashboard">2. Хяналтын самбар</a>
+                    <a href="#m-work-tasks">3. Ажлын даалгавар</a>
+                    <a href="#m-logs">4. Мессежийн түүх</a>
+                    <a href="#m-business-mgmt">5. Бизнесийн удирдлага</a>
+                    <a href="#m-bot-mgmt">6. Ботын удирдлага</a>
+                    <a href="#m-system">7. Систем</a>
+                    <a href="#m-handoff">8. Handoff урсгал</a>
+                    <a href="#m-troubleshooting">9. Алдааны шийдэл</a>
                 </div>
             </div>
         </div>
@@ -88,186 +84,171 @@
 <h4 id="m-overview" class="doc-section">1. Танилцуулга</h4>
 <p>
     Magic Bot бол Facebook Page чатанд ирсэн мессежид AI-аар автоматаар хариулдаг систем.
-    Та энэ админ панелаас ботын зан төлвийг тохируулж, лид, асуудал, мессежийн бүртгэлийг харж,
-    зайлшгүй шаардлагатай үед өөрөө гар оруулж болно.
+    Та энэ админ панелаас ботын зан төлвийг тохируулж, ажлын даалгавар (work tasks)-аа удирдаж,
+    шаардлагатай үед өөрөө гар оруулж болно.
+</p>
+<p>
+    <strong>Гол санаа:</strong> бот энгийн асуултанд хариулна, тодорхойгүй эсвэл өндөр үнэ цэнэтэй
+    асуултанд ажилтанд дамжуулна (handoff), Telegram-аар тантай холбогдоно. Та бэлэн болсон үед
+    "Хариуцах" товчоор яриаг өөрөө авч болно.
 </p>
 <p class="mb-0">
-    <strong>Гол санаа:</strong> бот 80% энгийн асуултанд хариулна, үлдсэн 20%-д (гомдол, ажилтантай шууд
-    ярих хүсэлт г.м.) Telegram-аар тантай холбогдоно.
+    <strong>Сайдбарын бүтэц:</strong> Өдөр тутмын ажил (Dashboard / Ажлын даалгавар / Мессежийн түүх) ·
+    Бизнес & бот (Бизнесийн удирдлага / Ботын удирдлага) · Систем.
 </p>
 
-<h4 id="m-dashboard" class="doc-section">2. Dashboard</h4>
-<p>Дөрвөн үндсэн үзүүлэлт:</p>
+<h4 id="m-dashboard" class="doc-section">2. Хяналтын самбар</h4>
+<p>Үндсэн үзүүлэлтүүд:</p>
 <ul>
     <li><strong>Leads</strong> — утсаа үлдээсэн нийт лидийн тоо.</li>
     <li><strong>Open Issues</strong> — шийдэгдээгүй handoff болон бусад асуудал.</li>
-    <li><strong>Total Messages</strong> — ботоор дамжсан нийт мессеж.</li>
     <li><strong>Hot Prospects</strong> — үнэ асуусан, бүртгүүлэх хүсэлтэй болсон ч утсаа үлдээгээгүй хэрэглэгчид.</li>
+    <li><strong>System health</strong> — OpenAI / Facebook / Telegram холболт тус бүрийн төлөв.</li>
 </ul>
 
-<h4 id="m-leads" class="doc-section">3. Лидүүд (<code>/admin/leads</code>)</h4>
-<p>Хоёр таб:</p>
-<h5>3.1 Бүртгэгдсэн лид</h5>
+<h4 id="m-work-tasks" class="doc-section">3. Ажлын даалгавар <small class="text-muted">(<code>/admin/work-tasks</code>)</small></h4>
 <p>
-    Утсаа чатанд бичсэн хэрэглэгчид. Ботын дугаар таних регекс <code>(?:\+?976[\s-]?)?[89]\d{7}</code>
-    (Монгол утасны 8 оронтой 8/9-р эхлэх дугаар) ашигладаг. Утас илэрсэн даруйд <code>is_lead = True</code>
-    болж, "Холбогдсон" төлөвт орно.
-</p>
-<h5>3.2 Халуун сонирхогч (Hot Prospects)</h5>
-<p>
-    Үнэ асуусан буюу бүртгүүлэх хүсэлтэй боллоо гэх сигнал илгээсэн ч утсаа үлдээгээгүй хэрэглэгчид.
-    Тэдний сүүлд бичсэн мессеж, цаг, нийт мессежийн тоог харж өөрсдөө идэвхтэй холбогдох боломжтой.
-</p>
-<h5>3.3 Нэр шинэчлэх</h5>
-<p>
-    "Unknown" нэртэй хэрэглэгчид байвал "Нэр шинэчлэх" товчоор Facebook-аас дахин татаж болно.
-    Хэрэглэгчийн нэр анх амжилтгүй татагдсан (Facebook апп Development mode-д байсан гэх мэт)
-    тохиолдолд хэрэглэгддэг.
-</p>
-
-<h4 id="m-issues" class="doc-section">4. Handoff & Issues (<code>/admin/issues</code>)</h4>
-<h5>4.1 Handoff гэж юу вэ</h5>
-<p>
-    Бот хэрэглэгчид өөрөө хариулж чадахгүй гэж шийдсэн үед "ажилтан холбогдоно" гэж хариулаад,
-    автомат хариултаа тогтоосон цагаар (анхдагч 2 цаг) зогсооно. Хэрэглэгчийн асуултыг тус хуудсанд
-    issue болгон бүртгэж, Telegram-аар админ багт мэдэгдэнэ.
-</p>
-<h5>4.2 Бот чимээгүй болсон хэрэглэгчид</h5>
-<p>
-    Хуудсын дээд хэсэгт байгаа шар картанд handoff авсан, одоо ботын автомат хариулт нь түр зогссон
-    хэрэглэгчид харагдана. Танд цаг хүлээх шаардлагагүй болсон тохиолдолд <strong>"Bot-ыг асаах"</strong>
-    товчоор автомат хариултыг шууд сэргээж болно (тестийн үед маш хэрэгтэй).
-</p>
-<h5>4.3 Issue-н төлөв</h5>
-<p>
-    Issue нь Open / In Progress / Resolved төлөвтэй. Та шаардлагатай үедээ status-ийг гараар сольж болно.
-</p>
-
-<h4 id="m-logs" class="doc-section">5. Чатын лог (<code>/admin/logs</code>)</h4>
-<p>
-    Сүүлийн 100 мессежийг хугацааны эсрэг дарааллаар харуулна. Хайх талбараас тодорхой нэр, утсаар хайх
-    боломжтой. "Export Logs" товчоор CSV болгож татаж авч болно.
-</p>
-
-<h4 id="m-courses" class="doc-section">6. Сургалтын анги (<code>/admin/courses</code>)</h4>
-<p>
-    Бот үе шатанд тохирсон анги санал болгохын тулд энэ жагсаалтыг ашиглана. Анги нэмэхдээ:
+    Өмнөх Inbox / Лидүүд / Асуудлууд гэсэн гурван хуудас энэ нэг хуудаст таб болж нэгдсэн. Таб бүр:
 </p>
 <ul>
-    <li><strong>Course Name</strong> — бүтэн нэр (жишээ: "Нягтлан-Нярвын хосолсон сургалт — Танхим")</li>
-    <li><strong>Course Type</strong> — 100% Online / Hybrid / Online with Teacher / Classroom</li>
-    <li><strong>Start Date, Time, Price</strong> — анги эхлэх огноо, цаг, төлбөр</li>
-    <li><strong>Description</strong> — товч тайлбар (бот эндээс эшилж хариулна)</li>
+    <li><strong>Халуун сонирхогч</strong> — үнэ/ready үе шатанд орсон ч утсаа өгөөгүй хэрэглэгчид. "Холбогдсон" товчоор гараар тэмдэглэнэ.</li>
+    <li><strong>Лидүүд</strong> — утсаа үлдээсэн бүх лид (хайлт, ангилал, CSV экспорт).</li>
+    <li><strong>Нээлттэй асуудлууд</strong> — бүх нээлттэй issue. Тус бүрт <em>Хариуцах</em> ба <em>Шийдэх</em> товчтой.</li>
+    <li><strong>Удаан асуудлууд</strong> — <code>INBOX_AGING_HOURS</code> (анхдагч 12)-аас удсан нээлттэй issue-ууд.</li>
+    <li><strong>Бот зогссон</strong> — staff "Хариуцах" товчоор ботыг чимээгүй болгосон хэрэглэгчид. "Bot асаах" товчоор шууд сэргээнэ.</li>
 </ul>
-
-<h4 id="m-faq" class="doc-section">7. FAQ (<code>/admin/faq</code>)</h4>
-<p>
-    Түгээмэл асуулт-хариултыг бот системийн заавартай хамт уншиж хариулна. Категориудаар нь ангилж бичих
-    нь хайхад илүү тохиромжтой. Шинэ асуулт олон удаа давтагдах юм бол FAQ болгож нэмж бай.
+<p class="mb-0">
+    Хуучин <code>/admin/inbox</code>, <code>/admin/leads</code>, <code>/admin/issues</code> URL-ууд энэ хуудас руу 301 redirect-ээр шилжүүлэгдсэн.
 </p>
 
-<h4 id="m-training" class="doc-section">8. Ботын сургалт (<code>/admin/training</code>)</h4>
-<p>Гурван хэсэгтэй:</p>
-<h5>8.1 Persona (Дүр)</h5>
+<h4 id="m-logs" class="doc-section">4. Мессежийн түүх <small class="text-muted">(<code>/admin/logs</code>)</small></h4>
 <p>
-    Ботын "хэн би вэ" гэдэг танилцуулга. Жишээ: "Та Мэжик Санхүүгийн Группын Facebook чат туслах..."
-    Энэ нь системийн зааварчилгааны эхний өгүүлбэр. Аяг ширэгийг хэрхэн авч явахыг тодорхойлно.
+    Сүүлийн 100 мессежийг хугацааны эсрэг дарааллаар харуулна. Pagination нь <code>before_id</code>
+    cursor ашигладаг. Хэрэглэгчийн нэр дээр дарж ярианы дэлгэрэнгүй (<code>/admin/users/&lt;id&gt;/conversation</code>)
+    рүү очно.
 </p>
-<h5>8.2 Суурь агуулга (Base intro)</h5>
+
+<h4 id="m-business-mgmt" class="doc-section">5. Бизнесийн удирдлага</h4>
+<p>Сайдбараас "Бизнесийн удирдлага" дээр дарвал гурван таб гарна:</p>
+<h5>5.1 Ерөнхий мэдээлэл <small class="text-muted">(<code>/business-management/general</code>)</small></h5>
 <p>
-    Компанийн ерөнхий танилцуулга — 1 удаа бичдэг урт блок. Энд бизнесийн талаарх ерөнхий мэдээллийг
-    бичнэ. Хоосон үлдээвэл Render-ийн <code>TRAINING_CONTENT</code> орчны хувьсагч, эсвэл
-    <code>pasted_content.txt</code> файл ашиглагдана.
+    Гол оффис, төвийн нэр/имэйл/утас/хаяг, бүртгэлийн нийтлэг форм URL. Хуучин Settings хуудсаас тэдгээр
+    талбарууд энд шилжсэн. Бот хариултдаа эдгээрийг иш татаж ашиглана.
 </p>
-<h5>8.3 Нэмэлт тайлбарууд (Snippets)</h5>
+<h5>5.2 Бизнесийн нэгжүүд <small class="text-muted">(<code>/business-management/units</code>)</small></h5>
 <p>
-    <strong>Энэ хэсэг хамгийн чухал</strong>. Бодит чатанд бот алдаа хийх бүрд энд нэг шинэ snippet
-    нэмж бай. Жишээ:
+    Magic Choice (сургалт), Magic Consulting Audit (аудит, татвар), Magic Cloud (програм) — бизнесийн
+    нэгж бүрд "Хариулах / Чиглүүлэх" зан, төрөл (Course / Service / Product), холбоо барих,
+    тайлбар бичнэ. <strong>Нэгжийн нэр</strong> дээр дарж дотогш орвол:
 </p>
 <ul>
-    <li>"PocketZero-оор төлөх дэлгэрэнгүй" (Гарчиг)</li>
-    <li>"Төлбөр" (Ангилал)</li>
-    <li>"Өндөр" эсвэл "Энгийн" (Ач холбогдол)</li>
-    <li>"PocketZero нь Khan Bank-ийн... " (Агуулга)</li>
+    <li>Нэгжийн дэлгэрэнгүй карт (collapsible)</li>
+    <li>Зүйлсийн (item) хүснэгт: бүтээгдэхүүн / үйлчилгээ / сургалт төрлөөрөө ялгагдана</li>
+    <li><strong>Олон линкийн засварлагч</strong>: зүйл бүрд хэдэн ч холбоос (Тайлбар / URL / Тэмдэглэл)
+        нэмж болно. Жишээ: Magic Finance програмд татах хуудас, гарын авлага, license сунгуулах форм
+        гэх мэт холбоосуудыг нэг дор оруулна.</li>
 </ul>
 <p>
-    Олон удирдлагатай зэрэгцэн ажиллах гол давуу тал нь нэгнийхээ ажлыг дарж бичихгүй.
-    <strong>★ Өндөр</strong> ач холбогдолтой snippet нь хариултанд илүү жинтэй нөлөөлнө.
+    Бот эдгээр линкийг тохирох асуултын хариултанд иш татна.
+</p>
+<h5>5.3 Ажилтнууд <small class="text-muted">(<code>/business-management/employees</code>)</small></h5>
+<p>
+    Багш / зөвлөх / хариуцагчдын жагсаалт. Бот "Х асуудлыг хэн хариуцдаг вэ?" гэх мэт асуултанд эндээс
+    эшилж хариулна. Идэвхгүй болгох тохиргоо нь түр чөлөөтэй гишүүнийг ботод үзүүлэхгүй байх боломж.
 </p>
 
-<h4 id="m-team" class="doc-section">9. Багийн гишүүд (<code>/admin/team</code>)</h4>
-<p>
-    Бот "Багш хэн бэ?", "Татварын асуудлыг хэн хариуцдаг вэ?" гэх асуултанд хариулахын тулд
-    энэ жагсаалтыг ашиглана. Гишүүн бүрт:
-</p>
+<h4 id="m-bot-mgmt" class="doc-section">6. Ботын удирдлага</h4>
+<p>Сайдбараас "Ботын удирдлага" → анхдагчаар Ботын тохиргоо таб нээгдэнэ. Бусад таб:</p>
+<h5>6.1 AI сургалт <small class="text-muted">(<code>/bot-management/training</code>)</small></h5>
 <ul>
-    <li><strong>Нэр</strong> (заавал)</li>
-    <li><strong>Албан тушаал</strong> — Жишээ: "Ахлах багш", "Хариуцагч"</li>
-    <li><strong>Мэргэшил</strong> — Жишээ: "Татварын тайлан, Magic Finance программ"</li>
-    <li><strong>Тайлбар</strong> — товч намтар (1-2 өгүүлбэр оновчтой)</li>
+    <li><strong>Persona</strong> — ботын дүр / дуу хоолой (super_admin засна).</li>
+    <li><strong>Суурь агуулга</strong> — компанийн нэг удаагийн танилцуулга (super_admin засна).</li>
+    <li><strong>Нэмэлт тайлбарууд</strong> — бодит чатанд алдаа гарах бүрд нэг шинэ snippet нэмнэ.
+        Ач холбогдол: <em>★ Өндөр</em> snippet нь хариултанд илүү жинтэй нөлөөлнө.</li>
+    <li><strong>AI харж буй prompt</strong> — "Үзэх" товч нь яг одоо ботод очиж буй бүхэл бүтэн системийн заавар.</li>
+    <li><strong>Нийцлийн шалгалт</strong> — FAQ / persona / snippet-д дурдсан үнэ, утас, линк нь
+        Course / Product / BusinessLine жагсаалттай таарч байгаа эсэхийг шалгана.</li>
 </ul>
+<h5>6.2 Дамжуулах түлхүүр үгс <small class="text-muted">(<code>/bot-management/handover</code>)</small></h5>
 <p>
-    Идэвхгүй болгох тохиргоо нь "одоохондоо чөлөөтэй байгаа гишүүн"-ийг ботод үзүүлэхгүй байх боломж олгоно.
+    Хэрэглэгчийн мессеж тодорхой үгстэй таарвал шууд handoff гаргадаг. <em>Explicit</em> — "ажилтантай ярьмаар",
+    "huntei" гэх мэт. <em>Frustration</em> — "болохгүй байна", "ойлгохгүй" гэх мэт. Латин үсгээр бичсэн
+    хувилбарууд (huntei, operator, menejer) бас орсон байгаа.
 </p>
-
-<h4 id="m-business" class="doc-section">10. Бусад үйлчилгээ (<code>/admin/business-lines</code>)</h4>
-<p>
-    Facebook хуудас бол компанийг сурталчилдаг боловч бот зөвхөн сургалтын хариулт өгөх ёсгүй.
-    Энд Magic Finance программ, тайлан гаргах үйлчилгээ гэх мэт компанийн бусад чиглэлийг бүртгэж,
-    ботын үйлдлийг сонгож өгнө:
-</p>
+<h5>6.3 FAQ <small class="text-muted">(<code>/bot-management/faqs</code>)</small></h5>
 <ul>
-    <li><strong>Хариулах (Answer)</strong> — товч мэдээлэл өгөөд, дэлгэрэнгүйг ажилтнаас лавлахыг санал болгоно.</li>
-    <li><strong>Чиглүүлэх (Refer)</strong> — өөрөө хариулахгүй, утас аваад ажилтанд дамжуулна (handoff үүсгэнэ).</li>
+    <li><strong>Гар хийсэн FAQ</strong> — админ бичсэн Q/A хосууд. Бот системийн заавартай хамт уншина.</li>
+    <li><strong>Чатнаас гарсан жинхэнэ асуултууд</strong> — LLM (gpt-4o-mini) сүүлийн 30 хоногийн
+        хэрэглэгчийн асуултуудыг сэдэвчилсэн бүлэгт оруулж харуулна. Долоо хоног бүр автомат шинэчлэгдэх
+        ба (<code>ENABLE_CHAT_CLUSTERING=true</code> орчны хувьсагч идэвхтэй үед), "Шинэчлэх" товчоор
+        гараар ажиллуулж болно. "FAQ болгох" товчоор тухайн бүлгийг гар FAQ-д шилжүүлнэ.</li>
 </ul>
-
-<h4 id="m-settings" class="doc-section">11. Settings (<code>/admin/settings</code>)</h4>
-<h5>11.1 Хүний хариу хэсэг</h5>
+<h5>6.4 Ботын тохиргоо <small class="text-muted">(<code>/bot-management/settings</code>)</small></h5>
 <ul>
-    <li><strong>Илрүүлэх мэдрэмж</strong> — handoff хэр амархан гарахыг тохируулна.
-        <ul>
-            <li><em>Болгоомжтой</em> — зөвхөн "ажилтан/оператор/менежертэй ярья" гэх мэт тодорхой үгстэй мессежид.</li>
-            <li><em>Дунд зэрэг</em> — гомдол, шүүмжлэлийн үгсийг мөн оруулна.</li>
-            <li><em>Идэвхтэй</em> — давтан асуух, ойлгомжгүй гэх мэт бүгдийг. Амралттай үед сонгож болно.</li>
-        </ul>
-    </li>
-    <li><strong>Ботыг чимээгүй болгох цаг</strong> — handoff гарсны дараа автомат хариултыг хичнээн цагт зогсоох (анхдагч 2).</li>
-    <li><strong>Telegram chat ID-ууд</strong> — мэдэгдэл хүлээн авах chat ID-ууд (бүлэг чатын ID-г сөрөг тоо хэлбэрээр).</li>
-    <li><strong>Туршиж үзэх товч</strong> — Telegram-ын холболтыг даруй шалгахад зориулсан.</li>
-    <li><strong>Дуун дохио</strong> — админ хуудсан дээр шинэ handoff гарвал товч дуу гаргах.</li>
+    <li><strong>Илрүүлэх мэдрэмж</strong> — handoff хэр амархан гарахыг тохируулна (conservative / balanced / aggressive).</li>
+    <li><strong>Ботыг чимээгүй болгох цаг</strong> — анхдагч <strong>0 цаг</strong> (advisory mode: handoff гарсан ч бот үргэлжлүүлэн тусална). Тодорхой тоо тавивал handoff гармагц автоматаар ботыг тэр цагт зогсооно.</li>
+    <li><strong>Telegram chat ID-ууд</strong> — мэдэгдэл хүлээн авах ID-ууд. "Туршиж үзэх" товчоор шууд шалгана.</li>
+    <li><strong>Ажлын цаг</strong> — Off-hours handoff үед Telegram-д 🌙 тэмдэгтэй мэдэгдэх ба хэрэглэгчид
+        маргааш холбогдоно гэсэн хариу автоматаар явна.</li>
+    <li><strong>Халуун сонирхогчийн funnel шат</strong> — анхдагч <code>pricing,ready</code>.</li>
+    <li><strong>Auto-comment блок</strong> — Facebook Page постонд автомат сэтгэгдэлд ашиглах текст.</li>
 </ul>
 
-<h4 id="m-admins" class="doc-section">12. Админ хэрэглэгчид (<code>/admin/admins</code>)</h4>
-<p>
-    Хоёр түвшний эрх: <strong>admin</strong> (бүх админ үйлдэл) ба <strong>super_admin</strong>
-    (нэмж: админ нэмэх / устгах / нууц үг шинэчлэх / эрх солих). Нууц үг хамгийн багадаа 12 тэмдэгт байх ёстой.
-</p>
-<p>
-    Нууц үгээ мартсан тохиолдолд Render-ийн <code>RESET_ADMIN_USERNAME</code> ба <code>RESET_ADMIN_PASSWORD</code>
-    орчны хувьсагчид утга өгч, дахин deploy хийгээд, нэвтэрсний дараа эдгээр хувьсагчийг устгана.
-</p>
+<h4 id="m-system" class="doc-section">7. Систем</h4>
+<p>Сайдбараас "Систем" → анхдагчаар Админ хэрэглэгчид таб нээгдэнэ:</p>
+<ul>
+    <li><strong>Админ хэрэглэгчид</strong> — admin / super_admin эрх бүхий хэрэглэгчдийн жагсаалт.
+        Нууц үг хамгийн багадаа 12 тэмдэгт. Нууц үгээ мартвал Render-ийн <code>RESET_ADMIN_USERNAME</code>
+        ба <code>RESET_ADMIN_PASSWORD</code> орчны хувьсагчид утга өгч, дахин deploy хийгээд буцааж устгана.</li>
+    <li><strong>Үйлдлийн түүх (Audit log)</strong> — нийт админ үйлдлүүдийн append-only лог.</li>
+    <li><strong>Баримт бичиг</strong> — энэ хуудас (Манул + Тex Spec).</li>
+</ul>
 
-<h4 id="m-troubleshooting" class="doc-section">13. Алдааны шийдэл</h4>
+<h4 id="m-handoff" class="doc-section">8. Handoff урсгал</h4>
+<p>Гурван төлөв:</p>
+<ol>
+    <li><strong>Энгийн</strong> — handoff issue алга, бот ердийнхөөрөө ажиллана.</li>
+    <li><strong>Зөвлөмжийн горим (advisory)</strong> — handoff issue нээлттэй боловч staff хариуцаагүй
+        байна. Бот хэрэглэгчтэй <em>үргэлжлүүлэн</em> ярилцана (каталогийн дэлгэрэнгүй, FAQ хариулна)
+        гэхдээ хэрэглэгчийг "manai mergejilten" руу ДАХИН чиглүүлэхгүй. Telegram-аар админ мэдэгдсэн.</li>
+    <li><strong>Staff хариуцсан</strong> — staff "<strong>Хариуцах</strong>" товчоор ботыг тогтоосон
+        цаг (анхдагч 4)-аар чимээгүй болгосон. Энэ үед бот огт хариулахгүй; staff Facebook Page Inbox-оос
+        шууд харилцана.</li>
+</ol>
+<p><strong>Бүх ажиллагаа:</strong></p>
+<ul>
+    <li>Handoff гарвал → AdminIssue үүснэ, Telegram мэдэгдэнэ, хэрэглэгчид "ажилтан удахгүй холбогдоно"
+        гэж хариу явна. Бот <em>advisory mode</em>-д ороод үргэлжлүүлэн тусална.</li>
+    <li>Staff "Хариуцах" → бот N цагаар чимээгүй болж, issue нь "In Progress" болно. Staff Facebook
+        Inbox-оос шууд ярина.</li>
+    <li>Staff "Шийдэх" → issue resolved болж, бот шууд асна (mute timer хүлээхгүй).</li>
+    <li>Mute timer дуусвал ч бот сэргэнэ.</li>
+</ul>
+
+<h4 id="m-troubleshooting" class="doc-section">9. Алдааны шийдэл</h4>
 <h5>Бот хэрэглэгчид хариулахаа больсон</h5>
 <p>
-    <code>/admin/issues</code>-н дээд хэсэгт байгаа "Бот чимээгүй байгаа хэрэглэгчид" картыг шалгана уу.
-    Тухайн хэрэглэгчийн ботыг асаах боломжтой.
+    <em>Ажлын даалгавар → Бот зогссон</em> таб дээр шалга. "Bot асаах" товчоор шууд сэргээ. Эсвэл
+    тухайн хэрэглэгчийн handoff issue-г "Шийдэх" товчоор хаа — бот автоматаар асна.
 </p>
-<h5>Шинэ handoff гарсан ч Telegram дээр мессеж ирэхгүй байна</h5>
+<h5>Шинэ handoff гарсан ч Telegram мэдэгдэхгүй байна</h5>
 <p>
-    Settings → "Туршиж үзэх" товчийг дарж шалгана уу. Алдаа гаргавал диалог нь шалтгааныг харуулна (token буруу,
-    chat ID буруу, бот руу /start бичээгүй гэх мэт).
+    <em>Ботын удирдлага → Ботын тохиргоо</em> → "Туршиж үзэх" товчийг дар. Алдаа гаргавал token / chat ID
+    тохиромжгүй гэдгийг тодорхой хэлнэ.
 </p>
 <h5>Нэр "Unknown" гэж харагдаж байна</h5>
 <p>
-    Facebook апп Development mode-д байгаа бол ажилтан биш хэрэглэгчдийн нэр татагдахгүй. App Review
-    хүлээгдэж байгаа эсэхээ шалгана уу. Бэлэн болсон дараа <code>/admin/leads</code>-н "Нэр шинэчлэх"
-    товчоор бүгдийг нь шинэчлэх боломжтой.
+    Facebook апп Development mode-д байгаа бол ажилтан бус хэрэглэгчдийн нэр татагдахгүй. App Review
+    дууссаны дараа <em>Ажлын даалгавар → Лидүүд</em> таб → "Нэр шинэчлэх" товчоор нийтийг шинэчилнэ.
 </p>
 <h5>Бот зөв хариулж чадахгүй болсон</h5>
 <p>
-    "Алдаа гарсан асуулт" болгонд <code>/admin/training</code>-н "Нэмэлт тайлбарууд" хэсэгт нэг шинэ snippet
-    нэмж бай. Энэ нь хамгийн үр дүнтэй сургалтын арга юм.
+    Алдаа гарах бүрд <em>Ботын удирдлага → AI сургалт → Нэмэлт тайлбарууд</em>-д нэг шинэ snippet нэм.
+    Бодит чатнаас гарсан асуултын хэв маягийг тусгай хариулттай харилцуулж бичих нь хамгийн үр дүнтэй сургалтын арга.
+</p>
+<h5>Хуучин URL-ууд (/admin/inbox, /admin/leads г.м.) ажиллаж байна уу?</h5>
+<p>
+    Тийм — бүгд 301 redirect-ээр шинэ хуудсууд руу шилждэг. Хэдэн хувилбарын дараа эдгээрийг бүрэн устгана.
 </p>
 
                 </div>
@@ -343,49 +324,100 @@
     <thead><tr><th>Table</th><th>Purpose</th></tr></thead>
     <tbody>
         <tr><td><code>user</code></td><td>Admin login users; <code>role</code> ∈ {admin, super_admin}</td></tr>
-        <tr><td><code>facebook_user</code></td><td>One row per Page-scoped ID. Tracks funnel stage, is_lead, phone, last nudge, bot_muted_until</td></tr>
+        <tr><td><code>facebook_user</code></td><td>One row per Page-scoped ID. Tracks funnel stage, is_lead, phone, last nudge, bot_muted_until, last_mute_ack_at</td></tr>
         <tr><td><code>message</code></td><td>Inbound + outbound chat messages</td></tr>
         <tr><td><code>course</code></td><td>Active class catalog included in the system prompt</td></tr>
+        <tr><td><code>course_link</code></td><td>Multi-link rows attached to a course (description / url / note / is_active / sort_order). Unified shape across types.</td></tr>
+        <tr><td><code>service</code></td><td>Service offerings (audit, tax consulting, etc.)</td></tr>
+        <tr><td><code>service_link</code></td><td>Multi-link rows attached to a service</td></tr>
+        <tr><td><code>product</code></td><td>Product catalog (Magic Finance, Microsoft license, ...) with <code>business_line_id</code> FK</td></tr>
+        <tr><td><code>product_link</code></td><td>Multi-link rows attached to a product (was kind/label, now description/note)</td></tr>
+        <tr><td><code>business_line</code></td><td>Business unit (Magic Choice / Consulting Audit / Cloud). Has <code>product_type</code> ∈ {Course, Service, Product} which decides which item schema the drill-in page uses, and <code>action</code> ∈ {answer, refer}</td></tr>
         <tr><td><code>faq</code></td><td>Q/A pairs included in the system prompt</td></tr>
-        <tr><td><code>admin_issue</code></td><td>Handoff queue (issue_type='handoff') and other unresolved items</td></tr>
+        <tr><td><code>chat_question_cluster</code></td><td>LLM-grouped themes from real user messages — populated by services.cluster_chat_questions() weekly or manually. <code>promoted_to_faq_id</code> tracks which clusters were turned into curated FAQ</td></tr>
+        <tr><td><code>admin_issue</code></td><td>Handoff queue (issue_type='handoff') and other unresolved items. Drives advisory mode while status='open'</td></tr>
         <tr><td><code>page_post</code></td><td>FB Page posts the bot has already auto-commented on</td></tr>
-        <tr><td><code>general_setting</code></td><td>Key/value bucket for runtime-editable settings (handoff_sensitivity, telegram_chat_ids, etc.)</td></tr>
+        <tr><td><code>general_setting</code></td><td>Key/value bucket for runtime-editable settings (handoff_sensitivity, telegram_chat_ids, mute_duration_hours, google_form_url, etc.)</td></tr>
         <tr><td><code>team_member</code></td><td>Staff directory included in the system prompt</td></tr>
-        <tr><td><code>training_snippet</code></td><td>Additive per-topic notes, priority high/normal, optional category</td></tr>
-        <tr><td><code>business_line</code></td><td>Other services with action=answer/refer driving off-topic behaviour</td></tr>
+        <tr><td><code>training_snippet</code></td><td>Additive per-topic notes, priority high/normal, optional category. Discovery-phrasing snippets seeded via /admin/api/seed-discovery-snippets</td></tr>
+        <tr><td><code>audit_entry</code></td><td>Append-only log of every admin action</td></tr>
+        <tr><td><code>handoff_keyword</code></td><td>Bot-handoff trigger keywords; explicit + frustration types, Cyrillic + Latin transliterations</td></tr>
+        <tr><td><code>alembic_version</code></td><td>Alembic schema version pointer (HEAD: 0003_chat_question_clusters)</td></tr>
     </tbody>
 </table>
+<p class="text-muted small">
+    Software model was removed in Phase 1 of the admin IA reorg — its rows migrated to <code>product</code>
+    rows under Magic Cloud. See <code>migrations/versions/0002_phase_1_ia_reorg.py</code>.
+</p>
 
-<h4 id="t-webhook" class="doc-section">5. Webhook lifecycle</h4>
+<h4 id="t-routes" class="doc-section">5. Routes layout</h4>
+<p>
+    <code>routes/admin/</code> is a package split into focused modules:
+</p>
+<ul>
+    <li><code>routes/admin/auth.py</code> — login / logout</li>
+    <li><code>routes/admin/work_tasks.py</code> — dashboard, work tasks (formerly inbox / leads / issues), logs, conversation viewer, ops APIs (telegram test, name backfill, classify, take_over)</li>
+    <li><code>routes/admin/business.py</code> — business-management routes (/business-management/{general,units,employees}, /business-units/&lt;id&gt;), legacy /admin/{courses,services,products,team,business-lines} POST handlers</li>
+    <li><code>routes/admin/bot.py</code> — bot-management routes (/bot-management/{training,handover,faqs,settings}), training-snippet CRUD, chat-clustering trigger, promote-cluster-to-faq</li>
+    <li><code>routes/admin/system.py</code> — admin user management, audit log, docs, settings (deprecated), /admin/api/run-migration, /admin/api/seed-default-links, /admin/api/seed-discovery-snippets</li>
+</ul>
+<p>
+    Endpoint names stay flat (no Flask Blueprint prefixes) so existing templates' <code>url_for('dashboard')</code>,
+    <code>url_for('login')</code> etc. don't need updating.
+</p>
+
+<h4 id="t-webhook" class="doc-section">6. Webhook lifecycle</h4>
 <p><code>POST /webhook</code> handler steps:</p>
 <ol>
     <li>Verify <code>X-Hub-Signature-256</code> against HMAC-SHA256(body, <code>FACEBOOK_APP_SECRET</code>). Skipped with warning if secret unset.</li>
-    <li>Log delivery object + entries + sender IDs.</li>
     <li>Per-sender sliding-window rate limit (default 5 msg / 60s). Over-limit users get one polite throttle reply.</li>
-    <li>Get-or-create <code>FacebookUser</code> by PSID. Lookup name via FB Graph; retry on subsequent messages if name still empty.</li>
-    <li>Classify session state from prior message timestamp (new / active / gap / returning).</li>
-    <li>Advance funnel stage (no regression).</li>
+    <li>Get-or-create <code>FacebookUser</code> by PSID; resolve name via FB Graph.</li>
+    <li>Classify session state (new / active / gap / returning) and advance funnel stage (no regression).</li>
     <li>Persist inbound message.</li>
-    <li><strong>Mute check</strong>: if <code>bot_muted_until &gt; now</code>, skip everything below. Auto-clear expired mutes.</li>
-    <li><strong>Handoff check</strong>: <code>should_handoff()</code> on the message. If positive: trigger handoff (send waiting reply, mute, create issue, Telegram notify) and stop.</li>
-    <li>Build system prompt: persona + base training + active snippets (high priority first) + courses + FAQ + team + business lines + funnel/session rules.</li>
-    <li>Call OpenAI with last 10 messages of conversation history.</li>
+    <li><strong>Mute check</strong>: if <code>bot_muted_until &gt; now</code> (staff takeover), silent-drop. Auto-clear expired mutes.</li>
+    <li><strong>Advisory check</strong>: compute <code>handoff_pending = is_in_handoff(fb_user)</code> based on open handoff AdminIssue.</li>
+    <li><strong>Keyword handoff</strong>: <code>should_handoff()</code> on the message. Skipped if <code>handoff_pending</code>. On match: <code>trigger_handoff()</code> + send waiting reply + Telegram + stop.</li>
+    <li>Build system prompt via <code>build_system_prompt(session_state, funnel_stage, user_first_name, handoff_pending)</code>. The <code>handoff_pending=True</code> case injects <code>HANDOFF_ADVISORY_RULE</code> telling the bot to keep helping without re-routing.</li>
+    <li>Call <code>gpt-4o-mini</code> with last 10 messages.</li>
     <li>Persist outbound message, send via FB Send API.</li>
+    <li><strong>Response-based handoff</strong>: <code>bot_response_implies_handoff()</code> scans the reply for staff-deferral phrases ('мэргэжлийн ажилтан', etc.). On match (and not already in handoff): fires a silent handoff (mute + AdminIssue + Telegram, no extra user message).</li>
     <li>Phone regex on inbound message; if matched and not yet a lead, mark <code>is_lead</code>, save phone, send a "thank you for the number" reply.</li>
 </ol>
 
-<h4 id="t-handoff" class="doc-section">6. Handoff logic</h4>
-<p>Three sensitivity tiers, controlled via <code>handoff_sensitivity</code> setting:</p>
+<h4 id="t-handoff" class="doc-section">7. Handoff lifecycle</h4>
+<p>Three explicit states keyed off open AdminIssue (handoff_pending) and bot_muted_until:</p>
+<ol>
+    <li><strong>Normal</strong> — no open handoff issue, bot does its full discovery + sales loop.</li>
+    <li><strong>Advisory mode</strong> (handoff_pending=True, bot_muted_until=null) — open handoff
+        AdminIssue exists. Bot keeps replying with full catalog knowledge, but the injected
+        <code>HANDOFF_ADVISORY_RULE</code> forbids re-routing or re-asking for phone (the customer is
+        already in the queue). Each reply may end with a brief "ажилтан холбогдоно" reminder.</li>
+    <li><strong>Staff takeover</strong> (bot_muted_until &gt; now) — staff clicked "Хариуцах" on the
+        Work Tasks page with a duration (default 4h). Bot is silent so staff can chat directly via
+        Facebook Page Inbox.</li>
+</ol>
+<p>Sensitivity tiers (<code>handoff_sensitivity</code> setting):</p>
 <ul>
-    <li><strong>conservative</strong> (default) — explicit stem matches (ажилтан / оператор / менежер / хүнтэй / live agent / human / etc.) + business-line refer matches.</li>
-    <li><strong>balanced</strong> — adds frustration phrases (болохгүй байна / ойлгомжгүй / гомдол / utgagүй / etc.).</li>
+    <li><strong>conservative</strong> (default) — explicit stem matches (ажилтан / оператор / менежер / хүнтэй / huntei / human / etc.) + business-line refer matches.</li>
+    <li><strong>balanced</strong> — adds frustration phrases (болохгүй байна / ойлгомжгүй / гомдол / etc.).</li>
     <li><strong>aggressive</strong> — adds repeated-question detection (same message 3× in 1h).</li>
 </ul>
 <p>
     Stems are deliberately short to defeat Mongolian agglutinative suffixes: <code>'ажилтан'</code> catches
-    <em>ажилтантай / ажилтанд / ажилтны / ажилтнаас</em>, etc. On match: <code>trigger_handoff()</code>
-    sets <code>bot_muted_until = now + mute_duration_hours</code>, creates AdminIssue with
-    <code>issue_type='handoff'</code>, sends the user a polite waiting reply, fires Telegram notifications.
+    <em>ажилтантай / ажилтанд / ажилтны / ажилтнаас</em>, etc. Latin transliterations are seeded
+    (huntei, operator, menejer, azhiltan) so customers typing without the Mongolian keyboard still trigger
+    handoff.
+</p>
+<p>
+    <code>trigger_handoff(send_user_message=False)</code> exists for the response-based path so a bot
+    that already sent a deferring reply doesn't double-message the user. Auto-mute on handoff is gated
+    by <code>mute_duration_hours</code> setting (default 0 = advisory only; set &gt;0 for immediate silence).
+    Staff "Шийдэх" auto-unmutes — closing the issue restores the bot.
+</p>
+<p>
+    Response-based detection: <code>bot_response_implies_handoff(reply_text)</code> returns the matched
+    phrase if the bot's own reply says it's deferring to staff. Phrases checked: 'мэргэжлийн ажилтан',
+    'манай ажилтан танд / удахгүй', 'ажилтан танд / тантай эргэж', 'ажилтантай холбог', 'тусгай ажилтан'.
 </p>
 
 <h4 id="t-funnel" class="doc-section">7. Funnel + session</h4>
@@ -447,6 +479,7 @@
         <tr><td><code>SEED_DEFAULTS</code></td><td><code>false</code> to skip seeding Magic's default courses/FAQs (use on non-Magic deployments)</td></tr>
         <tr><td><code>ENABLE_POLLING</code></td><td><code>true</code> to enable Page-post auto-commenting (off by default to avoid duplicate work across gunicorn workers)</td></tr>
         <tr><td><code>ENABLE_NUDGE</code></td><td><code>true</code> to enable silent-lead follow-up nudges</td></tr>
+        <tr><td><code>ENABLE_CHAT_CLUSTERING</code></td><td><code>true</code> to start the weekly background job that runs <code>services.cluster_chat_questions()</code>. Off by default. Admins can still trigger a one-shot run via the "Шинэчлэх" button on the FAQ tab regardless of this flag. ~$0.01/run at Magic's volume.</td></tr>
         <tr><td><code>RATE_LIMIT_MAX</code> / <code>RATE_LIMIT_WINDOW_SECONDS</code></td><td>Per-sender rate limit (default 5 per 60s)</td></tr>
         <tr><td><code>RESET_ADMIN_USERNAME</code> + <code>RESET_ADMIN_PASSWORD</code></td><td>One-time forgot-password recovery; remove both after use to prevent repeated resets on every restart</td></tr>
     </tbody>
@@ -462,12 +495,53 @@
 </ol>
 
 <h4 id="t-schema" class="doc-section">11. Schema migration</h4>
+<p>Two layers, both idempotent:</p>
+<ol>
+    <li>
+        <strong>Alembic via Flask-Migrate</strong> — proper revision-tracked migrations live at
+        <code>migrations/versions/</code>. Current HEAD: <code>0003_chat_question_clusters</code>.
+        Standalone <code>migrations/env.py</code> doesn't import the Flask app, so <code>alembic upgrade</code>
+        is fast even on cold start.
+    </li>
+    <li>
+        <strong>Bootstrap script</strong> — <code>scripts/apply_phase_1_migration.py</code> is a pure
+        <code>sqlite3</code> runner that applies the same changes without SQLAlchemy / Alembic startup
+        overhead. <code>app.py:init_db()</code> calls it via <code>_run_pending_migrations()</code> on
+        every boot. Fail-soft (logs traceback, doesn't crash init_db) so a broken migration doesn't 502
+        the whole service. Includes a self-healing sanity check: if alembic_version claims HEAD but
+        canary columns (<code>product_link.description</code>, <code>business_line.product_type</code>)
+        are missing, force a re-run.
+    </li>
+</ol>
 <p>
-    <code>init_db()</code> runs on every boot (gunicorn worker import). It does <code>db.create_all()</code>
-    for new tables and calls <code>ensure_schema()</code> which uses SQLite-style
-    <code>ALTER TABLE ADD COLUMN</code> (also valid on Postgres) to add columns introduced after the first
-    deploy — currently <code>funnel_stage</code>, <code>last_nudge_at</code>, <code>bot_muted_until</code>.
-    Idempotent: skips additions that already exist.
+    Manual trigger: <code>POST /admin/api/run-migration</code> (logged-in admin) returns the bootstrap
+    script's output as plain text. Use this if a deploy left the schema in an unexpected state.
+</p>
+<p>
+    Legacy <code>ensure_schema()</code> still exists in <code>services.py</code> for backward
+    compatibility — adds columns introduced before Alembic was wired up
+    (<code>funnel_stage</code>, <code>last_nudge_at</code>, <code>bot_muted_until</code>,
+    <code>conversation_topic</code>, <code>last_mute_ack_at</code>). New schema changes go through
+    Alembic, not ensure_schema.
+</p>
+
+<h4 id="t-clustering" class="doc-section">11b. Chat-question clustering</h4>
+<p>
+    <code>services.cluster_chat_questions()</code> pulls the last 30 days of <code>Message</code> rows
+    where <code>sender='user'</code>, filters via a Mongolian-interrogative heuristic to drop
+    one-word acknowledgements, sends up to 400 deduplicated phrasings to <code>gpt-4o-mini</code>
+    with <code>response_format={'type': 'json_object'}</code>. The model groups them into 5-15 themes
+    with title, representative_question, sample_questions, count.
+</p>
+<p>
+    Results wholesale-replace the unpromoted <code>chat_question_cluster</code> rows; rows with
+    <code>promoted_to_faq_id</code> set are preserved across runs (those clusters are already FAQ).
+    Fail-soft: any error returns 0 rather than crashing the weekly thread.
+</p>
+<p>
+    Promote flow: <code>POST /admin/api/promote-cluster-to-faq</code> creates a curated FAQ row from
+    a cluster's representative_question + admin-typed answer, then sets <code>promoted_to_faq_id</code>
+    so the cluster doesn't reappear on next clustering.
 </p>
 
 <h4 id="t-security" class="doc-section">12. Security</h4>
