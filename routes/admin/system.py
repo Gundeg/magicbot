@@ -93,6 +93,43 @@ def run_migration_now():
     return Response(body, mimetype='text/plain; charset=utf-8')
 
 
+# ===================== SEED DEFAULT LINKS =====================
+# One-shot admin trigger to wire Magic Financial Group's known set of
+# product/service URLs into the catalog (download, manual, support
+# ticket, Office license form, audit form, report form, course form).
+# Idempotent: re-running attaches only the missing links.
+
+@app.route('/admin/api/seed-default-links', methods=['POST', 'GET'])
+@login_required
+@admin_required
+def seed_default_links_now():
+    from flask import Response
+    from services import seed_default_magic_links
+    try:
+        report = seed_default_magic_links()
+    except Exception as e:
+        import traceback
+        return Response(
+            f"seed_default_magic_links() raised:\n{type(e).__name__}: {e}\n\n"
+            f"{traceback.format_exc()}",
+            status=500, mimetype='text/plain; charset=utf-8',
+        )
+    log_admin_action(
+        'system.seed_default_links', 'system', None, current_user.username,
+        detail='Magic-defaults default link map seeded into catalog'
+    )
+    body = (
+        f"=== Magic default links seeder ===\n"
+        f"Triggered by: {current_user.username}\n\n"
+        f"{report}\n\n"
+        f"--- Done ---\n"
+        f"Tip: any 'SKIPPED' lines above mean the matching item doesn't "
+        f"exist yet. Create it via the admin panel (Бизнесийн удирдлага -> "
+        f"the right unit -> add product/service), then re-run this endpoint."
+    )
+    return Response(body, mimetype='text/plain; charset=utf-8')
+
+
 # ===================== SETTINGS =====================
 
 @app.route('/admin/settings', methods=['GET', 'POST'])

@@ -1794,6 +1794,134 @@ _DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION = [
 ]
 
 
+def seed_default_magic_links():
+    """One-shot helper that wires Magic Financial Group's known set of
+    product/service URLs into the catalog. Idempotent: matches links by
+    URL so re-running doesn't create duplicates. Returns a multi-line
+    log of what it did, suitable for surfacing to the admin via the
+    /admin/api/seed-default-links endpoint."""
+    from models import (BusinessLine, Course, CourseLink, Product, ProductLink,
+                        Service, ServiceLink)
+
+    log = []
+
+    # The course registration form is a global setting (it lives at the top
+    # of the system prompt as БҮРТГЭЛИЙН ЛИНК). Set it first so the bot
+    # surfaces it for any "how do I register?" question.
+    course_form_url = (
+        'https://docs.google.com/forms/d/e/'
+        '1FAIpQLSejDvCSqo6J5cgqrdZdnzttz-1ahobmypNr0wLlPTRGehtEog/viewform'
+    )
+    existing = GeneralSetting.query.filter_by(key='google_form_url').first()
+    if existing:
+        if (existing.value or '').strip() != course_form_url:
+            existing.value = course_form_url
+            log.append(f'Updated GeneralSetting.google_form_url -> {course_form_url}')
+        else:
+            log.append('GeneralSetting.google_form_url already set; left unchanged.')
+    else:
+        db.session.add(GeneralSetting(key='google_form_url', value=course_form_url))
+        log.append(f'Created GeneralSetting.google_form_url = {course_form_url}')
+
+    # ----- Product / Service / Course link maps -----
+    # Each entry: (item-finder, link-table-class, fk-attr, [(description, url, note)...])
+    # Item finders take a session and return the SQLAlchemy row to attach to.
+
+    def _find_product(name_substrings):
+        for s in name_substrings:
+            row = Product.query.filter(Product.name.ilike(f'%{s}%')).order_by(Product.id.asc()).first()
+            if row:
+                return row
+        return None
+
+    def _find_service(name_substrings):
+        for s in name_substrings:
+            row = Service.query.filter(Service.name.ilike(f'%{s}%')).order_by(Service.id.asc()).first()
+            if row:
+                return row
+        return None
+
+    plan = [
+        # ----- Magic Finance product (Magic Cloud BU) -----
+        ('product', ['Magic Finance', 'magic finance'], [
+            ('Програмын шинэ хувилбар татах',
+             'https://magicgroup.mn/mn/download',
+             'Magic Finance програмын хамгийн сүүлийн хувилбарыг татаж авах хуудас.'),
+            ('Хэрэглэгчдийн Facebook групп',
+             'https://www.facebook.com/groups/magicfinanceusers',
+             'Magic Finance хэрэглэгчдийн нийгэмлэг — заавар, асуултын хариулт энд олдоно.'),
+            ('Заавар, гарын авлага',
+             'https://help.magicfinance.mn/',
+             'Албан ёсны help center — функц бүрийн заавар, видеотой.'),
+            ('Шинэчлэлтийн мэдээлэл',
+             'https://magicgroup.mn/mn/category/magicfinance-update',
+             'Програмын шинэ хувилбар, нэмэгдсэн боломжуудын мэдээлэл.'),
+            ('Лиценз сунгуулах, код авах',
+             'https://magicfinance.hamt.mn/code.php/code/codec',
+             'Лицензийн хугацаа сунгах эсвэл шинээр код авах форм.'),
+            ('Тайлан / файл шалгуулах',
+             'https://magicfinance.hamt.mn/code.php/ticket/send',
+             'Гарсан тайлан, файлын алдааг шалгуулах техник дэмжлэгийн ticket илгээх форм.'),
+        ]),
+        # ----- Microsoft license product -----
+        ('product', ['Microsoft license', 'Microsoft', 'MS Office'], [
+            ('MS Office лиценз авах',
+             'https://forms.office.com/pages/responsepage.aspx?id=0XXBWo5_eEuS8Pz5UCuyi8YXwrWr81RCpchKwHza4p5UNlRCR0lLUVZHV1NLMU85TURTNTJENFYxSS4u&route=shorturl',
+             'Microsoft Office license-ийг манайхаас худалдан авах захиалгын форм.'),
+        ]),
+        # ----- Audit service (Magic Consulting Audit BU) -----
+        ('service', ['аудит', 'audit'], [
+            ('Аудит хийлгэх захиалгын форм',
+             'https://share.teamforms.app/form/MDkyNzU3M2QtNjJhNC00MjRiLWI3ODEtMDExMzUyZDRhZDUzOjVhYzE3NWQxLTdmOGUtNGI3OC05MmYwLWZjZjk1MDJiYjI4YjoyMWRlMWRjNi0zYzFmLTQ3ZWEtYmE4Ny0zMGFkZWVlMjM5MmY=',
+             'Аудитийн үйлчилгээ авах захиалгын форм — Magic Consulting Audit.'),
+        ]),
+        # ----- Report service -----
+        ('service', ['тайлан гаргуулах', 'тайлан', 'report'], [
+            ('Тайлан гаргуулах захиалгын форм',
+             'https://share.teamforms.app/form/ZmU3YzZjMjItNTA0ZC00NWE5LTkwYjMtYWQ2Mjk4MzI5YjkwOjVhYzE3NWQxLTdmOGUtNGI3OC05MmYwLWZjZjk1MDJiYjI4YjpmMDlkNjE0Ni1jZjU5LTRmNzgtYWZlOS0wMTQyMmNjYWM3Yzk=',
+             'Санхүүгийн тайлан гаргуулах захиалгын форм.'),
+        ]),
+    ]
+
+    for kind, name_subs, links_to_add in plan:
+        if kind == 'product':
+            item = _find_product(name_subs)
+            LinkModel = ProductLink
+            fk_field = 'product_id'
+        else:
+            item = _find_service(name_subs)
+            LinkModel = ServiceLink
+            fk_field = 'service_id'
+        if not item:
+            log.append(
+                f'SKIPPED {kind} {"/".join(name_subs)}: no matching item found '
+                f'(add it via the admin panel, then re-run).'
+            )
+            continue
+        existing_urls = {l.url for l in LinkModel.query.filter_by(
+            **{fk_field: item.id}).all()}
+        added = 0
+        for description, url, note in links_to_add:
+            if url in existing_urls:
+                continue
+            db.session.add(LinkModel(
+                **{fk_field: item.id},
+                description=description,
+                url=url,
+                note=note,
+                is_active=True,
+                sort_order=0,
+            ))
+            added += 1
+        log.append(
+            f'{kind} "{item.name}" (#{item.id}): added {added} new link(s), '
+            f'{len(existing_urls)} already present.'
+        )
+
+    db.session.commit()
+    return '\n'.join(log)
+
+
 def seed_handoff_keywords():
     """Ensure the default handoff keywords exist. Upsert by keyword text:
     missing defaults are added with is_active=True; existing rows (whether
