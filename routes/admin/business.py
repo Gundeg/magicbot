@@ -351,13 +351,31 @@ def business_unit_detail(bu_id):
             # works even if the relationship couldn't load.
             item.links = []
 
-    return render_template(
-        'business/unit_detail.html',
-        line=line,
-        items=items,
-        ALLOWED_COURSE_TYPES=ALLOWED_COURSE_TYPES,
-        SELF_PACED_COURSE_TYPE=SELF_PACED_COURSE_TYPE,
-    )
+    try:
+        return render_template(
+            'business/unit_detail.html',
+            line=line,
+            items=items,
+            ALLOWED_COURSE_TYPES=ALLOWED_COURSE_TYPES,
+            SELF_PACED_COURSE_TYPE=SELF_PACED_COURSE_TYPE,
+        )
+    except Exception as e:
+        # Last-resort fallback so the admin can see what's wrong without
+        # digging through Render logs. Only shown to authenticated admins
+        # by the @admin_required decorator above, so revealing the error
+        # is acceptable.
+        import traceback
+        tb = traceback.format_exc()
+        print(f'business_unit_detail render failed for bu_id={bu_id}: {e}')
+        print(tb)
+        return render_template(
+            'business/unit_detail_error.html',
+            line=line,
+            item_count=len(items),
+            product_type=line.product_type,
+            error_message=str(e),
+            traceback=tb,
+        ), 500
 
 
 # Legacy item-CRUD endpoints (/admin/courses, /admin/services, /admin/products,
