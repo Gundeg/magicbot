@@ -447,11 +447,13 @@
             </nav>
 
             {# ── ZONE 4 — System: setup, touched rarely #}
+            {# Settings link removed: the page is now split across
+               Business Management → General Info (business fields) and
+               Bot Management → Bot Settings (bot-config fields). The
+               legacy /admin/settings URL still works with a deprecation
+               banner for any in-flight client code. #}
             <div class="nav-section">Систем</div>
             <nav class="nav flex-column">
-                <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="{{ url_for('settings') }}">
-                    <i class="bi bi-gear"></i> Тохиргоо
-                </a>
                 <a class="nav-link {% if request.endpoint == 'admins' %}active{% endif %}" href="{{ url_for('admins') }}">
                     <i class="bi bi-shield-lock"></i> Админ хэрэглэгчид
                 </a>

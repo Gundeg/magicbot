@@ -17,6 +17,28 @@
 {% endblock %}
 
 {% block content %}
+<div class="alert alert-info border-info mb-3">
+    <h6 class="mb-2"><i class="bi bi-stars"></i> Шинэчилсэн админ бүтэц (2026-05)</h6>
+    <p class="small mb-2">
+        Хуудаснууд гурван үндсэн хэсэгт цэгцэрсэн. Хуучин URL-ууд ажиллаж байгаа ч сайдбараас сонгох
+        замаар шинэ хэсгүүдийг ашиглахыг зөвлөе:
+    </p>
+    <ul class="small mb-0">
+        <li><strong>Өдөр тутмын ажил</strong> — Dashboard, <a href="{{ url_for('work_tasks') }}">Ажлын даалгавар</a>
+            (Inbox + Leads + Issues нэгтгэсэн 5 таб), Message Logs.</li>
+        <li><strong>Бизнесийн удирдлага</strong> — <a href="{{ url_for('business_management_general') }}">Ерөнхий мэдээлэл</a>
+            / <a href="{{ url_for('business_management_units') }}">Бизнесийн нэгжүүд</a>
+            / <a href="{{ url_for('business_management_employees') }}">Ажилтнууд</a>.
+            Нэгжийн нэр дээр дарж тухайн нэгжийн сургалт/үйлчилгээ/бүтээгдэхүүнийг шууд удирдана.</li>
+        <li><strong>Ботын удирдлага</strong> — <a href="{{ url_for('bot_management_training') }}">AI сургалт</a>
+            / <a href="{{ url_for('bot_management_handover') }}">Handover түлхүүр үгс</a>
+            / <a href="{{ url_for('bot_management_faqs') }}">FAQ (+ чатнаас гарсан асуултууд)</a>
+            / <a href="{{ url_for('bot_management_settings') }}">Ботын тохиргоо</a>.</li>
+        <li><strong>Шинэ боломж:</strong> Course / Service / Product бүрд олон линк (description / URL / note)
+            нэмж болно. FAQ хэсэгт OpenAI ашиглан жинхэнэ чатнаас гарсан асуултуудыг автомат бүлэглэх боломж.</li>
+    </ul>
+</div>
+
 <ul class="nav nav-tabs mb-3" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#manualTab" type="button" role="tab">

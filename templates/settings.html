@@ -5,6 +5,25 @@
 {% block page_title %}General Settings{% endblock %}
 
 {% block content %}
+<div class="alert alert-warning border-warning">
+    <h6 class="mb-2"><i class="bi bi-arrow-right-circle"></i> Settings нь шинэ хоёр хэсэгт хуваагдсан</h6>
+    <p class="small mb-0">
+        Энэ хуудас одоо хуучирсан тул удахгүй устгагдана. Талбаруудыг доорх шинэ хуудаснууд дээр засна уу:
+    </p>
+    <ul class="small mt-2 mb-0">
+        <li>Компанийн нэр, хаяг, утас, бүртгэлийн форм →
+            <a href="{{ url_for('business_management_general') }}">
+                Бизнесийн удирдлага → Ерөнхий мэдээлэл
+            </a>
+        </li>
+        <li>Handoff, Telegram, ажлын цаг, auto-comment, ботын мессеж →
+            <a href="{{ url_for('bot_management_settings') }}">
+                Ботын удирдлага → Ботын тохиргоо
+            </a>
+        </li>
+    </ul>
+</div>
+
 <div class="row">
     <div class="col-md-8">
         <div class="card">
