@@ -382,56 +382,66 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-diagram-3"></i> Бизнесийн нэгжүүд — {{ tenant_short_name or tenant_legal_name }}</span>
-                <a href="{{ url_for('business_lines') }}" class="btn btn-sm btn-light">Удирдах</a>
+                <a href="{{ url_for('business_management_units') }}" class="btn btn-sm btn-light">Удирдах</a>
             </div>
             <div class="card-body py-3">
                 <p class="text-muted small mb-3">
-                    Bot нь доорх бизнесийн нэгжүүдийн тухай мэдэх ёстой. Нэгж бүрийн дэлгэрэнгүй тохиргоог
-                    <a href="{{ url_for('business_lines') }}">Бизнесийн нэгжүүд</a> хэсгээс засна.
+                    Bot нь доорх бизнесийн нэгжүүдийн тухай мэдэх ёстой. Нэгж дээр дарж дэлгэрэнгүйг харна уу.
                 </p>
                 <div class="row g-2">
                     {% if business_lines_summary %}
                         {% for line in business_lines_summary %}
+                        {% set product_count = business_lines_counts.products.get(line.id, 0) %}
                         <div class="col-md-4 col-sm-6">
-                            <div class="border rounded p-2 h-100 {% if line.is_active %}biz-card-active{% else %}biz-card-paused opacity-50{% endif %}">
-                                <div class="d-flex align-items-start gap-2">
-                                    <div class="icon-md">
-                                        <i class="bi {% if 'сургалт' in line.name|lower or 'choice' in line.name|lower %}bi-mortarboard-fill text-success{% elif 'finance' in line.name|lower or 'санхүү' in line.name|lower %}bi-graph-up text-primary{% else %}bi-briefcase text-secondary{% endif %}"></i>
-                                    </div>
-                                    <div class="flex-grow-1">
-                                        <div class="fw-semibold fs-88">{{ line.name }}</div>
-                                        {% if line.description %}
-                                        <div class="text-muted summary-desc">
-                                            {{ line.description[:80] }}{% if line.description|length > 80 %}…{% endif %}
+                            <a href="{{ url_for('business_unit_detail', bu_id=line.id) }}"
+                               class="d-block text-decoration-none text-reset">
+                                <div class="border rounded p-2 h-100 biz-card {% if line.is_active %}biz-card-active{% else %}biz-card-paused opacity-50{% endif %}">
+                                    <div class="d-flex align-items-start gap-2">
+                                        <div class="icon-md">
+                                            <i class="bi {% if line.product_type == 'Course' %}bi-mortarboard-fill text-success{% elif line.product_type == 'Service' %}bi-clipboard2-check text-info{% elif line.product_type == 'Product' %}bi-box-seam text-primary{% else %}bi-briefcase text-secondary{% endif %}"></i>
                                         </div>
-                                        {% endif %}
-                                        <div class="mt-1 d-flex gap-1 flex-wrap">
-                                            {% if line.is_active %}
-                                                <span class="badge bg-success fs-62">Идэвхтэй</span>
-                                            {% else %}
-                                                <span class="badge bg-secondary fs-62">Зогссон</span>
+                                        <div class="flex-grow-1">
+                                            <div class="fw-semibold fs-88">{{ line.name }}</div>
+                                            {% if line.description %}
+                                            <div class="text-muted summary-desc">
+                                                {{ line.description[:80] }}{% if line.description|length > 80 %}…{% endif %}
+                                            </div>
                                             {% endif %}
-                                            {% if line.action == 'answer' %}
-                                                <span class="badge bg-info fs-62">Хариулах</span>
-                                            {% else %}
-                                                <span class="badge bg-warning text-dark fs-62">Чиглүүлэх</span>
-                                            {% endif %}
-                                            {# Highlight the primary training line and show its courses count #}
-                                            {% if 'choice' in line.name|lower or 'сургалт' in line.name|lower %}
-                                                <a href="{{ url_for('courses') }}" class="badge text-decoration-none bg-brand fs-62">
-                                                    <i class="bi bi-calendar-event"></i> Сургалтууд →
-                                                </a>
-                                            {% endif %}
+                                            <div class="mt-1 d-flex gap-1 flex-wrap">
+                                                {% if line.is_active %}
+                                                    <span class="badge bg-success fs-62">Идэвхтэй</span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary fs-62">Зогссон</span>
+                                                {% endif %}
+                                                {% if line.action == 'answer' %}
+                                                    <span class="badge bg-info fs-62">Хариулах</span>
+                                                {% else %}
+                                                    <span class="badge bg-warning text-dark fs-62">Чиглүүлэх</span>
+                                                {% endif %}
+                                                {% if line.product_type == 'Product' and product_count %}
+                                                    <span class="badge bg-brand fs-62">
+                                                        <i class="bi bi-box-seam"></i> {{ product_count }} бүтээгдэхүүн
+                                                    </span>
+                                                {% elif line.product_type == 'Course' %}
+                                                    <span class="badge bg-brand fs-62">
+                                                        <i class="bi bi-calendar-event"></i> {{ business_lines_counts.courses_total }} сургалт
+                                                    </span>
+                                                {% elif line.product_type == 'Service' %}
+                                                    <span class="badge bg-brand fs-62">
+                                                        <i class="bi bi-clipboard2-check"></i> {{ business_lines_counts.services_total }} үйлчилгээ
+                                                    </span>
+                                                {% endif %}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
+                            </a>
                         </div>
                         {% endfor %}
                     {% else %}
                         <div class="col-12 text-center text-muted small py-2">
                             Бизнесийн нэгж нэмэгдээгүй байна.
-                            <a href="{{ url_for('business_lines') }}">Нэмэх →</a>
+                            <a href="{{ url_for('business_management_units') }}">Нэмэх →</a>
                         </div>
                     {% endif %}
                 </div>

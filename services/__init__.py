@@ -171,6 +171,33 @@ SESSION_ACTIVE_WINDOW = timedelta(hours=2)
 SESSION_GAP_WINDOW = timedelta(hours=24)
 
 
+# ===================== LEAD STATUS VOCABULARY =====================
+# The six allowed values for FacebookUser.lead_status. Stored as ordered
+# tuples so the admin UI renders dropdowns in funnel order (new → ... →
+# converted/dropped). Both `key` (DB value) and `label` (Mongolian UI
+# text) are surfaced to templates; `color` maps to a Bootstrap badge
+# variant so the badge styling stays consistent across tabs.
+#
+# Adding a new status here is the single source of truth — the
+# /admin/api/lead-status endpoint accepts only these keys, and the
+# templates iterate LEAD_STATUSES to build their dropdowns.
+LEAD_STATUSES = (
+    {'key': 'new',        'label': 'Шинэ',           'color': 'info'},
+    {'key': 'contacted',  'label': 'Холбогдсон',     'color': 'primary'},
+    {'key': 'qualified',  'label': 'Сонирхолтой',    'color': 'warning'},
+    {'key': 'on_hold',    'label': 'Хүлээгдэж буй',  'color': 'secondary'},
+    {'key': 'converted',  'label': 'Бүртгүүлсэн',    'color': 'success'},
+    {'key': 'dropped',    'label': 'Орхисон',        'color': 'dark'},
+)
+LEAD_STATUS_KEYS = tuple(s['key'] for s in LEAD_STATUSES)
+LEAD_STATUS_LABELS = {s['key']: s['label'] for s in LEAD_STATUSES}
+
+# Statuses that remove a user from the active Hot Prospects / Leads
+# work queues. The user is still reachable through the conversation
+# viewer; this just hides them from the daily action list.
+TERMINAL_LEAD_STATUSES = ('dropped',)
+
+
 # ===================== WEBHOOK SECURITY + RATE LIMIT =====================
 
 def verify_facebook_signature(raw_body, header_value):

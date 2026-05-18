@@ -62,6 +62,37 @@
 </style>
 {% endblock %}
 
+{% macro lead_status_dropdown(user, statuses) -%}
+{# Bootstrap dropdown showing the user's current lead_status as a colored
+   badge, with click-to-change options. The JS in this file wires every
+   .lead-status-option click to POST /admin/api/lead-status. #}
+{%- set current = user.lead_status or 'new' -%}
+{%- set current_meta = (statuses | selectattr('key', 'equalto', current) | list | first) or statuses[0] -%}
+<div class="dropdown d-inline-block lead-status-dropdown" data-user-id="{{ user.id }}">
+    <button type="button"
+            class="btn btn-sm dropdown-toggle py-0 px-2 lead-status-badge"
+            data-bs-toggle="dropdown"
+            aria-expanded="false"
+            title="Статусыг өөрчлөх">
+        <span class="badge bg-{{ current_meta.color }} fs-75">
+            {{ current_meta.label }}
+        </span>
+    </button>
+    <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+        {% for s in statuses %}
+        <li>
+            <a class="dropdown-item lead-status-option {% if s.key == current %}active{% endif %}"
+               href="#"
+               data-status="{{ s.key }}">
+                <span class="badge bg-{{ s.color }} me-1">&nbsp;</span>
+                {{ s.label }}
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{%- endmacro %}
+
 {% block content %}
 
 <div id="wtToastContainer" class="position-fixed bottom-0 end-0 p-3 toast-stack"></div>
@@ -131,9 +162,7 @@
                     Сүүлд: {{ u.updated_at.strftime('%m/%d %H:%M') }}
                 </div>
                 <div class="actions">
-                    <button type="button" class="btn btn-sm btn-outline-primary contact-btn" data-id="{{ u.id }}" title="Холбогдсон гэж тэмдэглэх">
-                        <i class="bi bi-check2"></i> Холбогдсон
-                    </button>
+                    {{ lead_status_dropdown(u, lead_statuses) }}
                     <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=u.id) }}" title="Яриаг бүхэлд нь үзэх">
                         <i class="bi bi-eye"></i>
                     </a>
@@ -215,15 +244,7 @@
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if lead.lead_status == 'new' %}
-                                        <span class="badge bg-info">Шинэ</span>
-                                    {% elif lead.lead_status == 'contacted' %}
-                                        <span class="badge bg-warning text-dark">Холбогдсон</span>
-                                    {% elif lead.lead_status == 'converted' %}
-                                        <span class="badge bg-success">Бүртгүүлсэн</span>
-                                    {% else %}
-                                        <span class="badge bg-secondary">{{ lead.lead_status }}</span>
-                                    {% endif %}
+                                    {{ lead_status_dropdown(lead, lead_statuses) }}
                                 </td>
                                 <td><span class="badge bg-light text-muted border">{{ lead.funnel_stage or 'curious' }}</span></td>
                                 <td>
@@ -432,18 +453,73 @@
         setTimeout(() => node.remove(), 300);
     }
 
-    document.querySelectorAll('.contact-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            btn.disabled = true;
-            post({action: 'mark_contacted', user_id: btn.dataset.id}).then(r => {
-                if (r.success) {
-                    toast('Холбогдсон гэж тэмдэглэлээ.', true);
-                    fadeAndRemove(btn.closest('.wt-row'));
-                } else {
-                    toast('Алдаа гарлаа.', false);
-                    btn.disabled = false;
+    // Status dropdown — works on both Hot Prospects rows (.wt-row) and
+    // Leads rows (<tr data-lead-id>). Picks the closest row, fires the
+    // POST, updates the badge in-place, and removes the row when the
+    // user moves to a terminal status (currently just 'dropped').
+    const LEAD_STATUS_URL = '/admin/api/lead-status';
+    const TERMINAL_STATUSES = new Set(['dropped']);
+
+    document.querySelectorAll('.lead-status-option').forEach(opt => {
+        opt.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const dropdown = opt.closest('.lead-status-dropdown');
+            if (!dropdown) return;
+            const userId = dropdown.dataset.userId;
+            const newStatus = opt.dataset.status;
+            const badge = dropdown.querySelector('.lead-status-badge .badge');
+            const previousHtml = badge ? badge.outerHTML : null;
+            if (badge) badge.style.opacity = '0.5';
+
+            try {
+                const resp = await fetch(LEAD_STATUS_URL, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({user_id: userId, status: newStatus}),
+                });
+                const text = await resp.text();
+                let data;
+                try { data = JSON.parse(text); }
+                catch (_) {
+                    throw new Error(`Сервер JSON буцаасангүй (HTTP ${resp.status}).`);
                 }
-            });
+                if (!data.success) {
+                    throw new Error(data.error || data.message || 'unknown error');
+                }
+                toast(`Статус "${data.label}" болголоо.`, true);
+
+                if (TERMINAL_STATUSES.has(newStatus)) {
+                    // Row leaves the active queue. Fade it out and remove.
+                    const row = dropdown.closest('.wt-row, tr');
+                    if (row) fadeAndRemove(row);
+                    return;
+                }
+
+                // Update the badge text + color without reloading.
+                const selectedOpt = dropdown.querySelector(
+                    `.lead-status-option[data-status="${newStatus}"]`
+                );
+                const colorBadge = selectedOpt
+                    ? selectedOpt.querySelector('.badge')
+                    : null;
+                const colorClass = colorBadge
+                    ? Array.from(colorBadge.classList).find(c => c.startsWith('bg-'))
+                    : 'bg-secondary';
+                if (badge) {
+                    badge.className = `badge ${colorClass} fs-75`;
+                    badge.textContent = data.label;
+                    badge.style.opacity = '1';
+                }
+                // Update active marker in the menu.
+                dropdown.querySelectorAll('.lead-status-option')
+                    .forEach(o => o.classList.toggle('active', o.dataset.status === newStatus));
+            } catch (err) {
+                toast('Алдаа: ' + (err.message || err), false);
+                if (badge) {
+                    badge.style.opacity = '1';
+                    if (previousHtml) badge.outerHTML = previousHtml;
+                }
+            }
         });
     });
 

@@ -17,7 +17,9 @@ from extensions import db
 from models import (AdminIssue, BusinessLine, ConversationTopic, FacebookUser,
                     Message)
 from services import (CLASSIFICATION_LOOKBACK_MAX_DAYS, FACEBOOK_ACCESS_TOKEN,
-                      FACEBOOK_APP_SECRET, classify_user_topics,
+                      FACEBOOK_APP_SECRET, LEAD_STATUS_KEYS,
+                      LEAD_STATUS_LABELS, LEAD_STATUSES,
+                      TERMINAL_LEAD_STATUSES, classify_user_topics,
                       get_classification_lookback_days,
                       get_handoff_poll_payload, get_setting,
                       get_telegram_chat_ids, log_admin_action,
@@ -75,7 +77,31 @@ def dashboard():
     )
     topic_breakdown = {(t or 'unclassified'): c for t, c in topic_rows}
 
-    business_lines_summary = BusinessLine.query.order_by(BusinessLine.is_active.desc(), BusinessLine.name).all()
+    # Business Units dashboard card: per-line counts of the items each
+    # unit owns so admins see at-a-glance "Magic Choice has 4 courses,
+    # Magic Cloud has 3 products, Magic Consulting Audit has 5 services".
+    from models import Course, Product, Service
+    business_lines_summary = (BusinessLine.query
+                              .order_by(BusinessLine.is_active.desc(),
+                                        BusinessLine.sort_order.asc(),
+                                        BusinessLine.name)
+                              .all())
+    product_counts = dict(
+        db.session.query(Product.business_line_id, db.func.count(Product.id))
+        .filter_by(is_active=True)
+        .group_by(Product.business_line_id)
+        .all()
+    )
+    # Services and Courses don't carry an explicit business_line_id today
+    # (they're shared catalogs); count them globally instead so the
+    # cards stay informative.
+    active_services_count = Service.query.filter_by(is_active=True).count()
+    active_courses_count = Course.query.filter_by(is_active=True).count()
+    business_lines_counts = {
+        'products': product_counts,
+        'services_total': active_services_count,
+        'courses_total': active_courses_count,
+    }
 
     latest_message = (Message.query
                       .order_by(Message.created_at.desc())
@@ -105,6 +131,7 @@ def dashboard():
                            recent_leads=recent_leads,
                            topic_breakdown=topic_breakdown,
                            business_lines_summary=business_lines_summary,
+                           business_lines_counts=business_lines_counts,
                            health=health)
 
 
@@ -314,12 +341,15 @@ def work_tasks():
     hot_stages = [s.strip() for s in hot_stages_raw.split(',') if s.strip()]
 
     # --- Tab 1: hot prospects (no phone yet, in pricing/ready funnel) ---
+    # We DON'T narrow on lead_status='new' anymore — a hot prospect can
+    # progress through 'contacted'/'qualified'/'on_hold' without leaving
+    # a phone, and should stay visible until terminally closed.
     hot_prospects = (FacebookUser.query
                      .filter_by(is_lead=False)
                      .filter(FacebookUser.funnel_stage.in_(hot_stages))
                      .filter(db.or_(
                          FacebookUser.lead_status == None,  # noqa: E711
-                         FacebookUser.lead_status == 'new',
+                         ~FacebookUser.lead_status.in_(TERMINAL_LEAD_STATUSES),
                      ))
                      .order_by(FacebookUser.updated_at.desc())
                      .limit(50)
@@ -327,8 +357,14 @@ def work_tasks():
 
     # --- Tab 2: confirmed leads (dropped a phone). Reuse the rich shape
     # the old leads.html used: per-lead message counts + last user message.
+    # Dropped leads are hidden from the queue but stay reachable through
+    # the conversation viewer.
     leads_rows = (FacebookUser.query
                   .filter_by(is_lead=True)
+                  .filter(db.or_(
+                      FacebookUser.lead_status == None,  # noqa: E711
+                      ~FacebookUser.lead_status.in_(TERMINAL_LEAD_STATUSES),
+                  ))
                   .order_by(FacebookUser.created_at.desc())
                   .all())
     leads_msg_counts = dict(
@@ -406,6 +442,8 @@ def work_tasks():
         all_topic_counts=all_topic_counts,
         classification_lookback_days=get_classification_lookback_days(),
         classification_lookback_max=CLASSIFICATION_LOOKBACK_MAX_DAYS,
+        lead_statuses=LEAD_STATUSES,
+        lead_status_labels=LEAD_STATUS_LABELS,
         open_issues=open_issues,
         aging_issues=aging_issues,
         muted_users=muted_users,
@@ -545,6 +583,67 @@ def classify_conversations_backfill():
             'message': str(e)[:300],
             'attempted': 0,
             'classified': 0,
+        }), 500
+
+
+@app.route('/admin/api/lead-status', methods=['POST'])
+@login_required
+@admin_required
+def update_lead_status():
+    """Update FacebookUser.lead_status to one of LEAD_STATUS_KEYS.
+
+    Used by the Hot Prospects and Leads tabs to move a user through the
+    funnel — contacted, qualified, converted, dropped, etc. Setting any
+    non-terminal status keeps the user in the work queue; setting a
+    terminal status (currently just 'dropped') hides them from the
+    active tabs but leaves the conversation reachable through the
+    conversation viewer.
+
+    Always returns JSON. Logs an audit entry for traceability.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        try:
+            user_id = int(data.get('user_id'))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'user_id шаардлагатай.'}), 400
+        status = (data.get('status') or '').strip()
+        if status not in LEAD_STATUS_KEYS:
+            return jsonify({
+                'success': False,
+                'error': f'lead_status must be one of {LEAD_STATUS_KEYS}',
+            }), 400
+
+        user = db.session.get(FacebookUser, user_id)
+        if user is None:
+            return jsonify({'success': False, 'error': 'Хэрэглэгч олдсонгүй.'}), 404
+
+        previous = user.lead_status or 'new'
+        user.lead_status = status
+        db.session.commit()
+
+        log_admin_action(
+            'lead.status_change', 'facebook_user', user.id,
+            user.name or user.facebook_id,
+            detail=f'{previous} → {status}',
+        )
+        return jsonify({
+            'success': True,
+            'user_id': user.id,
+            'status': status,
+            'label': LEAD_STATUS_LABELS[status],
+            'previous': previous,
+        })
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception(
+            'update_lead_status failed: %s', e,
+        )
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': 'unexpected_error',
+            'message': str(e)[:300],
         }), 500
 
 
