@@ -14,8 +14,8 @@ from datetime import datetime, timedelta
 
 from extensions import db
 from models import (BusinessLine, ChatQuestionCluster, Course, FAQ,
-                    HandoffKeyword, Product, ProductLink, Service,
-                    ServiceLink, TrainingSnippet)
+                    GeneralSetting, HandoffKeyword, Product, ProductLink,
+                    Service, ServiceLink, TrainingSnippet)
 
 import services as _svc
 
