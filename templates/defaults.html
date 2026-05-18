@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}Анхдагч утгууд - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Анхдагч утгууд{% endblock %}
+
+{% block content %}
+{% include "system/partials/_tabs.html" %}
+
+<div class="alert alert-info" role="alert">
+    <i class="bi bi-info-circle"></i>
+    Эдгээр товч бүх Magic Financial Group-ийн стандарт холбоос, чиглүүлгийн зөвлөмжийг
+    ботын мэдлэгийн санд нэг товшилтоор ачаалдаг. Танай админуудын
+    <strong>гар аргаар хийсэн засваруудыг дардахгүй</strong> — зөвхөн дутуу мөрийг
+    нэмэх, ижил URL-тэй мөрийн тайлбарыг шинэчлэх замаар ажиллана.
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-link-45deg"></i>
+                <strong>Холбоосын анхдагч утгууд</strong>
+            </div>
+            <div class="card-body">
+                <p class="mb-2">
+                    Дараах зүйлсэд стандарт холбоосыг автоматаар нэмж эсвэл шинэчилнэ:
+                </p>
+                <ul class="small text-muted">
+                    <li><strong>Magic Finance</strong> — татах, групп, заавар, шинэчлэлт, код авах, тайлан шалгуулах (6 линк)</li>
+                    <li><strong>Microsoft license</strong> — MS Office лиценз авах форм</li>
+                    <li><strong>Аудитын үйлчилгээ</strong> — аудит хийлгэх форм</li>
+                    <li><strong>Татварын зөвлөх үйлчилгээ</strong> — тайлан гаргуулах форм</li>
+                    <li><strong>Бүх идэвхтэй сургалт</strong> — бүртгэлийн Google Form</li>
+                </ul>
+                <p class="small text-muted mb-3">
+                    Magic Finance бүтээгдэхүүний анхдагч тайлбар хэвээр байгаа бол
+                    "хэн ч худалдан авч болно" гэсэн шинэ үг рүү бас сольж өгнө.
+                </p>
+                <button id="btn-seed-links" class="btn btn-primary">
+                    <i class="bi bi-arrow-clockwise"></i> Холбоосын утгуудыг сэргээх
+                </button>
+            </div>
+            <div class="card-footer p-0">
+                <pre id="log-seed-links"
+                     class="mb-0 small p-3 bg-light text-muted"
+                     style="max-height: 320px; overflow:auto; white-space:pre-wrap;">Товч дарсны дараа лог энд гарна.</pre>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-chat-square-text"></i>
+                <strong>Чиглүүлгийн зөвлөмжүүд</strong>
+            </div>
+            <div class="card-body">
+                <p class="mb-2">
+                    Хэрэглэгчийн түгээмэл асуултанд бот хэрхэн хариулахыг заасан
+                    стандарт snippet-уудыг нэмнэ:
+                </p>
+                <ul class="small text-muted">
+                    <li>Аудит асуулт → аудитын үйлчилгээ</li>
+                    <li>Тайлан гаргуулах асуулт → татварын зөвлөх</li>
+                    <li>Magic Finance програмын асуулт</li>
+                    <li>Magic Finance худалдан авах, суулгах асуулт (★)</li>
+                    <li>Microsoft Office license асуулт</li>
+                    <li>Сургалтад бүртгүүлэх асуулт (★)</li>
+                    <li>Анги, хичээл тодруулах асуулт</li>
+                    <li>Бизнес/компанид зориулсан асуулт</li>
+                </ul>
+                <p class="small text-muted mb-3">
+                    Аль хэдийн бүртгэлтэй гарчигтай snippet байвал алгасна — давхар
+                    мөр үүсэхгүй.
+                </p>
+                <button id="btn-seed-snippets" class="btn btn-primary">
+                    <i class="bi bi-arrow-clockwise"></i> Зөвлөмжүүдийг сэргээх
+                </button>
+            </div>
+            <div class="card-footer p-0">
+                <pre id="log-seed-snippets"
+                     class="mb-0 small p-3 bg-light text-muted"
+                     style="max-height: 320px; overflow:auto; white-space:pre-wrap;">Товч дарсны дараа лог энд гарна.</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    // POST-and-log helper. Each button calls a text/plain endpoint that
+    // returns the seed function's report; we just dump it into the <pre>
+    // so the admin can read what changed. CSRF is added by the global
+    // fetch interceptor in base.html.
+    function wireButton(buttonId, logId, endpoint, runningLabel, idleHtml) {
+        const button = document.getElementById(buttonId);
+        const log = document.getElementById(logId);
+        button.addEventListener('click', async function () {
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + runningLabel;
+            log.className = 'mb-0 small p-3 bg-light text-muted';
+            log.textContent = 'Илгээж байна...';
+            try {
+                const resp = await fetch(endpoint, { method: 'POST' });
+                const text = await resp.text();
+                log.textContent = text;
+                log.className = 'mb-0 small p-3 ' +
+                    (resp.ok ? 'bg-light text-dark' : 'bg-danger-subtle text-danger');
+            } catch (err) {
+                log.textContent = 'Алдаа: ' + (err && err.message ? err.message : String(err));
+                log.className = 'mb-0 small p-3 bg-danger-subtle text-danger';
+            } finally {
+                button.disabled = false;
+                button.innerHTML = idleHtml;
+            }
+        });
+    }
+
+    wireButton(
+        'btn-seed-links',
+        'log-seed-links',
+        '{{ url_for("seed_default_links_now") }}',
+        'Илгээж байна...',
+        '<i class="bi bi-arrow-clockwise"></i> Холбоосын утгуудыг сэргээх'
+    );
+    wireButton(
+        'btn-seed-snippets',
+        'log-seed-snippets',
+        '{{ url_for("seed_discovery_snippets_now") }}',
+        'Илгээж байна...',
+        '<i class="bi bi-arrow-clockwise"></i> Зөвлөмжүүдийг сэргээх'
+    );
+})();
+</script>
+{% endblock %}

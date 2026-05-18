@@ -403,10 +403,17 @@ def seed_products():
             'product_number': 2001,
             'name': 'Magic Finance',
             'vendor': 'Magic Cloud LLC',
+            # The leading "ХЭН Ч … татаж аваад … код авч ашиглаж болно" sentence
+            # is load-bearing: it stops the bot from telling users they must
+            # attend training before they can install. The training-graduate
+            # free license stays only as an additive perk at the tail.
             'description': (
                 'Санхүү, татварын тайлан гаргахад зориулсан программ. 90 орчим '
                 'төрлийн тайлан гаргах боломжтой (Санхүүгийн, Татварын, '
-                'Удирдлагын, Туслах). Сургалтын төгсөгчдөд үнэгүй license '
+                'Удирдлагын, Туслах). ХЭН Ч https://magicgroup.mn/mn/download-ээс '
+                'татаж аваад "Програм сунгуулах, код авах" линкээр лицензийн '
+                'код авч ашиглаж болно — сургалт суух нь шаардлагагүй. '
+                'НЭМЭЛТ УРАМШУУЛАЛ: Сургалтын төгсөгчдөд үнэгүй license '
                 'олгоно: Танхим (100% танхим) ба Багштай онлайн → 1 жил; '
                 'Хосолсон ба 100% Онлайн → 6 сар.'
             ),
@@ -523,6 +530,37 @@ def seed_discovery_phrasing_snippets():
             ),
         },
         {
+            # Sits at ★high priority because the failure mode it prevents
+            # (telling a buyer they must enroll in training to install) is
+            # the most damaging the bot can make — it actively turns away
+            # ready-to-pay customers. Surfaces above generic routing.
+            'title': 'Magic Finance худалдан авах, суулгах асуулт',
+            'category': 'product-routing',
+            'priority': 'high',
+            'body': (
+                "Хэрэглэгч 'яаж суулгах', 'яаж авах', 'худалдан авч "
+                "болох уу', 'install hiih', 'tatah', 'buy', 'download', "
+                "'хаанаас авах', 'үнэ хэд', 'үнэ ямар вэ', 'price' гэх "
+                "мэт асуувал дараах дарааллаар хариулна:\n"
+                "  (1) Программыг ХЭН Ч АВЧ БОЛНО гэдгийг ТОДОРХОЙ хэл "
+                "— сургалтанд суух нь ШААРДЛАГА БИШ.\n"
+                "  (2) Magic Finance бүтээгдэхүүний 'Програмын шинэ "
+                "хувилбар' линкийг өг (татаж авах хуудас).\n"
+                "  (3) 'Програм сунгуулах, код авах' линкийг өгч, татсаны "
+                "дараа энэ замаар лицензийн код авч идэвхжүүлэх ёстойг "
+                "тайлбарла.\n"
+                "  (4) Үнийн дэлгэрэнгүй мэдээллийг ажилтан хариулна "
+                "гэж нэм.\n"
+                "  (5) Сургалтын төгсөгчдөд үнэгүй license олгодгийг "
+                "ЗӨВХӨН НЭГ ӨГҮҮЛБЭРЭЭР, НЭМЭЛТ боломж байдлаар дурд. "
+                "ХЭРЭГЛЭГЧ САНААТАЙ САНААГҮЙ СУРГАЛТАНД ХАМРАГДАХ "
+                "ШААРДЛАГАТАЙ ГЭЖ БҮҮ ОЙЛГУУЛ.\n"
+                "Утас лавлах хүсэлтийг 2 удаа давтан асуухаас зайлсхий "
+                "— хариултанд линкүүд бий учир хэрэглэгч өөрөө шийдэх "
+                "боломжтой."
+            ),
+        },
+        {
             'title': 'Microsoft Office license асуулт',
             'category': 'product-routing',
             'priority': 'normal',
@@ -602,18 +640,29 @@ def seed_discovery_phrasing_snippets():
 
 def seed_default_magic_links():
     """One-shot helper that wires Magic Financial Group's known set of
-    product/service URLs into the catalog. Idempotent: matches links by
-    URL so re-running doesn't create duplicates. Returns a multi-line
-    log of what it did, suitable for surfacing to the admin via the
-    /admin/api/seed-default-links endpoint."""
+    product / service / course URLs into the catalog.
+
+    Re-runnable: matches existing rows by URL, updating their description
+    + note in place when they already exist. That makes this safe to fire
+    again after the team rewords a link, without creating duplicates.
+    The wording in `description` surfaces verbatim to chat users, so it's
+    intentionally imperative ("Аудит хийлгэе", "Тайлан гаргуулая").
+
+    Also one-shot updates the Magic Finance product description to the
+    "anyone can buy" wording — but only when the current text still matches
+    a known seeded default, so admin edits are never stomped on.
+
+    Returned log is surfaced to the admin via /admin/api/seed-default-links.
+    """
     from models import (BusinessLine, Course, CourseLink, Product, ProductLink,
                         Service, ServiceLink)
 
     log = []
 
-    # The course registration form is a global setting (it lives at the top
-    # of the system prompt as БҮРТГЭЛИЙН ЛИНК). Set it first so the bot
-    # surfaces it for any "how do I register?" question.
+    # The course registration form is also the global БҮРТГЭЛИЙН ЛИНК
+    # injected at the top of the system prompt. Keep the GeneralSetting in
+    # sync alongside the per-course CourseLink rows below so the prompt's
+    # registration block and the course list quote the same URL.
     course_form_url = (
         'https://docs.google.com/forms/d/e/'
         '1FAIpQLSejDvCSqo6J5cgqrdZdnzttz-1ahobmypNr0wLlPTRGehtEog/viewform'
@@ -628,10 +677,6 @@ def seed_default_magic_links():
     else:
         db.session.add(GeneralSetting(key='google_form_url', value=course_form_url))
         log.append(f'Created GeneralSetting.google_form_url = {course_form_url}')
-
-    # ----- Product / Service / Course link maps -----
-    # Each entry: (item-finder, link-table-class, fk-attr, [(description, url, note)...])
-    # Item finders take a session and return the SQLAlchemy row to attach to.
 
     def _find_product(name_substrings):
         for s in name_substrings:
@@ -650,35 +695,35 @@ def seed_default_magic_links():
     plan = [
         # ----- Magic Finance product (Magic Cloud BU) -----
         ('product', ['Magic Finance', 'magic finance'], [
-            ('Програмын шинэ хувилбар татах',
+            ('Програмын шинэ хувилбар',
              'https://magicgroup.mn/mn/download',
-             'Magic Finance програмын хамгийн сүүлийн хувилбарыг татаж авах хуудас.'),
-            ('Хэрэглэгчдийн Facebook групп',
+             'Хэн ч татаж аваад ашиглаж болох үндсэн татах хуудас.'),
+            ('Програм хэрэглэгчдийн грүпп',
              'https://www.facebook.com/groups/magicfinanceusers',
-             'Magic Finance хэрэглэгчдийн нийгэмлэг — заавар, асуултын хариулт энд олдоно.'),
-            ('Заавар, гарын авлага',
+             'Magic Finance хэрэглэгчдийн нийгэмлэг — заавар, асуулт хариулт.'),
+            ('Програмын заавар, гарын авлага',
              'https://help.magicfinance.mn/',
-             'Албан ёсны help center — функц бүрийн заавар, видеотой.'),
-            ('Шинэчлэлтийн мэдээлэл',
+             'Албан ёсны help center — функц бүрийн заавар, видео.'),
+            ('Програм шинэчлэлтийн мэдээлэл',
              'https://magicgroup.mn/mn/category/magicfinance-update',
-             'Програмын шинэ хувилбар, нэмэгдсэн боломжуудын мэдээлэл.'),
-            ('Лиценз сунгуулах, код авах',
+             'Шинэ хувилбар, нэмэгдсэн боломжуудын мэдээлэл.'),
+            ('Програм сунгуулах, код авах',
              'https://magicfinance.hamt.mn/code.php/code/codec',
-             'Лицензийн хугацаа сунгах эсвэл шинээр код авах форм.'),
-            ('Тайлан / файл шалгуулах',
+             'Шинэ хэрэглэгч код авах, эсвэл лиценз сунгах нэгдсэн форм.'),
+            ('Тайлан шалгуулах, файл шалгуулах',
              'https://magicfinance.hamt.mn/code.php/ticket/send',
-             'Гарсан тайлан, файлын алдааг шалгуулах техник дэмжлэгийн ticket илгээх форм.'),
+             'Гарсан тайлан, файлын алдааг шалгуулах техник дэмжлэгийн форм.'),
         ]),
         # ----- Microsoft license product -----
         ('product', ['Microsoft license', 'Microsoft', 'MS Office'], [
-            ('MS Office лиценз авах',
+            ('MS Office лиценз авая',
              'https://forms.office.com/pages/responsepage.aspx?id=0XXBWo5_eEuS8Pz5UCuyi8YXwrWr81RCpchKwHza4p5UNlRCR0lLUVZHV1NLMU85TURTNTJENFYxSS4u&route=shorturl',
              'Microsoft Office license-ийг манайхаас худалдан авах захиалгын форм.'),
         ]),
         # ----- Audit service (Magic Consulting Audit BU) -----
         # Matches "Санхүүгийн тайлан баталгаажуулах аудитын үйлчилгээ"
         ('service', ['аудит', 'audit'], [
-            ('Аудит хийлгэх захиалгын форм',
+            ('Аудит хийлгэе',
              'https://share.teamforms.app/form/MDkyNzU3M2QtNjJhNC00MjRiLWI3ODEtMDExMzUyZDRhZDUzOjVhYzE3NWQxLTdmOGUtNGI3OC05MmYwLWZjZjk1MDJiYjI4YjoyMWRlMWRjNi0zYzFmLTQ3ZWEtYmE4Ny0zMGFkZWVlMjM5MmY=',
              'Аудитийн үйлчилгээ авах захиалгын форм — Magic Consulting Audit.'),
         ]),
@@ -687,11 +732,37 @@ def seed_default_magic_links():
         # "Тайлан гаргуулая" goes to the tax-consulting service because tax
         # reports (татварын тайлан) are filed through that channel.
         ('service', ['татвар', 'мэргэшсэн зөвлөх', 'tax'], [
-            ('Тайлан гаргуулах захиалгын форм',
+            ('Тайлан гаргуулая',
              'https://share.teamforms.app/form/ZmU3YzZjMjItNTA0ZC00NWE5LTkwYjMtYWQ2Mjk4MzI5YjkwOjVhYzE3NWQxLTdmOGUtNGI3OC05MmYwLWZjZjk1MDJiYjI4YjpmMDlkNjE0Ni1jZjU5LTRmNzgtYWZlOS0wMTQyMmNjYWM3Yzk=',
              'Татварын / санхүүгийн тайлан гаргуулах захиалгын форм.'),
         ]),
     ]
+
+    def _upsert_link(LinkModel, fk_field, item_id, description, url, note):
+        """Match by URL; insert if missing, otherwise update description /
+        note / is_active. Returns 'added' | 'updated' | 'unchanged'."""
+        row = LinkModel.query.filter_by(**{fk_field: item_id, 'url': url}).first()
+        if row is None:
+            db.session.add(LinkModel(
+                **{fk_field: item_id},
+                description=description,
+                url=url,
+                note=note,
+                is_active=True,
+                sort_order=0,
+            ))
+            return 'added'
+        changed = False
+        if (row.description or '') != description:
+            row.description = description
+            changed = True
+        if (row.note or '') != (note or ''):
+            row.note = note
+            changed = True
+        if not row.is_active:
+            row.is_active = True
+            changed = True
+        return 'updated' if changed else 'unchanged'
 
     for kind, name_subs, links_to_add in plan:
         if kind == 'product':
@@ -708,25 +779,90 @@ def seed_default_magic_links():
                 f'(add it via the admin panel, then re-run).'
             )
             continue
-        existing_urls = {l.url for l in LinkModel.query.filter_by(
-            **{fk_field: item.id}).all()}
-        added = 0
+        added = updated = unchanged = 0
         for description, url, note in links_to_add:
-            if url in existing_urls:
-                continue
-            db.session.add(LinkModel(
-                **{fk_field: item.id},
-                description=description,
-                url=url,
-                note=note,
-                is_active=True,
-                sort_order=0,
-            ))
-            added += 1
+            outcome = _upsert_link(LinkModel, fk_field, item.id, description, url, note)
+            if outcome == 'added':
+                added += 1
+            elif outcome == 'updated':
+                updated += 1
+            else:
+                unchanged += 1
         log.append(
-            f'{kind} "{item.name}" (#{item.id}): added {added} new link(s), '
-            f'{len(existing_urls)} already present.'
+            f'{kind} "{item.name}" (#{item.id}): +{added} new, ~{updated} updated, '
+            f'={unchanged} unchanged.'
         )
+
+    # ----- Course registration form: one CourseLink per active course -----
+    # Same URL for every course (also held in GeneralSetting.google_form_url
+    # above), so admins editing one course's link won't desync the rest.
+    course_link_description = 'Сургалтанд сууя, бүртгүүлье'
+    course_link_note = (
+        'Бүртгэл бөглөж бүртгүүлэх бодит зам — утас лавлахгүйгээр шууд '
+        'бүртгэгдэх боломжтой. Бүх ангид нэг л форм.'
+    )
+    active_courses = Course.query.filter_by(is_active=True).all()
+    if not active_courses:
+        log.append('SKIPPED courses: no active Course rows (run seed_courses_and_faqs first).')
+    else:
+        c_added = c_updated = c_unchanged = 0
+        for c in active_courses:
+            outcome = _upsert_link(
+                CourseLink, 'course_id', c.id,
+                course_link_description, course_form_url, course_link_note,
+            )
+            if outcome == 'added':
+                c_added += 1
+            elif outcome == 'updated':
+                c_updated += 1
+            else:
+                c_unchanged += 1
+        log.append(
+            f'course registration link: +{c_added} new, ~{c_updated} updated, '
+            f'={c_unchanged} unchanged across {len(active_courses)} active course(s).'
+        )
+
+    # ----- Magic Finance product description: one-shot reword -----
+    # Updates the description ONLY when the current text matches a known
+    # seeded default. Admin-edited descriptions stay untouched. The new
+    # wording removes the "must attend training to install" misconception
+    # by leading with "anyone can download + request a code".
+    KNOWN_DEFAULT_MF_DESCRIPTIONS = {
+        (
+            'Санхүү, татварын тайлан гаргахад зориулсан программ. 90 орчим '
+            'төрлийн тайлан гаргах боломжтой (Санхүүгийн, Татварын, '
+            'Удирдлагын, Туслах). Сургалтын төгсөгчдөд үнэгүй license '
+            'олгоно: Танхим (100% танхим) ба Багштай онлайн → 1 жил; '
+            'Хосолсон ба 100% Онлайн → 6 сар.'
+        ),
+    }
+    NEW_MF_DESCRIPTION = (
+        'Санхүү, татварын тайлан гаргахад зориулсан программ. 90 орчим '
+        'төрлийн тайлан гаргах боломжтой (Санхүүгийн, Татварын, '
+        'Удирдлагын, Туслах). ХЭН Ч https://magicgroup.mn/mn/download-ээс '
+        'татаж аваад "Програм сунгуулах, код авах" линкээр лицензийн код '
+        'авч ашиглаж болно — сургалт суух нь шаардлагагүй. НЭМЭЛТ '
+        'УРАМШУУЛАЛ: Сургалтын төгсөгчдөд үнэгүй license олгоно: Танхим '
+        '(100% танхим) ба Багштай онлайн → 1 жил; Хосолсон ба 100% '
+        'Онлайн → 6 сар.'
+    )
+    mf = _find_product(['Magic Finance', 'magic finance'])
+    if mf is not None:
+        current = (mf.description or '').strip()
+        if current in {d.strip() for d in KNOWN_DEFAULT_MF_DESCRIPTIONS}:
+            mf.description = NEW_MF_DESCRIPTION
+            log.append(
+                f'product "{mf.name}" (#{mf.id}): description updated to '
+                f'anyone-can-buy wording.'
+            )
+        elif current == NEW_MF_DESCRIPTION.strip():
+            log.append(f'product "{mf.name}" (#{mf.id}): description already up to date.')
+        else:
+            log.append(
+                f'product "{mf.name}" (#{mf.id}): description has been admin-edited '
+                f'({len(current)} chars); leaving unchanged. Edit it via the admin '
+                f'panel if needed.'
+            )
 
     db.session.commit()
     return '\n'.join(log)

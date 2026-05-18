@@ -1,4 +1,4 @@
-{# Tab nav shared across System pages (Admin Users, Audit Log, Docs).
+{# Tab nav shared across System pages (Admin Users, Audit Log, Defaults, Docs).
    The sidebar's "Систем" entry lands here; tabs handle the within-
    section navigation. #}
 <ul class="nav nav-tabs mb-3" role="tablist">
@@ -12,6 +12,12 @@
         <a class="nav-link {% if request.endpoint == 'audit_log' %}active{% endif %}"
            href="{{ url_for('audit_log') }}">
             <i class="bi bi-clock-history"></i> Үйлдлийн түүх
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if request.endpoint == 'system_defaults' %}active{% endif %}"
+           href="{{ url_for('system_defaults') }}">
+            <i class="bi bi-arrow-clockwise"></i> Анхдагч утгууд
         </a>
     </li>
     <li class="nav-item">

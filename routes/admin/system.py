@@ -92,9 +92,14 @@ def run_migration_now():
 
 # ===================== SEED DEFAULT LINKS =====================
 # One-shot admin trigger to wire Magic Financial Group's known set of
-# product/service URLs into the catalog (download, manual, support
-# ticket, Office license form, audit form, report form, course form).
-# Idempotent: re-running attaches only the missing links.
+# product / service / course URLs into the catalog (program download,
+# manual, support ticket, Office license form, audit form, tax-report
+# form, course registration form).
+#
+# Re-runnable: matches existing rows by URL, updating description + note
+# in place. Rerun after the team rewords a link to push the new wording
+# to chat without admins re-editing each row. Also one-shot rewords the
+# Magic Finance product description when it still matches a known default.
 
 @app.route('/admin/api/seed-discovery-snippets', methods=['POST'])
 @login_required
@@ -193,6 +198,19 @@ def settings():
 @admin_required
 def docs():
     return render_template('docs.html')
+
+
+# ===================== DEFAULTS =====================
+# UI surface for the seed-default-links and seed-discovery-snippets
+# endpoints. Lets non-technical admins push the canonical link map and
+# routing snippets into the catalog with a single button click instead
+# of curl + an admin URL they need to know.
+
+@app.route('/admin/defaults')
+@login_required
+@admin_required
+def system_defaults():
+    return render_template('defaults.html')
 
 
 # ===================== AUDIT LOG =====================
