@@ -1,0 +1,830 @@
+{% extends "base.html" %}
+
+{% block title %}Ботыг хэрхэн сургах вэ - Magic Bot Admin{% endblock %}
+
+{% block page_title %}AI Сургалт — Бүрэн гарын авлага{% endblock %}
+
+{% block extra_css %}
+<style>
+    .doc-section { scroll-margin-top: 80px; }
+    .doc-toc { position: sticky; top: 80px; max-height: calc(100vh - 100px); overflow-y: auto; }
+    .doc-toc a { text-decoration: none; color: #555; display: block; padding: 4px 0; font-size: 0.92rem; }
+    .doc-toc a:hover { color: #667eea; }
+    .doc-toc a.depth-2 { padding-left: 14px; font-size: 0.85rem; color: #888; }
+    .doc-content h3 { color: #667eea; margin-top: 2.5rem; border-bottom: 1px solid #eee; padding-bottom: 0.4rem; }
+    .doc-content h4 { color: #444; margin-top: 1.8rem; font-size: 1.1rem; }
+    .doc-content h5 { color: #555; margin-top: 1.2rem; font-size: 1.0rem; font-weight: 600; }
+    .doc-content code { background: #f5f5f5; padding: 1px 6px; border-radius: 3px; color: #c7254e; }
+    .doc-content table { font-size: 0.92rem; }
+    .doc-content table th { background: #f8f9fa; white-space: nowrap; }
+    .doc-content .field-name { font-family: monospace; font-weight: bold; color: #c7254e; }
+    .doc-content .good-bg { background: #e8f5e9; border-left: 3px solid #4caf50; padding: 12px; border-radius: 4px; margin: 8px 0; }
+    .doc-content .bad-bg { background: #ffebee; border-left: 3px solid #f44336; padding: 12px; border-radius: 4px; margin: 8px 0; }
+    .doc-content .tip-bg { background: #e3f2fd; border-left: 3px solid #2196f3; padding: 12px; border-radius: 4px; margin: 8px 0; }
+    .doc-content .warn-bg { background: #fff8e1; border-left: 3px solid #ff9800; padding: 12px; border-radius: 4px; margin: 8px 0; }
+    .cheatsheet td { vertical-align: middle; }
+    .cheatsheet .symptom { font-weight: 600; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "system/partials/_tabs.html" %}
+
+<div class="alert alert-info border-info mb-3">
+    <h6 class="mb-1"><i class="bi bi-stars"></i> Энэ гарын авлагын тухай</h6>
+    <p class="small mb-0">
+        Энэ хуудас нь "ботод юу хийгээд буруу хариулж байна" гэдгийг технологийн мэдлэггүй админ
+        хэрэглэгчид өөрөө ойлгож, өөрсдөө засах зорилготой. Бүх талбар, дүрэм, жишээ, нийтлэг
+        алдааг агуулна.
+    </p>
+</div>
+
+<div class="row">
+    <div class="col-lg-3 d-none d-lg-block">
+        <nav class="doc-toc">
+            <h6 class="text-muted text-uppercase small">Агуулга</h6>
+            <a href="#intro">1. Ботын ой ухаан хэрхэн ажилладаг вэ?</a>
+            <a href="#cheatsheet">2. Хурдан шийдвэрийн самбар</a>
+            <a href="#ai-training">3. AI Сургалт хэсэг</a>
+            <a href="#ai-persona" class="depth-2">3.1. Ботын дүр</a>
+            <a href="#ai-base" class="depth-2">3.2. Суурь агуулга</a>
+            <a href="#ai-snippets" class="depth-2">3.3. Snippets</a>
+            <a href="#faqs">4. FAQs хэсэг</a>
+            <a href="#handover">5. Handover түлхүүр үгс</a>
+            <a href="#bot-settings">6. Ботын тохиргоо</a>
+            <a href="#business">7. Бизнесийн удирдлага</a>
+            <a href="#business-bu" class="depth-2">7.1. Бизнес нэгжүүд</a>
+            <a href="#business-product" class="depth-2">7.2. Бүтээгдэхүүн</a>
+            <a href="#business-service" class="depth-2">7.3. Үйлчилгээ</a>
+            <a href="#business-course" class="depth-2">7.4. Сургалт</a>
+            <a href="#business-team" class="depth-2">7.5. Ажилтнууд</a>
+            <a href="#system">8. Систем хэсэг</a>
+            <a href="#best-practices">9. Best practice</a>
+            <a href="#troubleshooting">10. Алдааг засах</a>
+            <a href="#examples">11. Жишээ цуглуулга</a>
+        </nav>
+    </div>
+
+    <div class="col-lg-9 doc-content">
+
+    {# ==================== 1. INTRO ==================== #}
+    <section id="intro" class="doc-section">
+        <h3>1. Ботын ой ухаан хэрхэн ажилладаг вэ?</h3>
+
+        <p>
+            Magic Bot нь хэрэглэгчтэй чатлах болгондоо <strong>system prompt</strong> гэдэг
+            "санах ой"-г уншиж байж хариу үүсгэдэг. Энэ санах ой нь дараах
+            эх сурвалжуудаас автоматаар угсардаг:
+        </p>
+
+        <table class="table table-bordered small">
+            <thead>
+                <tr><th>Эх сурвалж</th><th>Энд юу байх вэ</th><th>Хэн засдаг</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>Ботын дүр</strong> (Persona)</td>
+                    <td>Дуу хоолой, ярианы хэв маяг (1 удаа бичигдсэн)</td>
+                    <td>Зөвхөн Super Admin</td></tr>
+                <tr><td><strong>Суурь агуулга</strong></td>
+                    <td>Компанийн ерөнхий танилцуулга</td>
+                    <td>Зөвхөн Super Admin</td></tr>
+                <tr><td><strong>★ Snippets</strong></td>
+                    <td>Тодорхой нэг асуултанд "ингэж хариул" гэсэн жижиг дүрмүүд</td>
+                    <td>Аль ч админ</td></tr>
+                <tr><td><strong>FAQ</strong></td>
+                    <td>Бэлэн асуулт-хариулт хосууд</td>
+                    <td>Аль ч админ</td></tr>
+                <tr><td><strong>Catalog</strong> (BU, Product, Service, Course)</td>
+                    <td>Үнэн өгөгдөл — нэр, тайлбар, үнэ, цаг, линк</td>
+                    <td>Аль ч админ</td></tr>
+                <tr><td><strong>Team members</strong></td>
+                    <td>Багш, ажилтны нэр, мэргэшил</td>
+                    <td>Аль ч админ</td></tr>
+                <tr><td><strong>Тохиргоо</strong> (handoff, цаг, хариулт)</td>
+                    <td>Ботын зан төлөв, хэзээ хүн рүү дамжуулах гэх мэт</td>
+                    <td>Аль ч админ</td></tr>
+            </tbody>
+        </table>
+
+        <div class="tip-bg">
+            <strong><i class="bi bi-lightbulb"></i> Гол санаа:</strong>
+            Та <em>ямар нэг талбар</em> засахдаа "энэ нь ботын санах ойн алин хэсэгт нөлөөлөх вэ?"
+            гэж бод. Жижиг засвар (snippet) нь зөвхөн нэг асуултанд, том засвар (persona) нь
+            бүх харилцан яриа дээр нөлөөлнө.
+        </div>
+    </section>
+
+    {# ==================== 2. CHEATSHEET ==================== #}
+    <section id="cheatsheet" class="doc-section">
+        <h3>2. Хурдан шийдвэрийн самбар (cheatsheet)</h3>
+
+        <p>Бот буруу хариулж буй бол ямар хэсэгт оч?</p>
+
+        <table class="table table-striped cheatsheet">
+            <thead>
+                <tr><th style="width: 45%">Шинж тэмдэг</th><th>Эхлээд оч</th><th>Эрх</th></tr>
+            </thead>
+            <tbody>
+                <tr><td class="symptom">Ганц асуултанд ганц алдаа</td>
+                    <td>AI Сургалт → Snippets → нэмэх ★high</td>
+                    <td>Аль ч админ</td></tr>
+                <tr><td class="symptom">Олон хэрэглэгч ижил асуултыг асуудаг</td>
+                    <td>FAQs → нэмэх (эсвэл "From Chat"-аас Promote)</td>
+                    <td>Аль ч админ</td></tr>
+                <tr><td class="symptom">Үнэ, нэр, линк хуучирсан</td>
+                    <td>Бизнес → нэгжид орж засах</td>
+                    <td>Аль ч админ</td></tr>
+                <tr><td class="symptom">Цаг хуваарь буруу гарч байна</td>
+                    <td>Бизнес → Сургалт хэсэг (Course)</td>
+                    <td>Аль ч админ</td></tr>
+                <tr><td class="symptom">Бот хэт удаан / богино хариулж байна</td>
+                    <td>AI Сургалт → Ботын дүр (Persona)</td>
+                    <td>Super Admin</td></tr>
+                <tr><td class="symptom">Хэрэглэгч "ажилтан"-аас тусламж асуухад бот хариулсаар л байна</td>
+                    <td>Ботын тохиргоо → Handoff Sensitivity-г "Идэвхтэй" болго</td>
+                    <td>Аль ч админ</td></tr>
+                <tr><td class="symptom">Бот хэрэгцээгүй үед утас лав гэж байна</td>
+                    <td>AI Сургалт → Snippets → ★high дүрэм нэмэх</td>
+                    <td>Аль ч админ</td></tr>
+                <tr><td class="symptom">Шинэ deploy дараа линкүүд алга</td>
+                    <td>Систем → Анхдагч утгууд → Сэргээх</td>
+                    <td>Аль ч админ</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    {# ==================== 3. AI TRAINING ==================== #}
+    <section id="ai-training" class="doc-section">
+        <h3>3. AI Сургалт хэсэг</h3>
+        <p class="text-muted">
+            <code>Ботын удирдлага → AI Сургалт</code> зам. Энд 3 том талбар бий: Persona, Суурь агуулга, Snippets.
+        </p>
+
+        <h4 id="ai-persona">3.1. Ботын дүр (Persona)</h4>
+
+        <p>Ботын ерөнхий "хувийн шинж" — дуу хоолой, ярианы тон, хариултын урт.</p>
+
+        <table class="table table-bordered">
+            <tbody>
+                <tr><td class="field-name">bot_persona</td>
+                    <td><strong>Юу:</strong> Чөлөөт текст. Ботыг хэн гэдгийг танилцуулсан 1-2 параграф.</td></tr>
+                <tr><td><strong>Бот үүнийг яаж ашигладаг вэ?</strong></td>
+                    <td>System prompt-ын ХАМГИЙН ТОП хэсэгт орж, ботын БҮХ хариултанд тон өгнө.</td></tr>
+                <tr><td><strong>Хэзээ засах вэ?</strong></td>
+                    <td>Бот хэт хатуу/албан ёсны / хэт чөлөөт байвал. Эсвэл шинэ "хувийн шинж" нэмэх гэвэл (жнь "хошин шогтой бай", "богино хариул").</td></tr>
+                <tr><td><strong>Хязгаар</strong></td>
+                    <td>200-500 үг хооронд. Зөвхөн Super Admin засна.</td></tr>
+            </tbody>
+        </table>
+
+        <div class="good-bg">
+            <strong>✓ Сайн Persona жишээ:</strong>
+            "Та Magic Financial Group-ын туслах. Та найрсаг, итгэлтэй, туршлагатай зөвлөгчийн маягтай.
+            3 өгүүлбэрээс ихгүй богино хариулна. Хэрэглэгчийг асуулт асуулга руу аль болох
+            оруулна — өөрөө ярилцагч санаачлахаас зайлсхий. Эмодзи (1-2)-ыг үе үе ашиглана."
+        </div>
+
+        <div class="bad-bg">
+            <strong>✗ Муу Persona жишээ:</strong> "Сайн уу" эсвэл "Ботын дүр" гэх мэт хоосон / богино утга. LLM-д хангалттай мэдээлэл өгөөгүй.
+        </div>
+
+        <h4 id="ai-base">3.2. Сургалтын суурь агуулга (Training content)</h4>
+
+        <p>Компанийн талаарх <em>үндсэн</em> мэдээлэл — анх удаагаа бичдэг "блок".</p>
+
+        <table class="table table-bordered">
+            <tbody>
+                <tr><td class="field-name">training_content</td>
+                    <td><strong>Юу:</strong> Чөлөөт текст. Компанийн ерөнхий танилцуулга, түүх, гол мэдэгдэхүйц мэдээллүүд.</td></tr>
+                <tr><td><strong>Хэзээ засах вэ?</strong></td>
+                    <td>Үндсэн өгөгдөл өөрчлөгдөх үед (нэр, үндсэн зорилго). Жижиг шинэчлэлт нэмэхэд ЭНД БУЦАЛТГҮЙ — Snippet-аар нэмнэ үү.</td></tr>
+                <tr><td><strong>Хязгаар</strong></td>
+                    <td>Зөвхөн Super Admin засна. 5000 тэмдэгтээс ихгүй байлгахыг зөвлөе.</td></tr>
+            </tbody>
+        </table>
+
+        <div class="warn-bg">
+            <strong><i class="bi bi-exclamation-triangle"></i> Анхааруулга:</strong>
+            <code>Сургалтын суурь агуулга</code>-ийг ОЛОН ХУНУУС нэгэн зэрэг засвал хэн нэг
+            нь нөгөөгийн ажлыг дардаг. Үүний оронд <strong>Snippet</strong> ашиглах нь
+            аюулгүй — Snippet-үүд бие даан хадгалагдаж бүгд хариултанд нэмэгдэнэ.
+        </div>
+
+        <h4 id="ai-snippets">3.3. Нэмэлт тайлбарууд (★ Snippets)</h4>
+
+        <p>
+            Snippet нь жижиг "дүрэм" — ботод тодорхой нэг асуултанд яаж хариулахыг заана.
+            <strong>Ботын ой ухаанг засах ХАМГИЙН ХҮЧТЭЙ хэрэгсэл.</strong>
+        </p>
+
+        <h5>Snippet-ийн талбарууд</h5>
+        <table class="table table-bordered">
+            <thead><tr><th>Талбар</th><th>Утга</th><th>Хязгаар</th></tr></thead>
+            <tbody>
+                <tr><td class="field-name">title</td>
+                    <td>Snippet-ийг таних богино гарчиг (админд харагдана). Жнь "Magic Finance худалдан авах асуулт".</td>
+                    <td>1-200 тэмдэгт. Шаардлагатай.</td></tr>
+                <tr><td class="field-name">body</td>
+                    <td>Snippet-ийн ҮНДСЭН агуулга. Trigger үг, ХИЙХ, ХИЙХГҮЙ, жишээ хариу.</td>
+                    <td>Шаардлагатай. 100-1000 үг гэж зөвлөе.</td></tr>
+                <tr><td class="field-name">category</td>
+                    <td>Чөлөөт tag (жнь "product-routing", "course-routing"). Зорилго нь зөвхөн админд бүлэглэхэд туслах.</td>
+                    <td>Сонгох (хоосон үлдээж болно).</td></tr>
+                <tr><td class="field-name">priority</td>
+                    <td>★ <strong>high</strong> — хариултын эхэнд ордог, хүчтэй жинтэй.<br>
+                        <strong>normal</strong> — жижиг тодруулга.</td>
+                    <td>Зөвхөн 2 утга.</td></tr>
+                <tr><td class="field-name">is_active</td>
+                    <td>Хаах товчоор snippet-ийг түр унтраана. Устгахаас илүү аюулгүй.</td>
+                    <td>Анхдагч: үнэн.</td></tr>
+            </tbody>
+        </table>
+
+        <h5>Сайн snippet-ийн 4 хэсэг</h5>
+        <ol>
+            <li><strong>Trigger</strong> — хэрэглэгчийн ямар үг/хэллэг энэ дүрмийг идэвхжүүлэх вэ?</li>
+            <li><strong>ХИЙХ</strong> — бот ЗААВАЛ юу хэлэх вэ?</li>
+            <li><strong>ХИЙХГҮЙ ⚠️</strong> — бот ЮУГ ОРХИГДУУЛАХ вэ? (Хамгийн их орхигддог хэсэг!)</li>
+            <li><strong>Жишээ хариу</strong> — зөв хариултын <em>тодорхой</em> жишээ</li>
+        </ol>
+
+        <div class="good-bg">
+            <strong>✓ 4-хэсэгтэй snippet жишээ</strong> (Title: "Аудит асуултын хүрээ", Priority: ★ high):
+            <pre class="small mb-0" style="white-space:pre-wrap;">Хэрэглэгч 'audit', 'аудит', 'нягтлан баталгаажуулах' гэж асуувал:
+
+ХИЙХ:
+  (1) "Тийм ээ, бид аудитын үйлчилгээ үзүүлдэг" 1 өгүүлбэрээр.
+  (2) "Аудит хийлгэе" линкийг өгнө.
+  (3) "Сонирхож байна уу?" гэж тодруулна.
+
+ХИЙХГҮЙ — эдгээр өөр үйлчилгээг ХАМТРУУЛЖ БҮҮ ДУРД:
+  ✗ Татварын зөвлөгөө
+  ✗ CPA outsource
+  ✗ Тайлан гаргуулах
+
+Жишээ зөв хариу: "Тийм ээ, бид аудитын үйлчилгээ үзүүлдэг. Сонирхож
+байна уу? [Аудит хийлгэе линк]"</pre>
+        </div>
+
+        <div class="bad-bg">
+            <strong>✗ Дутуу snippet жишээ:</strong>
+            "Хэрэглэгч аудит асуувал — тийм гэж хэлээд бүх боломжуудыг танилцуул."
+            <br><br>
+            Энэ нь юу ХИЙХГҮЙ-г заагаагүй болохоор бот холбоотой үйлчилгээ бүгдийг нэгтгэж хэлнэ.
+        </div>
+
+        <h5>★ high vs normal — хэзээ алийг сонгох вэ?</h5>
+        <ul>
+            <li><strong>★ high</strong>: ботод <em>заавал</em> дагах ёстой дүрэм. Жнь "хэрэглэгчийг сургалтанд хамрагдах шаардлагатай гэж бүү ойлгуул".</li>
+            <li><strong>normal</strong>: туслах тодруулга. Жнь "Magic Finance-ийн заавар-уудыг help.magicfinance.mn руу холбоно".</li>
+        </ul>
+        <p class="text-muted small">
+            ★ high snippet олон байх нь сайн биш — хамгийн чухал 5-10 дүрэм л ★high байх ёстой.
+            Бусад нь normal-аар хангалттай.
+        </p>
+
+        <h5>Category-ийн ач холбогдол</h5>
+        <p>Category талбар нь зөвхөн админд бүлэглэхэд туслана. Боттой шууд хамаагүй. Жишиг category-ууд:</p>
+        <ul>
+            <li><code>product-routing</code> — бүтээгдэхүүний асуултыг чиглүүлэх</li>
+            <li><code>service-routing</code> — үйлчилгээний асуултыг чиглүүлэх</li>
+            <li><code>course-routing</code> — сургалтын асуултыг чиглүүлэх</li>
+            <li><code>tone</code> — ярианы тон, найрсагтай байдал</li>
+            <li><code>policy</code> — хатуу дүрэм (үнэ хэлэхгүй, г.м.)</li>
+        </ul>
+    </section>
+
+    {# ==================== 4. FAQs ==================== #}
+    <section id="faqs" class="doc-section">
+        <h3>4. FAQs хэсэг</h3>
+        <p class="text-muted"><code>Ботын удирдлага → FAQs</code> зам.</p>
+
+        <h5>FAQ-ийн талбарууд</h5>
+        <table class="table table-bordered">
+            <thead><tr><th>Талбар</th><th>Утга</th><th>Хязгаар</th></tr></thead>
+            <tbody>
+                <tr><td class="field-name">question</td>
+                    <td>Хэрэглэгчийн асуудаг асуулт, баталгаажсан хэлбэрээр</td>
+                    <td>Шаардлагатай. 1 өгүүлбэр.</td></tr>
+                <tr><td class="field-name">answer</td>
+                    <td>2-4 өгүүлбэрийн товч, тодорхой хариу</td>
+                    <td>Шаардлагатай. Урт битгий бичээрэй.</td></tr>
+                <tr><td class="field-name">category</td>
+                    <td>Бүлэг (жнь "Хөтөлбөр", "Төлбөр", "Цаг")</td>
+                    <td>Сонгох.</td></tr>
+            </tbody>
+        </table>
+
+        <h5>FAQ vs Snippet — алийг сонгох вэ?</h5>
+        <table class="table table-bordered">
+            <thead><tr><th>FAQ</th><th>Snippet</th></tr></thead>
+            <tbody>
+                <tr><td>Тодорхой нэг асуултанд тодорхой нэг хариу</td>
+                    <td>Олон төстэй асуултанд нэгэн дүрмээр чиглүүлэх</td></tr>
+                <tr><td>Бот "хариу"-г үг үсгээр шууд хуулж болно</td>
+                    <td>Бот дүрмийг ойлгож шинэ хариу үүсгэнэ</td></tr>
+                <tr><td>Жнь: "Сургалт хэдэн долоо хоног үргэлжилдэг вэ?"</td>
+                    <td>Жнь: "Аудит асуувал зөвхөн аудитын тухай хариул"</td></tr>
+            </tbody>
+        </table>
+
+        <h5>"Чатнаас гарсан асуултууд" (From Chat)</h5>
+        <p>
+            Хэрэв сервер дээр <code>ENABLE_CHAT_CLUSTERING=true</code> тохируулагдсан бол LLM нь
+            бодит хэрэглэгчдийн асуултуудыг автоматаар бүлэглэж энд гарна. <strong>Promote to FAQ</strong>
+            товч дарж шинэ FAQ болгож хадгалаарай.
+        </p>
+        <div class="tip-bg">
+            <strong>Хэрэглэх дараалал:</strong> 7 хоног тутамд энэ хуудсыг харж, ботын мэдэхгүй
+            байсан асуултуудыг FAQ болгож нэм. Энэ нь танай ботын мэдлэг үргэлжлүүлэн нэмэгдэх
+            хамгийн хялбар арга.
+        </div>
+    </section>
+
+    {# ==================== 5. HANDOVER ==================== #}
+    <section id="handover" class="doc-section">
+        <h3>5. Handover түлхүүр үгс</h3>
+        <p class="text-muted"><code>Ботын удирдлага → Handover түлхүүр үгс</code> зам.</p>
+
+        <p>
+            Хэрэглэгчийн мессеж дотор аль нэг түлхүүр үг олдсон тохиолдолд бот ХАРИУ ӨГӨХӨӨ ЗОГСООНО,
+            үүний оронд хүн рүү дамжуулна (Telegram руу мэдэгдэх + админ панелд handoff issue үүсэх).
+        </p>
+
+        <h5>Талбарууд</h5>
+        <table class="table table-bordered">
+            <tbody>
+                <tr><td class="field-name">keyword</td>
+                    <td>Хайх үг/хэллэг (case-insensitive substring match)</td></tr>
+                <tr><td class="field-name">keyword_type</td>
+                    <td>
+                        <strong>explicit</strong> — "ажилтантай ярим", "хүнтэй яримаар" (хэрэглэгч өөрөө хүн хүсч буй).<br>
+                        <strong>frustration</strong> — "болохгүй байна", "ойлгомжгүй" (хэрэглэгч уурлаж буй).
+                    </td></tr>
+                <tr><td class="field-name">is_active</td><td>Идэвхтэй эсэх</td></tr>
+                <tr><td class="field-name">note</td><td>Админд зориулсан тэмдэглэл (заавал биш)</td></tr>
+            </tbody>
+        </table>
+
+        <h5>Хэзээ шинэ үг нэмэх вэ?</h5>
+        <ul>
+            <li>Хэрэглэгч "хариу" хүсч буй боловч бот нь үргэлжлүүлэн хариулсаар байгаа бол → тэр үгийг <strong>explicit</strong> болгож нэм.</li>
+            <li>Хэрэглэгчийн уурлаж эхэлсэн үг ботод харагдаагүй бол → <strong>frustration</strong> болгож нэм.</li>
+        </ul>
+
+        <div class="warn-bg">
+            <strong>Анхааруулга:</strong> Хэт олон үг (жнь "тийм", "ок") handoff болгох нь
+            ажилтны Telegram-ыг мэдэгдлээр баллавна. Зөвхөн ШИЙДВЭРЛЭХ түлхүүр үгсийг нэм.
+        </div>
+    </section>
+
+    {# ==================== 6. BOT SETTINGS ==================== #}
+    <section id="bot-settings" class="doc-section">
+        <h3>6. Ботын тохиргоо</h3>
+        <p class="text-muted"><code>Ботын удирдлага → Ботын тохиргоо</code> зам.</p>
+
+        <h5>Хүн рүү дамжуулах (Handoff)</h5>
+        <table class="table table-bordered">
+            <tbody>
+                <tr><td class="field-name">handoff_sensitivity</td>
+                    <td>
+                        <strong>conservative</strong> (анхдагч) — зөвхөн "ажилтантай" гэх мэт.<br>
+                        <strong>balanced</strong> — нэмж гомдол / шүүмжлэлийг оруулна.<br>
+                        <strong>aggressive</strong> — давтан асуух, ойлгомжгүй гэх мэт бүгдийг.
+                    </td></tr>
+                <tr><td class="field-name">mute_duration_hours</td>
+                    <td>Handoff болсны дараа ботыг хэдэн цаг чимээгүй болгох. Анхдагч: 2 цаг. Хязгаар: 0-168 цаг (7 хоног).</td></tr>
+            </tbody>
+        </table>
+
+        <h5>Telegram мэдэгдэл</h5>
+        <table class="table table-bordered">
+            <tbody>
+                <tr><td class="field-name">telegram_chat_ids</td>
+                    <td>Handoff болоход мэдэгдэл хүлээн авах Telegram chat ID-ууд (таслалаар тусгаарласан). "Туршиж үзэх" товчоор шалгаж болно.</td></tr>
+                <tr><td class="field-name">sound_alerts_enabled</td>
+                    <td>Админ хуудсан дээр дуун дохио (beep) тоглуулах эсэх</td></tr>
+            </tbody>
+        </table>
+
+        <h5>Ажлын цаг + funnel</h5>
+        <table class="table table-bordered">
+            <tbody>
+                <tr><td class="field-name">office_hours_start / end</td>
+                    <td>UB-ийн цагаар (0-23). Off-hours-д handoff бол Telegram мэдэгдэл дээр 🌙 [OFF-HOURS] гарна.</td></tr>
+                <tr><td class="field-name">hot_prospect_stages</td>
+                    <td>"Халуун" харилцагч гэж тооцох funnel шатууд (таслалаар). Анхдагч: <code>pricing,ready</code>.</td></tr>
+            </tbody>
+        </table>
+
+        <h5>Facebook Page-ын сэтгэгдлүүд</h5>
+        <table class="table table-bordered">
+            <tbody>
+                <tr><td class="field-name">training_comment</td><td>Сургалтын пост дээр автоматаар бичигдэх сэтгэгдэл</td></tr>
+                <tr><td class="field-name">celebration_comment</td><td>Баяр хүргэх пост дээр автоматаар бичигдэх сэтгэгдэл</td></tr>
+                <tr><td class="field-name">default_comment</td><td>Бусад пост дээр (анхдагч)</td></tr>
+            </tbody>
+        </table>
+        <div class="warn-bg">
+            <strong>Анхааруулга:</strong> Энэ нь зөвхөн <code>ENABLE_POLLING=true</code> үед ажиллана.
+        </div>
+
+        <h5>Хуучин тогтмол хариултууд (legacy)</h5>
+        <table class="table table-bordered">
+            <tbody>
+                <tr><td class="field-name">handoff_message</td>
+                    <td>Handoff болоход хэрэглэгчид харагдах текст. Жнь "Танд эргэж холбогдоно".</td></tr>
+                <tr><td class="field-name">bot_welcome</td>
+                    <td>Чатны эхний мэндчилгээ. Жнь "Сайн уу! Magic Financial Group-ын туслах байна".</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    {# ==================== 7. BUSINESS MANAGEMENT ==================== #}
+    <section id="business" class="doc-section">
+        <h3>7. Бизнесийн удирдлага</h3>
+        <p class="text-muted"><code>Бизнесийн удирдлага</code> сайдбар цэгээс орно.</p>
+
+        <p>
+            Энд ботын <strong>үнэн өгөгдөл</strong> (catalog) хадгалагдана. Бот эдгээр өгөгдлөөс л
+            үнэ, нэр, цаг хуваарь, линкийг иш татна — өөрөөсөө зохиохгүй.
+        </p>
+
+        <h4 id="business-bu">7.1. Бизнесийн нэгжүүд (BusinessLine)</h4>
+        <p>
+            Магиc Group-ын охин компаниуд / үйлчилгээний чиглэлүүд. Жнь Magic Cloud, Magic Consulting Audit, сургалтын төв.
+        </p>
+
+        <table class="table table-bordered">
+            <thead><tr><th>Талбар</th><th>Утга</th><th>Хязгаар / зөвлөмж</th></tr></thead>
+            <tbody>
+                <tr><td class="field-name">name</td>
+                    <td>Нэгжийн нэр (хэрэглэгчид харагдана)</td>
+                    <td>Шаардлагатай</td></tr>
+                <tr><td class="field-name">description</td>
+                    <td>Богино тайлбар (1-3 өгүүлбэр)</td>
+                    <td>Сонгох</td></tr>
+                <tr><td class="field-name">action</td>
+                    <td>
+                        <strong>answer</strong> — бот энэ нэгжийн талаар <em>товч</em> хариулна.<br>
+                        <strong>refer</strong> — бот зөвхөн "тийм бид үзүүлдэг, дэлгэрэнгүйг ажилтан хариулна" гэж дамжуулна.
+                    </td>
+                    <td>Үндсэн бизнес = answer; туслах = refer.</td></tr>
+                <tr><td class="field-name">product_type</td>
+                    <td><strong>Course</strong> (цагтай хичээл) / <strong>Service</strong> (тогтмол үйлчилгээ) / <strong>Product</strong> (лиценз/программ).</td>
+                    <td>Энэ нь BU доторх "хүүхдүүд" ямар талбартай байхыг тогтооно.</td></tr>
+                <tr><td class="field-name">contact_info / address / email</td>
+                    <td>Тус нэгжийн өөрийн холбоо барих мэдээлэл</td>
+                    <td>Хоосон үлдээвэл "гол оффис"-ын мэдээлэл ашиглагдана.</td></tr>
+                <tr><td class="field-name">established_year</td>
+                    <td>Үүсгэн байгуулагдсан он</td>
+                    <td>Сонгох.</td></tr>
+                <tr><td class="field-name">is_active</td>
+                    <td>Идэвхтэй эсэх. Унтраавал бот "одоогоор зогссон" гэж хариулна.</td>
+                    <td>Устгахаас илүү аюулгүй.</td></tr>
+                <tr><td class="field-name">status_note</td>
+                    <td>Унтрагдсан үе дэх тайлбар (бот харах болно)</td>
+                    <td>Жнь: "2026 оны 06-р сараас эхэлж дахин нээгдэнэ"</td></tr>
+                <tr><td class="field-name">sort_order</td>
+                    <td>Эрэмбэлэлт. Бага тоо нь түрүүлж гарна.</td>
+                    <td>Анхдагч: 0.</td></tr>
+            </tbody>
+        </table>
+
+        <h4 id="business-product">7.2. Бүтээгдэхүүн (Product)</h4>
+        <p>BusinessLine дотор олон Product байж болно. Жнь Magic Cloud BU доор Magic Finance + Microsoft + Kaspersky.</p>
+
+        <table class="table table-bordered">
+            <thead><tr><th>Талбар</th><th>Утга</th><th>Хязгаар / зөвлөмж</th></tr></thead>
+            <tbody>
+                <tr><td class="field-name">product_number</td>
+                    <td>Бүтээгдэхүүний код (жнь 2001)</td>
+                    <td>Сонгох. Олон Product-ыг ялгахад тус болно.</td></tr>
+                <tr><td class="field-name">name</td><td>Нэр</td><td>Шаардлагатай.</td></tr>
+                <tr><td class="field-name">vendor</td><td>Үйлдвэрлэгч (жнь Microsoft, Magic Cloud LLC)</td><td>Сонгох.</td></tr>
+                <tr><td class="field-name">description</td>
+                    <td>Тайлбар — энэ нь ботын хариултанд шууд иш татагдана.</td>
+                    <td><strong>Хамгийн чухал талбар.</strong> Жишээ дор.</td></tr>
+                <tr><td class="field-name">is_main_product</td>
+                    <td>"Үндсэн" гэж тэмдэглэх. Бот үүнийг түрүүлж нэрлэх болно (★main тэмдэгтэй).</td>
+                    <td>Нэгжид нэг л main product байх ёстой.</td></tr>
+                <tr><td class="field-name">is_active / status_note</td>
+                    <td>BusinessLine-тэй ижил</td><td></td></tr>
+            </tbody>
+        </table>
+
+        <div class="good-bg">
+            <strong>✓ Сайн Product description жишээ:</strong>
+            <pre class="small mb-0" style="white-space:pre-wrap;">Санхүү, татварын тайлан гаргахад зориулсан программ. 90 орчим
+төрлийн тайлан гаргах боломжтой. ХЭН Ч https://magicgroup.mn/mn/download-ээс
+татаж аваад "Програм сунгуулах, код авах" линкээр лицензийн код
+авч ашиглаж болно — сургалт суух нь шаардлагагүй. НЭМЭЛТ
+УРАМШУУЛАЛ: Сургалтын төгсөгчдөд үнэгүй license олгоно.</pre>
+        </div>
+
+        <div class="bad-bg">
+            <strong>✗ Муу Product description жишээ:</strong>
+            "Magic Finance бол сайн программ. Сонирхож байвал ажилтантай холбогдоно уу."
+            <br><br>
+            Хэт ерөнхий, утга мэдээлэл байхгүй. Бот үнэн зөв мэдээлэлгүйгээр хариулж чадахгүй.
+        </div>
+
+        <h5>ProductLink — "Холбоосууд"</h5>
+        <table class="table table-bordered">
+            <tbody>
+                <tr><td class="field-name">description</td>
+                    <td>Линкийн нэр — энэ нь хэрэглэгчийн чатад харагдана.</td></tr>
+                <tr><td class="field-name">url</td>
+                    <td>Жинхэнэ линк (https://...). Бот энэ хаягийг хариултанд шууд оруулна.</td></tr>
+                <tr><td class="field-name">note</td>
+                    <td>Зөвхөн админд харагдах тэмдэглэл. Бот ҮЛ ХАРНА.</td></tr>
+                <tr><td class="field-name">is_active</td>
+                    <td>Унтраавал бот тэр линкийг ашиглахаа больно.</td></tr>
+            </tbody>
+        </table>
+
+        <h4 id="business-service">7.3. Үйлчилгээ (Service)</h4>
+        <p>Аудит, татварын зөвлөгөө, CPA гэх мэт <em>тогтмол</em> үйлчилгээнүүд (Course нь хуваарьтай, Service нь хуваариас үл хамаарна).</p>
+
+        <table class="table table-bordered">
+            <thead><tr><th>Талбар</th><th>Утга</th><th>Зөвлөмж</th></tr></thead>
+            <tbody>
+                <tr><td class="field-name">name</td><td>Үйлчилгээний нэр</td><td>Шаардлагатай.</td></tr>
+                <tr><td class="field-name">description</td><td>Тайлбар</td><td>Product-той ижил журамтай.</td></tr>
+                <tr><td class="field-name">price</td><td>Үнэ</td><td>Олон үйлчилгээ "engagement тутамд" тооцдог тул хоосон үлдээж болно.</td></tr>
+                <tr><td class="field-name">duration</td><td>Үргэлжлэх хугацаа (чөлөөт текст)</td><td>Жнь "1-2 долоо хоног", "тогтмол"</td></tr>
+                <tr><td class="field-name">is_active / status_note</td><td>BusinessLine-тэй ижил</td><td></td></tr>
+            </tbody>
+        </table>
+        <p class="text-muted small">ServiceLink-ийн талбарууд ProductLink-тэй яг ижил.</p>
+
+        <h4 id="business-course">7.4. Сургалт (Course)</h4>
+
+        <table class="table table-bordered">
+            <thead><tr><th>Талбар</th><th>Утга</th><th>Хязгаар / зөвлөмж</th></tr></thead>
+            <tbody>
+                <tr><td class="field-name">course_number</td><td>Сургалтын код</td><td>Сонгох.</td></tr>
+                <tr><td class="field-name">name</td><td>Сургалтын нэр</td><td>Шаардлагатай.</td></tr>
+                <tr><td class="field-name">course_type</td>
+                    <td>Зөвхөн 4 утга: <code>Classroom</code> / <code>Hybrid</code> / <code>Online with Teacher</code> / <code>100% Online</code></td>
+                    <td>Эдгээрээс л сонго!</td></tr>
+                <tr><td class="field-name">start_date / end_date</td>
+                    <td>Эхлэх/дуусах огноо</td>
+                    <td><strong>100% Online</strong> нь огнооНОЙ ӨГНӨГ — энэ хоёрыг ХОООСОН үлдээ.</td></tr>
+                <tr><td class="field-name">time</td>
+                    <td>Цагийн интервал (жнь "10:00-13:00", эсвэл "Хүссэн үедээ судлах")</td>
+                    <td>Шаардлагатай.</td></tr>
+                <tr><td class="field-name">price</td>
+                    <td>Төгрөгөөр (жнь 360000)</td>
+                    <td>Шаардлагатай.</td></tr>
+                <tr><td class="field-name">description</td>
+                    <td>Хичээлийн агуулга, давуу талын тайлбар</td>
+                    <td>2-4 өгүүлбэр.</td></tr>
+                <tr><td class="field-name">duration_days</td>
+                    <td>Нийт хоног</td>
+                    <td>Сонгох. Жнь 28 хоног.</td></tr>
+                <tr><td class="field-name">is_recurring</td>
+                    <td>Тогтмол давтагдах эсэх (жнь 4 долоо хоног тутамд шинэ когорт)</td>
+                    <td>Идэвхжүүлбэл огноог автомат тооцоолно.</td></tr>
+                <tr><td class="field-name">schedule_template</td>
+                    <td>JSON формат (зөвхөн is_recurring=true үед): <code>{"interval_weeks": 4, "day_of_week": 0}</code></td>
+                    <td>Анхдагчаар 4 долоо хоног тутамд.</td></tr>
+                <tr><td class="field-name">status_note</td>
+                    <td>Унтрагдсан үе дэх тайлбар</td>
+                    <td>Жнь "Зун амралттай — 9-р сараас".</td></tr>
+            </tbody>
+        </table>
+
+        <div class="warn-bg">
+            <strong>Анхааруулга — Stale courses:</strong>
+            Хэрэв <code>is_recurring=false</code> ба <code>end_date</code> өнгөрсөн бол энэ Сургалт
+            "хуучирсан" гэж тооцогдоно. Бот эдгээрийг "ОДООГИЙН АНГИУД" жагсаалтаас хасч,
+            "ТҮР ЗОГССОН" хэсэгт оруулна. Огноог шинэчилж эсвэл архивлаарай.
+        </div>
+
+        <h4 id="business-team">7.5. Ажилтнууд (TeamMember)</h4>
+        <table class="table table-bordered">
+            <thead><tr><th>Талбар</th><th>Утга</th></tr></thead>
+            <tbody>
+                <tr><td class="field-name">name</td><td>Ажилтны нэр</td></tr>
+                <tr><td class="field-name">role</td><td>Албан тушаал (жнь "Багш", "Хариуцагч")</td></tr>
+                <tr><td class="field-name">specialty</td><td>Мэргэшил (жнь "Татварын асуудал, Magic Finance")</td></tr>
+                <tr><td class="field-name">bio</td><td>Богино намтар, туршлага</td></tr>
+                <tr><td class="field-name">is_active</td><td>Идэвхтэй ажиллаж байгаа эсэх</td></tr>
+                <tr><td class="field-name">sort_order</td><td>Эрэмбэлэлт</td></tr>
+            </tbody>
+        </table>
+        <p class="text-muted small">
+            Бот эдгээрийг "багш хэн вэ?", "хэн заадаг вэ?", "хариуцагч хэн вэ?" асуултанд ашиглана.
+            <code>is_active=false</code> ажилтан ботын хариултанд гарахгүй.
+        </p>
+    </section>
+
+    {# ==================== 8. SYSTEM ==================== #}
+    <section id="system" class="doc-section">
+        <h3>8. Систем хэсэг</h3>
+
+        <h5>Админ хэрэглэгчид</h5>
+        <table class="table table-bordered">
+            <tbody>
+                <tr><td class="field-name">role</td>
+                    <td>
+                        <strong>admin</strong> — ихэнх юмыг засна, гэхдээ Persona / Суурь агуулга / админ нэмж устгахгүй.<br>
+                        <strong>super_admin</strong> — бүх юм.
+                    </td></tr>
+                <tr><td class="field-name">username</td><td>Нэвтрэх нэр (өөрчилж болохгүй)</td></tr>
+                <tr><td class="field-name">email</td><td>Имэйл (үндсэн магадлан холбоо)</td></tr>
+                <tr><td class="field-name">password</td><td>Хамгийн багадаа 12 тэмдэгт.</td></tr>
+            </tbody>
+        </table>
+
+        <h5>Үйлдлийн түүх (Audit log)</h5>
+        <p>
+            Хэн юу хэзээ засаж устгасныг харах. Алдаа гарвал хэн юу хийсэн гэдгийг буцаан мөшгих
+            боломжтой. <strong>Энэ нь буцаах боломжгүй</strong> — зөвхөн харах зориулалттай.
+        </p>
+
+        <h5>Анхдагч утгууд (Defaults)</h5>
+        <p>
+            Хоёр товч:
+        </p>
+        <ul>
+            <li><strong>Холбоосын утгуудыг сэргээх</strong> — бүх ProductLink / ServiceLink / CourseLink-ийг standardize-лж нэмнэ. Шинэ deploy дараа эсвэл DB-ийг "цэвэрлэх" хэрэгтэй үед.</li>
+            <li><strong>Зөвлөмжүүдийг сэргээх</strong> — стандарт чиглүүлгийн snippet-уудыг нэмнэ.</li>
+        </ul>
+        <div class="tip-bg">
+            <strong>Аюулгүй:</strong> Эдгээр товчнууд админы засварыг дардахгүй — зөвхөн дутуу
+            мөрийг нэмж, URL давхцсан үед description-ийг шинэчилнэ.
+        </div>
+    </section>
+
+    {# ==================== 9. BEST PRACTICES ==================== #}
+    <section id="best-practices" class="doc-section">
+        <h3>9. Best Practice — Тогтсон 10 дүрэм</h3>
+
+        <ol>
+            <li><strong>Эхлээд хамгийн жижиг хэрэгслийг ашигла.</strong>
+                Snippet → FAQ → Catalog → Persona. Persona өөрчилсөн нь бүх харилцан яриа дээр нөлөөлнө,
+                Snippet нь зөвхөн нэг асуултанд нөлөөлнө. Жижигийг сонго.</li>
+            <li><strong>Юу хийхгүй гэдгийг үргэлж заа.</strong>
+                Сайн snippet нь "энэ хийхгүй" жагсаалттай байна. Хоёр snippet хүртэл хооронд
+                зөрчилдөж болно — хязгаар тавь.</li>
+            <li><strong>Хариултын дараа турш.</strong>
+                Snippet хадгалсны дараа Messenger-аас (эсвэл туршилтын чатаас) тэр асуултыг
+                асууж шалга. Шинэ дүрэм 5 секундын дотор хүчин төгөлдөр болно.</li>
+            <li><strong>Устгахаас илүү унтраа.</strong>
+                Үйлчилгээ, Сургалт, Snippet байгаа зүйлийг устгаснаар хэн нэг нь юу засаж байсан гэдэг түүх
+                алдагдана. Үргэлж <code>is_active=false</code> руу шилжүүл.</li>
+            <li><strong>Нэг snippet = нэг дүрэм.</strong>
+                Олон дүрэм нэг snippet дотор нийлүүлбэл LLM-д ойлгомжгүй болно. Тус тусдаа snippet бичээрэй.</li>
+            <li><strong>Үнэ, нэр зэргийг харин catalog-д.</strong>
+                Snippet-д үнэ, утас, линк бичих хэрэггүй. Тэдгээр нь Catalog-д байх ёстой. Бот тэндээс
+                автомат татна.</li>
+            <li><strong>Status note ашигла.</strong>
+                Үйлчилгээг түр зогсоохдоо <code>status_note</code> бөглөж яагаад зогссон + хэзээ
+                нээгдэх гэдгийг тэмдэглээрэй.</li>
+            <li><strong>Хэт олон ★high snippet хийхгүй.</strong>
+                ★high нь зөвхөн заавал дагах ёстой 5-10 дүрмэд зориул. Бусад нь normal болго.</li>
+            <li><strong>"From Chat"-ыг 7 хоног тутам шалга.</strong>
+                Чатнаас гарсан жинхэнэ асуултууд танай ботын мэдлэгийн орчуулагч хамгийн сайн
+                эх сурвалж.</li>
+            <li><strong>Audit log-ыг шалга.</strong>
+                Бот сүүлийн үед буруу хариулж байвал хэн юу засаж хэлснийг шалгаарай — заавал
+                таны буруу биш ч байж магадгүй.</li>
+        </ol>
+    </section>
+
+    {# ==================== 10. TROUBLESHOOTING ==================== #}
+    <section id="troubleshooting" class="doc-section">
+        <h3>10. Алдааг засах (Troubleshooting)</h3>
+
+        <h5>Бот тодорхой нэг асуултанд буруу хариулж байна</h5>
+        <p>→ <strong>Snippet нэмэх</strong>. ★high priority. Trigger үгсээ нарийн бич, ХИЙХГҮЙ жагсаалтыг заавал оруул.</p>
+
+        <h5>Бот холбоотой үйлчилгээнүүдийг нэгтгэж хариулна (scope leakage)</h5>
+        <p>→ <strong>Snippet нэмэх</strong>. "ХИЙХГҮЙ" хэсэгт өөр үйлчилгээнүүдийг тодорхой нэрлэ.</p>
+
+        <h5>Бот үнэ хэлж байгаа атал хэлэх ёсгүй</h5>
+        <p>→ <strong>Persona</strong>-ийн ХАМГИЙН ТӨГСГӨЛД "Бүтээгдэхүүний үнэ ХЭЗЭЭ Ч ХЭЛЭХГҮЙ" гэж бич. Эсвэл ★high snippet нэм.</p>
+
+        <h5>Бот хуучирсан огноо/үнийг хэлж байна</h5>
+        <p>→ <strong>Catalog</strong>-аас тухайн зүйлийг засах. Course/Service/Product.</p>
+
+        <h5>Шинэ deploy дараа линк/snippet алга</h5>
+        <p>→ <strong>Систем → Анхдагч утгууд</strong>. Хоёр товчоо нэг бүрт даран.</p>
+
+        <h5>Бот хэрэглэгчийг ажилтантай холбохгүй байгаа</h5>
+        <p>→ <strong>Handover түлхүүр үгс</strong>. Хэрэглэгч ямар үг бичиж байсныг үзэж, тэрхүү үгийг
+        <code>explicit</code> төрлөөр нэм.</p>
+
+        <h5>Бот хэт уртаар хариулж байна</h5>
+        <p>→ <strong>Persona</strong> дотор "2-3 өгүүлбэрээс ихгүй хариулна" гэж тодорхой заа.</p>
+
+        <h5>Telegram мэдэгдэл ирэхгүй байна</h5>
+        <p>→ Ботын тохиргоо → Telegram chat ID-уудыг шалгаад "Туршиж үзэх" товчоор турш.</p>
+    </section>
+
+    {# ==================== 11. EXAMPLES ==================== #}
+    <section id="examples" class="doc-section">
+        <h3>11. Жишээ цуглуулга</h3>
+
+        <h5>Жишээ 1 — "Үнэ хэлэхгүй" дүрэм</h5>
+        <div class="good-bg">
+            <strong>Snippet (★ high, category: policy):</strong>
+            <pre class="small mb-0" style="white-space:pre-wrap;">Title: Бүтээгдэхүүний үнэ ХЭЗЭЭ Ч хэлэхгүй
+
+Body:
+Magic Finance, Microsoft license, Kaspersky зэрэг бүтээгдэхүүнүүдийн
+ҮНЭ-г бот хэлэхгүй. Хэрэглэгч "үнэ хэд?", "хэдээр зарна?" гэж асуувал:
+
+ХИЙХ:
+  (1) "Үнийн дэлгэрэнгүй мэдээллийг ажилтан хариулна" гэж нэр.
+  (2) Тухайн бүтээгдэхүүний "Худалдан авах" эсвэл "Код авах" линкийг өг.
+  (3) "Утасны дугаараа үлдээх үү?" гэж сонголт өг.
+
+ХИЙХГҮЙ:
+  ✗ Тоо хэлэхгүй (60,000₮ г.м.)
+  ✗ "ойролцоогоор", "хямд" гэх мэт ерөнхий үг хэлэхгүй
+
+Сургалтын үнийг (Course-уудын price) хэлэх нь ЗӨВШӨӨРӨГДӨНӨ.</pre>
+        </div>
+
+        <h5>Жишээ 2 — "Сургалт бүртгүүлэх линк"</h5>
+        <div class="good-bg">
+            <strong>FAQ:</strong>
+            <table class="table table-sm table-bordered mb-0">
+                <tr><td><strong>Question:</strong></td><td>Яаж бүртгүүлэх вэ?</td></tr>
+                <tr><td><strong>Answer:</strong></td>
+                    <td>Та бүртгэлийн форм бөглөж шууд бүртгүүлж болно: https://docs.google.com/forms/.../viewform. Эсвэл утасны дугаараа үлдээвэл бүртгэлийн ажилтан тантай холбогдоно.</td></tr>
+                <tr><td><strong>Category:</strong></td><td>Бүртгэл</td></tr>
+            </table>
+        </div>
+
+        <h5>Жишээ 3 — Дутуу Snippet → засаж буй</h5>
+        <div class="bad-bg">
+            <strong>Алдаатай хувилбар:</strong>
+            <pre class="small mb-0" style="white-space:pre-wrap;">Title: Татварын асуулт
+
+Body: Хэрэглэгч татвар асуувал татварын зөвлөгөөг танилцуул.</pre>
+        </div>
+        <p class="text-center small text-muted my-1">↓ Засаж сайжруулсан</p>
+        <div class="good-bg">
+            <strong>Зөв хувилбар:</strong>
+            <pre class="small mb-0" style="white-space:pre-wrap;">Title: Татварын зөвлөгөөний асуулт
+Category: service-routing
+Priority: ★ high
+
+Body:
+Хэрэглэгч 'татварын зөвлөгөө', 'татвар тооцох', 'tatvariin medeelel',
+'татвар бодуулах' гэж асуувал:
+
+ХИЙХ:
+  (1) "Тийм ээ, бид татварын мэргэшсэн зөвлөх үйлчилгээ үзүүлдэг
+       (Magic Consulting Audit)" гэж 1 өгүүлбэрээр.
+  (2) "Тайлан гаргуулая" линкийг өгнө.
+  (3) "Сонирхож байна уу?" гэж тодруулна.
+
+ХИЙХГҮЙ — өөр үйлчилгээг хольж бүү дурд:
+  ✗ Аудитын үйлчилгээ
+  ✗ Сургалт
+  ✗ Magic Finance программ
+
+Жишээ зөв хариу: "Тийм ээ, бид татварын мэргэшсэн зөвлөх
+үйлчилгээ үзүүлдэг. Сонирхож байна уу? [Тайлан гаргуулая линк]"</pre>
+        </div>
+
+        <h5>Жишээ 4 — Сургалт is_active=false болгох</h5>
+        <p>2026 оны зун амралттай байх Magic Cloud сургалтыг түр зогсоох жишээ:</p>
+        <div class="tip-bg">
+            <ol class="mb-0">
+                <li>Бизнесийн удирдлага → нэгж рүүгээ ороод тухайн Сургалтын <strong>Засах</strong> товч.</li>
+                <li><code>is_active</code> = unchecked болго.</li>
+                <li><code>status_note</code> бөглө: "Зун амралттай. 2026 оны 9-р сараас дахин нээгдэнэ."</li>
+                <li>Хадгална. Бот энэ сургалтын талаар асуувал зогссон гэдгийг тодорхой хэлнэ.</li>
+            </ol>
+        </div>
+
+        <h5>Жишээ 5 — Шинэ бүтээгдэхүүн нэмэх</h5>
+        <div class="tip-bg">
+            <ol class="mb-0">
+                <li>Бизнесийн удирдлага → Magic Cloud (эсвэл тохирох BU) → <strong>+ Бүтээгдэхүүн нэмэх</strong>.</li>
+                <li>Нэр, vendor, тайлбар бөглөнө.</li>
+                <li>Тайлбарт <em>ХЭН ашиглаж болох</em> гэдгийг ТОДОРХОЙ бичээрэй.</li>
+                <li>Линк нэмэх — худалдан авах форм, заавар, дэмжлэг гэх мэт.</li>
+                <li>Хадгална.</li>
+                <li>Туршилт: Messenger-аас "тэр бүтээгдэхүүний тухай" асууж шалга.</li>
+            </ol>
+        </div>
+    </section>
+
+    <hr class="my-4">
+    <p class="text-muted small text-center">
+        <i class="bi bi-bookmark-check"></i>
+        Энэ заавар нь ботын зан төлөв өөрчлөгдөх бүрд шинэчлэгдэх ёстой. Эргэлзвэл код доторх
+        <code>services/_prompt.py</code> файлыг харж бот яг юу "уншиж" буйг шалгаж болно
+        (зөвхөн developer).
+    </p>
+
+    </div>{# /col-lg-9 #}
+</div>{# /row #}
+{% endblock %}

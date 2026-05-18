@@ -200,6 +200,19 @@ def docs():
     return render_template('docs.html')
 
 
+# ===================== TRAIN AI GUIDE =====================
+# Comprehensive Mongolian-language admin guide for non-technical admins:
+# explains every field in the catalog, bot, and system pages, the rules
+# for what to put in each, and best practices. Lives as its own System
+# tab so it sits next to the technical docs without crowding them.
+
+@app.route('/admin/train-ai-guide')
+@login_required
+@admin_required
+def train_ai_guide():
+    return render_template('train_ai.html')
+
+
 # ===================== DEFAULTS =====================
 # UI surface for the seed-default-links and seed-discovery-snippets
 # endpoints. Lets non-technical admins push the canonical link map and
