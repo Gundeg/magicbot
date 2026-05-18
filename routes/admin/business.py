@@ -10,6 +10,7 @@ Legacy URLs (/admin/business-lines, /admin/courses, /admin/services,
 /admin/products, /admin/team) remain as redirects or compatibility views
 until Phase 6 deletes them.
 """
+import logging
 from datetime import datetime
 
 from flask import flash, jsonify, redirect, render_template, request, url_for
@@ -24,6 +25,8 @@ from models import (BusinessLine, Course, CourseLink, GeneralSetting, Product,
 from services import (ALLOWED_COURSE_TYPES, SELF_PACED_COURSE_TYPE,
                       advance_recurring_courses, archive_past_courses,
                       log_admin_action)
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_links_payload(raw_links):
@@ -128,7 +131,7 @@ def business_management_units():
                 line = BusinessLine(is_active=True)
                 db.session.add(line)
             else:
-                line = BusinessLine.query.get(data.get('id'))
+                line = db.session.get(BusinessLine, data.get('id'))
                 if not line:
                     return jsonify({'success': False}), 404
             line.name = (data.get('name') or '').strip()
@@ -161,7 +164,7 @@ def business_management_units():
             return jsonify({'success': True, 'id': line.id})
 
         if action == 'toggle':
-            line = BusinessLine.query.get(data.get('id'))
+            line = db.session.get(BusinessLine, data.get('id'))
             if not line:
                 return jsonify({'success': False}), 404
             line.is_active = not line.is_active
@@ -175,7 +178,7 @@ def business_management_units():
             return jsonify({'success': True, 'is_active': line.is_active})
 
         if action == 'delete':
-            line = BusinessLine.query.get(data.get('id'))
+            line = db.session.get(BusinessLine, data.get('id'))
             if not line:
                 return jsonify({'success': False}), 404
             label, lid = line.name, line.id
@@ -226,7 +229,7 @@ def _handle_team_member_action(data):
         return jsonify({'success': True, 'id': member.id})
 
     if action in ('edit', 'toggle', 'delete'):
-        member = TeamMember.query.get(data.get('id'))
+        member = db.session.get(TeamMember, data.get('id'))
         if not member:
             return jsonify({'success': False}), 404
         if action == 'edit':
@@ -290,8 +293,7 @@ def business_unit_detail(bu_id):
     try:
         return _render_business_unit_detail(bu_id)
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).exception(
+        logger.exception(
             'business_unit_detail(%s) failed: %s', bu_id, e,
         )
         from flask import Response
@@ -320,7 +322,7 @@ def _render_business_unit_detail(bu_id):
         except Exception as e:
             # Fall back to a links-free query if course_link doesn't
             # exist yet (Phase 1 auto-bootstrap incomplete on prod).
-            print(f'business_unit_detail Course query fallback: {e}')
+            logger.info('business_unit_detail Course query fallback: %s', e)
             items = Course.query.order_by(Course.id.asc()).all()
     elif line.product_type == 'Service':
         try:
@@ -331,7 +333,7 @@ def _render_business_unit_detail(bu_id):
                                Service.id.asc())
                      .all())
         except Exception as e:
-            print(f'business_unit_detail Service query fallback: {e}')
+            logger.info('business_unit_detail Service query fallback: %s', e)
             items = Service.query.order_by(Service.id.asc()).all()
     elif line.product_type == 'Product':
         try:
@@ -343,7 +345,7 @@ def _render_business_unit_detail(bu_id):
                                Product.id.asc())
                      .all())
         except Exception as e:
-            print(f'business_unit_detail Product query fallback: {e}')
+            logger.info('business_unit_detail Product query fallback: %s', e)
             items = (Product.query
                      .filter_by(business_line_id=line.id)
                      .order_by(Product.id.asc())
@@ -384,21 +386,19 @@ def _render_business_unit_detail(bu_id):
             SELF_PACED_COURSE_TYPE=SELF_PACED_COURSE_TYPE,
         )
     except Exception as e:
-        # Last-resort fallback so the admin can see what's wrong without
-        # digging through Render logs. Only shown to authenticated admins
-        # by the @admin_required decorator above, so revealing the error
-        # is acceptable.
-        import traceback
-        tb = traceback.format_exc()
-        print(f'business_unit_detail render failed for bu_id={bu_id}: {e}')
-        print(tb)
+        # Last-resort fallback so the admin sees the error class/message
+        # in the UI; the full traceback goes to server logs only (admin
+        # sessions shouldn't have a way to fingerprint the deployment).
+        logger.exception(
+            'business_unit_detail render failed for bu_id=%s: %s', bu_id, e
+        )
         return render_template(
             'business/unit_detail_error.html',
             line=line,
             item_count=len(items),
             product_type=line.product_type,
             error_message=str(e),
-            traceback=tb,
+            traceback='',
         ), 500
 
 
@@ -515,7 +515,7 @@ def courses():
             return jsonify({'success': True, 'id': course.id})
 
         elif action == 'edit':
-            course = Course.query.get(data.get('id'))
+            course = db.session.get(Course, data.get('id'))
             if not course:
                 return jsonify({'success': False, 'error': 'Анги олдсонгүй.'}), 404
             fields, err = _parse_course_payload(data, existing=course)
@@ -534,7 +534,7 @@ def courses():
             return jsonify({'success': True})
 
         elif action == 'toggle':
-            course = Course.query.get(data.get('id'))
+            course = db.session.get(Course, data.get('id'))
             if course:
                 course.is_active = not course.is_active
                 course.status_note = (data.get('status_note') or '').strip() or None
@@ -547,7 +547,7 @@ def courses():
                 return jsonify({'success': True, 'is_active': course.is_active})
 
         elif action == 'delete':
-            course = Course.query.get(data.get('id'))
+            course = db.session.get(Course, data.get('id'))
             if course:
                 label = course.name
                 cid = course.id
@@ -584,7 +584,7 @@ def services():
                 item = Service(is_active=True)
                 db.session.add(item)
             else:
-                item = Service.query.get(data.get('id'))
+                item = db.session.get(Service, data.get('id'))
                 if not item:
                     return jsonify({'success': False}), 404
             item.name = (data.get('name') or '').strip()
@@ -612,7 +612,7 @@ def services():
             return jsonify({'success': True, 'id': item.id})
 
         if action == 'toggle':
-            item = Service.query.get(data.get('id'))
+            item = db.session.get(Service, data.get('id'))
             if not item:
                 return jsonify({'success': False}), 404
             item.is_active = not item.is_active
@@ -626,7 +626,7 @@ def services():
             return jsonify({'success': True, 'is_active': item.is_active})
 
         if action == 'delete':
-            item = Service.query.get(data.get('id'))
+            item = db.session.get(Service, data.get('id'))
             if not item:
                 return jsonify({'success': False}), 404
             label, sid = item.name, item.id
@@ -663,7 +663,7 @@ def business_lines():
                 line = BusinessLine(is_active=True)
                 db.session.add(line)
             else:
-                line = BusinessLine.query.get(data.get('id'))
+                line = db.session.get(BusinessLine, data.get('id'))
                 if not line:
                     return jsonify({'success': False}), 404
             line.name = (data.get('name') or '').strip()
@@ -698,7 +698,7 @@ def business_lines():
             return jsonify({'success': True, 'id': line.id})
 
         if action == 'toggle':
-            line = BusinessLine.query.get(data.get('id'))
+            line = db.session.get(BusinessLine, data.get('id'))
             if not line:
                 return jsonify({'success': False}), 404
             line.is_active = not line.is_active
@@ -712,7 +712,7 @@ def business_lines():
             return jsonify({'success': True, 'is_active': line.is_active})
 
         if action == 'delete':
-            line = BusinessLine.query.get(data.get('id'))
+            line = db.session.get(BusinessLine, data.get('id'))
             if not line:
                 return jsonify({'success': False}), 404
             label, lid = line.name, line.id
@@ -744,7 +744,7 @@ def _parse_product_payload(data, existing=None):
         bl_id = int(bl_id)
     except (TypeError, ValueError):
         return None, None, 'business_line_id шаардлагатай.'
-    if not BusinessLine.query.get(bl_id):
+    if not db.session.get(BusinessLine, bl_id):
         return None, None, 'Сонгосон бизнесийн чиглэл олдсонгүй.'
 
     raw_number = data.get('product_number')
@@ -821,7 +821,7 @@ def products():
             return jsonify({'success': True, 'id': product.id})
 
         if action == 'edit':
-            product = Product.query.get(data.get('id'))
+            product = db.session.get(Product, data.get('id'))
             if not product:
                 return jsonify({'success': False, 'error': 'Бүтээгдэхүүн олдсонгүй.'}), 404
             fields, links, err = _parse_product_payload(data, existing=product)
@@ -840,7 +840,7 @@ def products():
             return jsonify({'success': True})
 
         if action == 'toggle':
-            product = Product.query.get(data.get('id'))
+            product = db.session.get(Product, data.get('id'))
             if not product:
                 return jsonify({'success': False}), 404
             product.is_active = not product.is_active
@@ -854,7 +854,7 @@ def products():
             return jsonify({'success': True, 'is_active': product.is_active})
 
         if action == 'delete':
-            product = Product.query.get(data.get('id'))
+            product = db.session.get(Product, data.get('id'))
             if not product:
                 return jsonify({'success': False}), 404
             label, pid = product.name, product.id

@@ -23,6 +23,9 @@ def _seed_env():
     os.environ.setdefault('SECRET_KEY', 'test-secret-key')
     os.environ.setdefault('FACEBOOK_ACCESS_TOKEN', 'test-access-token')
     os.environ.setdefault('FACEBOOK_APP_SECRET', 'test-app-secret')
+    # OpenAI's client raises at construction without a key. We never make
+    # real API calls in unit tests; the value is a stub.
+    os.environ.setdefault('OPENAI_API_KEY', 'sk-test-key')
     os.environ.setdefault('SQLALCHEMY_DATABASE_URI', 'sqlite:///:memory:')
     # Skip init_db() so tests can build their own minimal schema.
     os.environ.setdefault('FLASK_SKIP_INIT_DB', '1')
@@ -61,3 +64,16 @@ def db_session(app):
     from extensions import db
     yield db.session
     db.session.rollback()
+
+
+@pytest.fixture(autouse=True)
+def _clear_setting_cache(app):
+    """services.get_setting caches per-request via flask.g. pytest-flask
+    auto-pushes a single request context that outlives a single test, so
+    without this fixture the cache leaks values between tests."""
+    from flask import g, has_request_context
+    if has_request_context():
+        g.pop('_setting_cache', None)
+    yield
+    if has_request_context():
+        g.pop('_setting_cache', None)

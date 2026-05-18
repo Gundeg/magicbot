@@ -155,7 +155,7 @@ def promote_cluster_to_faq():
     keeps its row (with promoted_to_faq_id set) so we know not to surface
     it again on the next clustering run."""
     data = request.get_json() or {}
-    cluster = ChatQuestionCluster.query.get(data.get('id'))
+    cluster = db.session.get(ChatQuestionCluster, data.get('id'))
     if not cluster:
         return jsonify({'success': False, 'error': 'Cluster олдсонгүй.'}), 404
     answer = (data.get('answer') or '').strip()
@@ -232,7 +232,7 @@ def faq():
             return jsonify({'success': True, 'id': faq_item.id})
 
         elif action == 'edit':
-            faq_item = FAQ.query.get(data.get('id'))
+            faq_item = db.session.get(FAQ, data.get('id'))
             if faq_item:
                 faq_item.question = data.get('question')
                 faq_item.answer = data.get('answer')
@@ -241,7 +241,7 @@ def faq():
                 return jsonify({'success': True})
 
         elif action == 'delete':
-            faq_item = FAQ.query.get(data.get('id'))
+            faq_item = db.session.get(FAQ, data.get('id'))
             if faq_item:
                 db.session.delete(faq_item)
                 db.session.commit()
@@ -323,7 +323,7 @@ def training_snippets():
         return jsonify({'success': True, 'id': snippet.id})
 
     if action == 'edit':
-        snippet = TrainingSnippet.query.get(data.get('id'))
+        snippet = db.session.get(TrainingSnippet, data.get('id'))
         if not snippet:
             return jsonify({'success': False}), 404
         snippet.title = (data.get('title') or '').strip()
@@ -336,7 +336,7 @@ def training_snippets():
         return jsonify({'success': True})
 
     if action == 'toggle':
-        snippet = TrainingSnippet.query.get(data.get('id'))
+        snippet = db.session.get(TrainingSnippet, data.get('id'))
         if not snippet:
             return jsonify({'success': False}), 404
         snippet.is_active = not snippet.is_active
@@ -344,7 +344,7 @@ def training_snippets():
         return jsonify({'success': True, 'is_active': snippet.is_active})
 
     if action == 'delete':
-        snippet = TrainingSnippet.query.get(data.get('id'))
+        snippet = db.session.get(TrainingSnippet, data.get('id'))
         if not snippet:
             return jsonify({'success': False}), 404
         db.session.delete(snippet)
@@ -393,7 +393,7 @@ def handoff_keywords():
                 kw = HandoffKeyword()
                 db.session.add(kw)
             else:
-                kw = HandoffKeyword.query.get(data.get('id'))
+                kw = db.session.get(HandoffKeyword, data.get('id'))
                 if not kw:
                     return jsonify({'success': False}), 404
             kw.keyword = (data.get('keyword') or '').strip().lower()
@@ -406,7 +406,7 @@ def handoff_keywords():
             return jsonify({'success': True, 'id': kw.id})
 
         if action == 'toggle':
-            kw = HandoffKeyword.query.get(data.get('id'))
+            kw = db.session.get(HandoffKeyword, data.get('id'))
             if not kw:
                 return jsonify({'success': False}), 404
             kw.is_active = not kw.is_active
@@ -414,7 +414,7 @@ def handoff_keywords():
             return jsonify({'success': True, 'is_active': kw.is_active})
 
         if action == 'delete':
-            kw = HandoffKeyword.query.get(data.get('id'))
+            kw = db.session.get(HandoffKeyword, data.get('id'))
             if not kw:
                 return jsonify({'success': False}), 404
             db.session.delete(kw)

@@ -206,7 +206,7 @@ def work_tasks():
         action = data.get('action')
 
         if action == 'mark_contacted':
-            user = FacebookUser.query.get(data.get('user_id'))
+            user = db.session.get(FacebookUser, data.get('user_id'))
             if not user:
                 return jsonify({'success': False}), 404
             user.lead_status = 'contacted'
@@ -219,7 +219,7 @@ def work_tasks():
             return jsonify({'success': True})
 
         if action == 'resolve_issue':
-            issue = AdminIssue.query.get(data.get('id'))
+            issue = db.session.get(AdminIssue, data.get('id'))
             if not issue:
                 return jsonify({'success': False}), 404
             issue.status = 'resolved'
@@ -245,7 +245,7 @@ def work_tasks():
             return jsonify({'success': True, 'bot_unmuted': unmuted})
 
         if action == 'update_status':
-            issue = AdminIssue.query.get(data.get('id'))
+            issue = db.session.get(AdminIssue, data.get('id'))
             if not issue:
                 return jsonify({'success': False}), 404
             new_status = data.get('status')
@@ -269,7 +269,7 @@ def work_tasks():
             return jsonify({'success': True})
 
         if action == 'unmute':
-            user = FacebookUser.query.get(data.get('user_id'))
+            user = db.session.get(FacebookUser, data.get('user_id'))
             if not user:
                 return jsonify({'success': False}), 404
             user.bot_muted_until = None
@@ -285,7 +285,7 @@ def work_tasks():
             # so the customer talks to the staff member directly via
             # Facebook Page Inbox without bot interference. Default 4h
             # if the admin didn't supply a duration.
-            issue = AdminIssue.query.get(data.get('id'))
+            issue = db.session.get(AdminIssue, data.get('id'))
             if not issue or not issue.facebook_user:
                 return jsonify({'success': False, 'error': 'issue олдсонгүй'}), 404
             try:

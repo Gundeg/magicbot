@@ -34,6 +34,7 @@ logging.basicConfig(
     level=os.environ.get('LOG_LEVEL', 'INFO').upper(),
     format='%(asctime)s %(levelname)s %(name)s: %(message)s',
 )
+logger = logging.getLogger(__name__)
 
 # ===================== APP CONSTRUCTION =====================
 
@@ -73,10 +74,10 @@ def _ensure_sqlite_path_writable(uri):
         os.remove(probe)
         return uri
     except OSError as e:
-        print(
-            f"WARNING: SQLALCHEMY_DATABASE_URI={uri!r} is not usable "
-            f"({e!s}). Falling back to {_default_db_uri!r}. "
-            "Likely you set the URI before adding a Render Persistent Disk."
+        logger.warning(
+            "SQLALCHEMY_DATABASE_URI=%r is not usable (%s). Falling back to %r. "
+            "Likely you set the URI before adding a Render Persistent Disk.",
+            uri, e, _default_db_uri,
         )
         return _default_db_uri
 
@@ -147,6 +148,12 @@ def inject_tenant():
     }
 
 
+# Shared constants used by route modules. Defined BEFORE `import routes`
+# so admin/system.py's `from app import MIN_ADMIN_PASSWORD_LENGTH` works
+# during the chained import.
+MIN_ADMIN_PASSWORD_LENGTH = 12
+
+
 # ===================== ROUTES =====================
 # Importing the routes package registers every @app.route(...) decorator
 # against the Flask app constructed above. Must happen after `app` exists.
@@ -154,8 +161,6 @@ import routes  # noqa: E402,F401
 
 
 # ===================== INITIALIZATION =====================
-
-MIN_ADMIN_PASSWORD_LENGTH = 12
 
 
 def _run_pending_migrations():
@@ -176,15 +181,15 @@ def _run_pending_migrations():
     """
     db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
     if not db_uri.startswith('sqlite:'):
-        print('Phase 1 auto-bootstrap: non-sqlite DB URI, skipping (apply migrations manually).')
+        logger.info('Phase 1 auto-bootstrap: non-sqlite DB URI, skipping (apply migrations manually).')
         return
     try:
         db_path = str(db.engine.url.database)
     except Exception as e:
-        print(f'!!! Phase 1 auto-bootstrap: could not resolve DB path ({e!s}); skipping.')
+        logger.error('!!! Phase 1 auto-bootstrap: could not resolve DB path (%s); skipping.', str(e))
         return
     if not db_path or not os.path.exists(db_path):
-        print(f'Phase 1 auto-bootstrap: DB not found at {db_path!r}, skipping (fresh install).')
+        logger.info('Phase 1 auto-bootstrap: DB not found at %s, skipping (fresh install).', repr(db_path))
         return
     try:
         from scripts.apply_phase_1_migration import apply_migration
@@ -195,7 +200,7 @@ def _run_pending_migrations():
         # broken but admin pages will at least render so the operator
         # can read the error and rerun the migration manually.
         import traceback
-        print(f'!!! Phase 1 auto-bootstrap raised {type(e).__name__}: {e!s}')
+        logger.error('!!! Phase 1 auto-bootstrap raised %s: %s', type(e).__name__, str(e))
         traceback.print_exc()
 
 
@@ -230,16 +235,18 @@ def init_db():
                 )
                 db.session.add(admin)
                 db.session.commit()
-                print("Default admin user created with username 'admin' (super_admin).")
+                logger.info("Default admin user created with username 'admin' (super_admin).")
             else:
-                print("INITIAL_ADMIN_PASSWORD not set — skipping default admin creation. "
-                      "Set it and redeploy to create the admin user.")
+                logger.warning(
+                    "INITIAL_ADMIN_PASSWORD not set — skipping default admin creation. "
+                    "Set it and redeploy to create the admin user."
+                )
 
         if User.query.count() > 0 and not User.query.filter_by(role='super_admin').first():
             oldest = User.query.order_by(User.created_at.asc()).first()
             oldest.role = 'super_admin'
             db.session.commit()
-            print(f"No super_admin found — promoted '{oldest.username}' to super_admin.")
+            logger.info("No super_admin found — promoted '%s' to super_admin.", oldest.username)
 
         # Emergency forgot-password recovery via env vars. Set both
         # RESET_ADMIN_USERNAME and RESET_ADMIN_PASSWORD on Render, redeploy,
@@ -249,22 +256,23 @@ def init_db():
         reset_pw = os.environ.get('RESET_ADMIN_PASSWORD')
         if reset_user and reset_pw:
             if len(reset_pw) < MIN_ADMIN_PASSWORD_LENGTH:
-                print(
-                    f"!!! RESET_ADMIN_PASSWORD too short (need >= "
-                    f"{MIN_ADMIN_PASSWORD_LENGTH} chars). Skipping reset."
+                logger.error(
+                    "!!! RESET_ADMIN_PASSWORD too short (need >= %s chars). Skipping reset.",
+                    MIN_ADMIN_PASSWORD_LENGTH,
                 )
             else:
                 target = User.query.filter_by(username=reset_user).first()
                 if target:
                     target.password = generate_password_hash(reset_pw)
                     db.session.commit()
-                    print(
-                        f"!!! WARNING: password reset for '{reset_user}' via env var. "
-                        f"REMOVE RESET_ADMIN_USERNAME and RESET_ADMIN_PASSWORD now "
-                        f"and redeploy, or the password resets on every boot."
+                    logger.warning(
+                        "!!! password reset for '%s' via env var. REMOVE "
+                        "RESET_ADMIN_USERNAME and RESET_ADMIN_PASSWORD now and "
+                        "redeploy, or the password resets on every boot.",
+                        reset_user,
                     )
                 else:
-                    print(f"!!! RESET_ADMIN_USERNAME='{reset_user}' not found.")
+                    logger.error("!!! RESET_ADMIN_USERNAME='%s' not found.", reset_user)
 
 
 # Run at import so gunicorn workers initialize the DB on boot.

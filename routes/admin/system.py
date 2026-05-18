@@ -51,7 +51,7 @@ def run_migration_now():
 
     if not db_path or not os.path.exists(db_path):
         return Response(
-            f"DB file not found at {db_path!r}\n",
+            f"DB file not found at {repr(db_path)}\n",
             status=500, mimetype='text/plain; charset=utf-8',
         )
 
@@ -291,7 +291,7 @@ def create_admin():
 @login_required
 @super_admin_required
 def delete_admin(admin_id):
-    target = User.query.get(admin_id)
+    target = db.session.get(User, admin_id)
     if not target:
         flash('Тухайн админ олдсонгүй.', 'error')
         return redirect(url_for('admins'))
@@ -359,7 +359,7 @@ def change_my_password():
 @login_required
 @super_admin_required
 def reset_admin_password(admin_id):
-    target = User.query.get(admin_id)
+    target = db.session.get(User, admin_id)
     if not target:
         flash('Тухайн админ олдсонгүй.', 'error')
         return redirect(url_for('admins'))
@@ -389,7 +389,7 @@ def reset_admin_password(admin_id):
 @login_required
 @super_admin_required
 def toggle_admin_role(admin_id):
-    target = User.query.get(admin_id)
+    target = db.session.get(User, admin_id)
     if not target:
         flash('Тухайн админ олдсонгүй.', 'error')
         return redirect(url_for('admins'))
