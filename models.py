@@ -336,6 +336,39 @@ class Service(db.Model):
 # scripts/apply_phase_1_migration.py for the migration details.
 
 
+class ConversationTopic(db.Model):
+    """Topic tag attached to a FacebookUser based on what they've asked about.
+
+    The single-string `FacebookUser.conversation_topic` column is too narrow
+    for clients who ask about several services in one chat. This table lets
+    us attach many topics per user, each with first/last_seen timestamps and
+    a short evidence snippet so an admin can see "this client asked about
+    audit on 2026-05-10 and training on 2026-05-15".
+
+    `topic` is the human-visible name of an active BusinessLine, Product,
+    Service, or Course at the time of classification — denormalized so the
+    tag stays readable even after the source row is renamed or deleted.
+    `topic_kind` distinguishes which catalog the topic came from so the
+    admin UI can group / filter.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    facebook_user_id = db.Column(
+        db.Integer, db.ForeignKey('facebook_user.id'), nullable=False, index=True
+    )
+    topic = db.Column(db.String(200), nullable=False)
+    topic_kind = db.Column(db.String(20), nullable=False, index=True)
+    evidence = db.Column(db.Text)
+    first_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    facebook_user = db.relationship(
+        'FacebookUser',
+        backref=db.backref('topics', lazy=True, cascade='all, delete-orphan'),
+    )
+    __table_args__ = (
+        db.UniqueConstraint('facebook_user_id', 'topic', name='uq_conv_topic_user_topic'),
+    )
+
+
 class ChatQuestionCluster(db.Model):
     """LLM-grouped themes from real user chat messages, populated weekly by
     services.cluster_chat_questions(). Surfaces FAQ candidates: each row is

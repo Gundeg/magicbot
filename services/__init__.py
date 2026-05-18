@@ -379,70 +379,218 @@ def post_comment_on_page(post_id, comment_text):
 
 # ===================== SESSION + FUNNEL CLASSIFIERS =====================
 
-def classify_conversation(fb_user):
-    """Use gpt-4o-mini to classify what business line (or generic category)
-    a user's conversation is about, then persist to facebook_user.conversation_topic.
+def _collect_classification_topics():
+    """Build the topic catalog the classifier picks from.
 
-    Accepts either a FacebookUser instance or its primary key. The id form
-    is what background-thread callers use, since the request-scoped session
-    that originally loaded the instance is gone by the time the worker runs."""
+    Only ACTIVE rows in BusinessLine / Product / Service / Course
+    contribute. The returned list pairs each topic name with its kind
+    ('business_line' | 'product' | 'service' | 'course') so callers can
+    persist the source for filtering in the admin UI.
+
+    Names are deduplicated case-insensitively, with the first source
+    winning (BusinessLine outranks Product outranks Service outranks
+    Course). A duplicate name across kinds is rare in practice but the
+    dedup keeps the prompt short and predictable.
+    """
+    catalog = []
+    seen_lower = set()
+
+    def _add(name, kind):
+        if not name:
+            return
+        clean = name.strip()
+        if not clean or clean.lower() in seen_lower:
+            return
+        seen_lower.add(clean.lower())
+        catalog.append({'name': clean, 'kind': kind})
+
+    for bl in BusinessLine.query.filter_by(is_active=True).order_by(
+        BusinessLine.sort_order.asc(), BusinessLine.id.asc()
+    ).all():
+        _add(bl.name, 'business_line')
+    for p in Product.query.filter_by(is_active=True).order_by(
+        Product.sort_order.asc(), Product.id.asc()
+    ).all():
+        _add(p.name, 'product')
+    # Service is imported lazily — older codepaths may not always have it
+    # in scope when this module is first reachable.
+    from models import Service as _Service
+    for s in _Service.query.filter_by(is_active=True).order_by(
+        _Service.sort_order.asc(), _Service.id.asc()
+    ).all():
+        _add(s.name, 'service')
+    for c in Course.query.filter_by(is_active=True).order_by(
+        Course.id.asc()
+    ).all():
+        _add(c.name, 'course')
+    return catalog
+
+
+def classify_user_topics(fb_user):
+    """Tag a FacebookUser with the Magic-related topics they've asked about.
+
+    Replaces the single-topic ``classify_conversation``. The LLM is told the
+    list of allowed topics (active BusinessLine / Product / Service / Course
+    names) and must return ONLY topics from that list — generic curiosity,
+    off-topic chatter, and competitor questions get no topic at all. Each
+    returned topic is upserted into ConversationTopic with first/last_seen
+    timestamps and a short evidence snippet from the user's message.
+
+    Reads at most the user's last 60 messages within the
+    classification_lookback_days window (admin setting, capped at 30 days).
+    Returns the number of topics attached (or refreshed). Catches its own
+    errors and logs them — callers (webhook background queue and the
+    /admin/api/classify-conversations route) must keep working even if
+    OpenAI is having a bad day.
+
+    Accepts either a FacebookUser instance or its primary key, mirroring
+    the contract callers expect from the background queue.
+    """
+    from models import ConversationTopic  # local — table created by ensure_schema
     try:
         if isinstance(fb_user, int):
             fb_user = db.session.get(FacebookUser, fb_user)
             if fb_user is None:
-                return
+                return 0
 
+        lookback = get_classification_lookback_days()
+        since = datetime.utcnow() - timedelta(days=lookback)
         recent_messages = (
             Message.query
             .filter_by(facebook_user_id=fb_user.id, sender='user')
+            .filter(Message.created_at >= since)
             .order_by(Message.created_at.desc())
-            .limit(15)
+            .limit(60)
             .all()
         )
         if not recent_messages:
-            return
+            return 0
 
-        business_lines = [
-            bl.name for bl in
-            BusinessLine.query.filter_by(is_active=True).order_by(BusinessLine.sort_order).all()
-        ]
+        catalog = _collect_classification_topics()
+        if not catalog:
+            logger.info(
+                'classify_user_topics: no active business lines/products/services/courses; '
+                'leaving user %s untouched.', fb_user.id,
+            )
+            return 0
 
+        # Build a short, numbered list of allowed topics for the prompt
+        # so the LLM has zero room to invent new ones.
+        topic_lines = '\n'.join(
+            f'  {i+1}. {t["name"]} ({t["kind"]})' for i, t in enumerate(catalog)
+        )
         conversation_text = '\n'.join(
-            m.content for m in reversed(recent_messages)
+            f'- {(m.content or "").strip()}' for m in reversed(recent_messages)
         )
 
-        category_list = business_lines + ['general', 'not_related', 'other_request']
-        categories_str = ', '.join(f'"{c}"' for c in category_list)
-
         prompt = (
-            f"You are classifying a Messenger conversation for a Mongolian training/consulting center.\n"
-            f"Available categories: {categories_str}\n\n"
-            f"Business line names like {', '.join(repr(b) for b in business_lines)} represent specific non-training services.\n"
-            f'"general" = ANY question about training courses: course names, pricing, schedules, start dates, duration, content, '
-            f'teaching format (online/classroom), enrollment, registration, or any other training-center topic\n'
-            f'"not_related" = clearly off-topic messages with no connection to the company or its services '
-            f'(e.g. jokes, random chat, completely unrelated questions)\n'
-            f'"other_request" = operational requests NOT about enrolling (e.g. VAT registration, certification follow-up, pitch scheduling)\n\n'
-            f"When in doubt between \"general\" and \"not_related\", choose \"general\".\n\n"
-            f"Recent user messages:\n{conversation_text}\n\n"
-            f"Respond with ONLY the single most relevant category name from the list above. "
-            f"No explanation, no punctuation, just the category string."
+            "You tag Mongolian Messenger conversations with the Magic "
+            "Financial Group topics they touch. The customer's messages "
+            "are below. Pick ONLY the topics from the ALLOWED list that "
+            "the customer actually asks about or shows interest in. If "
+            "the conversation is generic small talk, off-topic, or about "
+            "a service we do not offer, return an empty list — do NOT "
+            "force a match.\n\n"
+            f"ALLOWED TOPICS:\n{topic_lines}\n\n"
+            f"USER MESSAGES (most recent last):\n{conversation_text}\n\n"
+            "Return strict JSON with this shape (no prose, no markdown):\n"
+            '{"topics": [{"name": "<exact name from ALLOWED list>", '
+            '"evidence": "<short Mongolian quote / paraphrase from the '
+            'user explaining why this topic was tagged, <= 160 chars>"}]}\n'
+            "Use the names verbatim from the ALLOWED list. Maximum 5 "
+            "topics. Empty list is valid."
         )
 
         result = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": "You output strict JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={'type': 'json_object'},
             temperature=0,
-            max_tokens=60,
+            max_tokens=400,
         )
+        raw = result.choices[0].message.content or '{}'
 
-        raw = result.choices[0].message.content.strip().strip('"').strip("'")
-        matched = next((c for c in category_list if c.lower() == raw.lower()), None)
-        if matched:
-            fb_user.conversation_topic = matched
-            db.session.commit()
+        try:
+            parsed = json.loads(raw)
+        except Exception as e:
+            logger.warning(
+                'classify_user_topics: JSON parse failed for user %s: %s; raw[:200]=%r',
+                fb_user.id, e, raw[:200],
+            )
+            return 0
+
+        items = parsed.get('topics') if isinstance(parsed, dict) else None
+        if not isinstance(items, list):
+            return 0
+
+        # Match LLM-returned names back to the catalog case-insensitively.
+        # Anything that doesn't match an active topic is dropped silently —
+        # we don't trust the model to invent topic names.
+        by_name = {t['name'].lower(): t for t in catalog}
+        now = datetime.utcnow()
+        attached = 0
+        for it in items[:10]:
+            if not isinstance(it, dict):
+                continue
+            name = (it.get('name') or '').strip()
+            evidence = (it.get('evidence') or '').strip()[:500] or None
+            if not name:
+                continue
+            matched = by_name.get(name.lower())
+            if not matched:
+                continue
+            row = (ConversationTopic.query
+                   .filter_by(facebook_user_id=fb_user.id, topic=matched['name'])
+                   .first())
+            if row is None:
+                row = ConversationTopic(
+                    facebook_user_id=fb_user.id,
+                    topic=matched['name'],
+                    topic_kind=matched['kind'],
+                    evidence=evidence,
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+                db.session.add(row)
+            else:
+                row.last_seen_at = now
+                row.topic_kind = matched['kind']
+                if evidence:
+                    row.evidence = evidence
+            attached += 1
+        db.session.commit()
+
+        # Keep the legacy single-topic field populated with the most-recently-
+        # seen topic so older UI surfaces don't go blank. Drop it the next time
+        # the admin panel is touched if we want a clean break.
+        if attached:
+            latest = (ConversationTopic.query
+                      .filter_by(facebook_user_id=fb_user.id)
+                      .order_by(ConversationTopic.last_seen_at.desc())
+                      .first())
+            if latest:
+                fb_user.conversation_topic = latest.topic
+                db.session.commit()
+        return attached
     except Exception as e:
-        logger.error("classify_conversation error for user %s: %s", fb_user.id, e)
+        logger.exception('classify_user_topics error for user %s: %s',
+                         getattr(fb_user, 'id', fb_user), e)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return 0
+
+
+# Backwards-compatibility shim. Anything still calling the old
+# ``classify_conversation`` (background queue in routes/webhook.py) now
+# routes through the new topic classifier. Keep the name so old
+# `from services import classify_conversation` imports don't break.
+def classify_conversation(fb_user):
+    return classify_user_topics(fb_user)
 
 
 def classify_session(last_msg_at):
@@ -565,6 +713,27 @@ def get_handoff_sensitivity():
     """
     value = (get_setting('handoff_sensitivity', 'conservative') or '').strip().lower()
     return value if value in ('conservative', 'balanced', 'aggressive') else 'conservative'
+
+
+CLASSIFICATION_LOOKBACK_DEFAULT_DAYS = 30
+CLASSIFICATION_LOOKBACK_MAX_DAYS = 30
+
+
+def get_classification_lookback_days():
+    """How far back the topic classifier reads a user's messages, in days.
+
+    Admin-settable via the `classification_lookback_days` GeneralSetting.
+    Clamped to [1, 30]: 0 would classify nothing, and 30 days matches the
+    explicit cap promised in the admin UI. Default 30 if unset.
+    """
+    raw = (get_setting('classification_lookback_days', '') or '').strip()
+    if not raw:
+        return CLASSIFICATION_LOOKBACK_DEFAULT_DAYS
+    try:
+        days = int(raw)
+    except ValueError:
+        return CLASSIFICATION_LOOKBACK_DEFAULT_DAYS
+    return max(1, min(days, CLASSIFICATION_LOOKBACK_MAX_DAYS))
 
 
 def get_mute_duration_hours():

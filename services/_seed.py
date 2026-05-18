@@ -145,6 +145,37 @@ def ensure_schema():
             except Exception as e:
                 logger.info("Schema migration skipped (handoff_keyword table): %s", e)
 
+    if 'conversation_topic' not in inspector.get_table_names():
+        with db.engine.begin() as conn:
+            try:
+                conn.exec_driver_sql(
+                    "CREATE TABLE conversation_topic ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  facebook_user_id INTEGER NOT NULL REFERENCES facebook_user(id),"
+                    "  topic VARCHAR(200) NOT NULL,"
+                    "  topic_kind VARCHAR(20) NOT NULL,"
+                    "  evidence TEXT,"
+                    "  first_seen_at DATETIME,"
+                    "  last_seen_at DATETIME,"
+                    "  UNIQUE (facebook_user_id, topic)"
+                    ")"
+                )
+                conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_conv_topic_user "
+                    "ON conversation_topic (facebook_user_id)"
+                )
+                conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_conv_topic_kind "
+                    "ON conversation_topic (topic_kind)"
+                )
+                conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_conv_topic_last_seen "
+                    "ON conversation_topic (last_seen_at)"
+                )
+                logger.info("Schema migration: created conversation_topic table")
+            except Exception as e:
+                logger.info("Schema migration skipped (conversation_topic table): %s", e)
+
 
 
 # ===================== TRAINING-DATA LINTER =====================

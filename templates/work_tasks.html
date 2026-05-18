@@ -168,8 +168,27 @@
                 </div>
             </div>
             <div class="card-body">
-                <input type="text" class="form-control mb-3" id="leadsSearchInput"
-                       placeholder="Нэр эсвэл утсаар хайх..." aria-label="Лидийг нэр эсвэл утсаар хайх">
+                <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+                    <input type="text" class="form-control flex-grow-1" id="leadsSearchInput"
+                           placeholder="Нэр эсвэл утсаар хайх..." aria-label="Лидийг нэр эсвэл утсаар хайх"
+                           style="min-width: 220px;">
+                    <form method="get" class="d-flex gap-2 align-items-center">
+                        <input type="hidden" name="tab" value="leads">
+                        <select name="topic" class="form-select form-select-sm" onchange="this.form.submit()" aria-label="Сэдвээр шүүх">
+                            <option value="">Бүх сэдэв ({{ leads|length }})</option>
+                            {% for tname, tcount in all_topic_counts.items()|sort %}
+                            <option value="{{ tname }}" {% if topic_filter == tname %}selected{% endif %}>
+                                {{ tname }} ({{ tcount }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                        {% if topic_filter %}
+                        <a href="{{ url_for('work_tasks', tab='leads') }}" class="btn btn-sm btn-outline-secondary" title="Шүүлтийг арилгах">
+                            <i class="bi bi-x"></i>
+                        </a>
+                        {% endif %}
+                    </form>
+                </div>
                 <div class="table-responsive">
                     <table class="table table-hover">
                         <thead>
@@ -178,7 +197,7 @@
                                 <th>Утас</th>
                                 <th>Төлөв</th>
                                 <th>Үе шат</th>
-                                <th>Сонирхол</th>
+                                <th>Сонирхолтой сэдвүүд</th>
                                 <th>Бүртгэгдсэн</th>
                                 <th>Мессеж</th>
                                 <th><span class="visually-hidden">Үйлдэл</span></th>
@@ -208,15 +227,14 @@
                                 </td>
                                 <td><span class="badge bg-light text-muted border">{{ lead.funnel_stage or 'curious' }}</span></td>
                                 <td>
-                                    {% set topic = lead.conversation_topic %}
-                                    {% if topic == 'general' %}
-                                        <span class="badge bg-info">Ерөнхий</span>
-                                    {% elif topic == 'not_related' %}
-                                        <span class="badge bg-secondary">Холбоогүй</span>
-                                    {% elif topic == 'other_request' %}
-                                        <span class="badge bg-warning text-dark">Бусад</span>
-                                    {% elif topic %}
-                                        <span class="badge bg-brand">{{ topic }}</span>
+                                    {% set topics = leads_topics.get(lead.id, []) %}
+                                    {% if topics %}
+                                        {% for t in topics %}
+                                        <span class="badge bg-brand me-1 mb-1"
+                                              title="{{ t.topic_kind }} · сүүлд: {{ t.last_seen_at.strftime('%Y-%m-%d %H:%M') }}{% if t.evidence %} · {{ t.evidence }}{% endif %}">
+                                            {{ t.topic }}
+                                        </span>
+                                        {% endfor %}
                                     {% else %}
                                         <span class="text-muted small">—</span>
                                     {% endif %}
@@ -505,12 +523,29 @@
                 credentials: 'same-origin',
                 headers: {'Content-Type': 'application/json'},
             })
-            .then(r => r.json())
+            .then(async r => {
+                // Always parse as JSON, but tolerate the error path (HTML
+                // body, network failure) so a 500 doesn't surface as
+                // "Unexpected token '<'".
+                const text = await r.text();
+                try { return JSON.parse(text); }
+                catch (_) { throw new Error(`Сервер JSON буцаасангүй (HTTP ${r.status}). ${text.slice(0, 120)}`); }
+            })
             .then(d => {
-                alert(`Оролдсон: ${d.attempted}\nАнгилагдсан: ${d.classified}\n\nХуудсыг шинэчилж байна...`);
+                if (d.error) {
+                    alert(`Ангилахад алдаа гарлаа: ${d.message || d.error}`);
+                    return;
+                }
+                alert(
+                    `Сүүлийн ${d.lookback_days} хоногийн харилцааг ангилав.\n\n` +
+                    `Оролдсон: ${d.attempted}\n` +
+                    `Сэдэвтэй болсон лид: ${d.classified}\n` +
+                    `Нийт нэмэгдсэн сэдвийн тэмдэг: ${d.topics_attached}\n\n` +
+                    `Хуудсыг шинэчилж байна...`
+                );
                 location.reload();
             })
-            .catch(e => alert('Алдаа: ' + e))
+            .catch(e => alert('Алдаа: ' + e.message))
             .finally(() => { btn.disabled = false; btn.innerHTML = original; });
         });
     }

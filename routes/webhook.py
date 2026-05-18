@@ -17,9 +17,8 @@ from app import app, csrf
 from extensions import db
 from models import FacebookUser, Message
 from services import (PHONE_RE, bot_response_implies_handoff,
-                      check_rate_limit, classify_conversation,
-                      classify_session, detect_funnel_stage,
-                      enqueue_background, first_name_of,
+                      check_rate_limit, classify_session, classify_user_topics,
+                      detect_funnel_stage, enqueue_background, first_name_of,
                       generate_bot_response, get_facebook_user_info,
                       is_in_handoff, refresh_facebook_user_name,
                       send_facebook_message, should_handoff,
@@ -203,11 +202,11 @@ def webhook():
                                 send_user_message=False,
                             )
 
-                    # Fire-and-forget the conversation classifier — it's an
+                    # Fire-and-forget the topic classifier — it's an
                     # OpenAI call and shouldn't keep Facebook waiting on
                     # the webhook response. Errors are logged inside the
                     # function so failures here don't affect the user.
-                    enqueue_background(classify_conversation, fb_user.id)
+                    enqueue_background(classify_user_topics, fb_user.id)
 
     return jsonify({'status': 'ok'}), 200
 

@@ -14,10 +14,13 @@ from sqlalchemy.orm import joinedload
 from app import app
 from auth import admin_required
 from extensions import db
-from models import AdminIssue, BusinessLine, FacebookUser, Message
-from services import (FACEBOOK_ACCESS_TOKEN, FACEBOOK_APP_SECRET,
-                      classify_conversation, get_handoff_poll_payload,
-                      get_setting, get_telegram_chat_ids, log_admin_action,
+from models import (AdminIssue, BusinessLine, ConversationTopic, FacebookUser,
+                    Message)
+from services import (CLASSIFICATION_LOOKBACK_MAX_DAYS, FACEBOOK_ACCESS_TOKEN,
+                      FACEBOOK_APP_SECRET, classify_user_topics,
+                      get_classification_lookback_days,
+                      get_handoff_poll_payload, get_setting,
+                      get_telegram_chat_ids, log_admin_action,
                       refresh_facebook_user_name, take_over_chat)
 
 
@@ -335,6 +338,37 @@ def work_tasks():
         .all()
     ) if leads_rows else {}
 
+    # Pull every topic tag attached to the displayed leads in a single
+    # query, then build a per-user list ordered by last_seen_at desc so
+    # the most recent topic shows first in each row.
+    leads_topics = {}
+    if leads_rows:
+        topic_rows = (ConversationTopic.query
+                      .filter(ConversationTopic.facebook_user_id.in_(
+                          [l.id for l in leads_rows]
+                      ))
+                      .order_by(ConversationTopic.last_seen_at.desc())
+                      .all())
+        for t in topic_rows:
+            leads_topics.setdefault(t.facebook_user_id, []).append(t)
+
+    # Optional topic filter ('?topic=Magic Finance'): when set, hide
+    # leads that don't carry the chosen topic. The filter values come
+    # from the same set we just collected, so it stays accurate even
+    # when the catalog changes.
+    topic_filter = (request.args.get('topic') or '').strip()
+    if topic_filter:
+        keep = {uid for uid, ts in leads_topics.items()
+                if any(t.topic == topic_filter for t in ts)}
+        leads_rows = [l for l in leads_rows if l.id in keep]
+
+    # Distinct topic names (with counts) for the filter dropdown.
+    all_topic_counts = dict(
+        db.session.query(ConversationTopic.topic, db.func.count(ConversationTopic.id))
+        .group_by(ConversationTopic.topic)
+        .all()
+    )
+
     # --- Tab 3: every open issue (not just aging) ---
     open_issues = (AdminIssue.query
                    .options(joinedload(AdminIssue.facebook_user))
@@ -367,6 +401,11 @@ def work_tasks():
         hot_prospects=hot_prospects,
         leads=leads_rows,
         leads_msg_counts=leads_msg_counts,
+        leads_topics=leads_topics,
+        topic_filter=topic_filter,
+        all_topic_counts=all_topic_counts,
+        classification_lookback_days=get_classification_lookback_days(),
+        classification_lookback_max=CLASSIFICATION_LOOKBACK_MAX_DAYS,
         open_issues=open_issues,
         aging_issues=aging_issues,
         muted_users=muted_users,
@@ -465,29 +504,48 @@ def backfill_names():
 @login_required
 @admin_required
 def classify_conversations_backfill():
-    """Re-classify up to 300 users who have sent at least one message."""
-    users = (
-        FacebookUser.query
-        .join(Message, Message.facebook_user_id == FacebookUser.id)
-        .filter(Message.sender == 'user')
-        .group_by(FacebookUser.id)
-        .order_by(
-            FacebookUser.conversation_topic.is_(None).desc(),
-            FacebookUser.updated_at.asc(),
+    """Re-classify up to 300 users who have sent at least one message
+    within the admin-configured lookback window. Always returns JSON —
+    a 500 here would surface as an "Unexpected token '<'" toast in the
+    Leads tab JS because the fetch parses the response body as JSON.
+    """
+    try:
+        lookback = get_classification_lookback_days()
+        since = datetime.utcnow() - timedelta(days=lookback)
+        users = (
+            FacebookUser.query
+            .join(Message, Message.facebook_user_id == FacebookUser.id)
+            .filter(Message.sender == 'user')
+            .filter(Message.created_at >= since)
+            .group_by(FacebookUser.id)
+            .order_by(FacebookUser.updated_at.asc())
+            .limit(300)
+            .all()
         )
-        .limit(300)
-        .all()
-    )
-    classified = 0
-    for u in users:
-        before = u.conversation_topic
-        classify_conversation(u)
-        if u.conversation_topic and u.conversation_topic != before:
-            classified += 1
-    return jsonify({
-        'attempted': len(users),
-        'classified': classified,
-    })
+        classified = 0
+        topics_attached_total = 0
+        for u in users:
+            n = classify_user_topics(u)
+            if n:
+                classified += 1
+                topics_attached_total += n
+        return jsonify({
+            'attempted': len(users),
+            'classified': classified,
+            'topics_attached': topics_attached_total,
+            'lookback_days': lookback,
+        })
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception(
+            'classify-conversations endpoint failed: %s', e,
+        )
+        return jsonify({
+            'error': 'classify_failed',
+            'message': str(e)[:300],
+            'attempted': 0,
+            'classified': 0,
+        }), 500
 
 
 @app.route('/admin/api/handoff-poll')

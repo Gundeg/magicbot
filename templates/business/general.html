@@ -71,6 +71,21 @@
                 <div class="form-text">Бот зориуд салангид холбоосгүй сургалт/үйлчилгээний хувьд эндэх линкийг иш татна.</div>
             </div>
 
+            <div class="col-12"><hr class="my-2"></div>
+
+            <div class="col-md-6">
+                <label class="form-label" for="classification_lookback_days">
+                    Харилцааны ангиллын хугацаа (хоног)
+                </label>
+                <input type="number" min="1" max="30" step="1"
+                       class="form-control" id="classification_lookback_days"
+                       name="classification_lookback_days"
+                       value="{{ settings.classification_lookback_days or '30' }}">
+                <div class="form-text">
+                    Лидийн харилцааг ангилахдаа хэдэн өдрийн мессежийг харах вэ? 1-30 хооронд. 30 хоног дээд хязгаар.
+                </div>
+            </div>
+
             <div class="col-12 text-end">
                 <button type="submit" class="btn btn-brand">
                     <i class="bi bi-save"></i> Хадгалах

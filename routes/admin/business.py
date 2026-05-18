@@ -68,6 +68,9 @@ BUSINESS_GENERAL_KEYS = (
     'main_office_address',
     'main_office_phone',
     'google_form_url',
+    # Days of message history the topic classifier reads per user.
+    # Clamped to [1, 30] server-side in services.get_classification_lookback_days.
+    'classification_lookback_days',
 )
 
 
