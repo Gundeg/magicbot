@@ -4,18 +4,22 @@ CSRF is intentionally disabled — Facebook POSTs here directly, not a browser.
 The request is authenticated by HMAC-SHA256 against the raw body using
 FACEBOOK_APP_SECRET (see services.verify_facebook_signature).
 """
+import logging
 import os
 from datetime import datetime
 
 from flask import jsonify, request
 from sqlalchemy.exc import IntegrityError
 
+logger = logging.getLogger(__name__)
+
 from app import app, csrf
 from extensions import db
 from models import FacebookUser, Message
 from services import (PHONE_RE, bot_response_implies_handoff,
                       check_rate_limit, classify_conversation,
-                      classify_session, detect_funnel_stage, first_name_of,
+                      classify_session, detect_funnel_stage,
+                      enqueue_background, first_name_of,
                       generate_bot_response, get_facebook_user_info,
                       is_in_handoff, refresh_facebook_user_name,
                       send_facebook_message, should_handoff,
@@ -31,10 +35,9 @@ def webhook():
     sig_header = request.headers.get('X-Hub-Signature-256', '')
     if not verify_facebook_signature(raw_body, sig_header):
         sig_preview = (sig_header[:14] + '…') if sig_header else '<missing>'
-        print(
-            f"Webhook rejected: signature mismatch "
-            f"sig_header={sig_preview} body_len={len(raw_body)} "
-            f"app_secret_set={bool(FACEBOOK_APP_SECRET)}"
+        logger.warning(
+            "Webhook rejected: signature mismatch sig_header=%s body_len=%s app_secret_set=%s",
+            sig_preview, len(raw_body), bool(FACEBOOK_APP_SECRET),
         )
         return jsonify({'error': 'invalid signature'}), 403
 
@@ -46,9 +49,9 @@ def webhook():
         for entry in entries
         for ev in entry.get('messaging', [])
     ]
-    print(
-        f"Webhook received object={data.get('object')!r} "
-        f"entries={len(entries)} senders={senders}"
+    logger.info(
+        "Webhook received object=%r entries=%s senders=%s",
+        data.get('object'), len(entries), senders,
     )
 
     if data.get('object') == 'page':
@@ -57,9 +60,9 @@ def webhook():
                 sender_id = messaging_event.get('sender', {}).get('id')
                 recipient_id = messaging_event.get('recipient', {}).get('id')
                 event_keys = [k for k in messaging_event.keys() if k not in ('sender', 'recipient', 'timestamp')]
-                print(
-                    f"Webhook event sender={sender_id} recipient={recipient_id} "
-                    f"kinds={event_keys}"
+                logger.info(
+                    "Webhook event sender=%s recipient=%s kinds=%s",
+                    sender_id, recipient_id, event_keys,
                 )
 
                 if messaging_event.get('message'):
@@ -104,6 +107,20 @@ def webhook():
                     db.session.add(user_msg)
                     db.session.commit()
 
+                    # Phone capture runs BEFORE the bot reply so we don't
+                    # double up: previously a single inbound could trigger
+                    # (a) the bot's main reply, (b) a deferral handoff, and
+                    # (c) a separate "phone received" thank-you. By
+                    # capturing the lead state up front the prompt can ack
+                    # it in the single reply and we never send the extra
+                    # thank-you message.
+                    phone_match = PHONE_RE.search(message_text or '') if message_text else None
+                    if phone_match and not fb_user.is_lead:
+                        fb_user.phone = phone_match.group(0)
+                        fb_user.is_lead = True
+                        fb_user.lead_status = 'contacted'
+                        db.session.commit()
+
                     now = datetime.utcnow()
                     # Three states for the bot's relationship to this user:
                     #   1) Normal           — no handoff, no mute. Bot does
@@ -135,10 +152,17 @@ def webhook():
                             trigger_handoff(fb_user, reason, message_text)
                             continue
 
-                    history = Message.query.filter_by(facebook_user_id=fb_user.id).order_by(Message.created_at).all()
+                    # Pull only the last 10 messages instead of the entire
+                    # conversation. For a chatty user `.all()` was loading
+                    # the full history just to slice the tail.
+                    recent_desc = (Message.query
+                                   .filter_by(facebook_user_id=fb_user.id)
+                                   .order_by(Message.created_at.desc())
+                                   .limit(10)
+                                   .all())
                     conversation = [
                         {"role": "user" if m.sender == 'user' else "assistant", "content": m.content}
-                        for m in history[-10:]
+                        for m in reversed(recent_desc)
                     ]
 
                     bot_response = generate_bot_response(
@@ -179,23 +203,11 @@ def webhook():
                                 send_user_message=False,
                             )
 
-                    try:
-                        classify_conversation(fb_user)
-                    except Exception:
-                        pass
-
-                    phone_match = PHONE_RE.search(message_text)
-                    if phone_match and not fb_user.is_lead:
-                        fb_user.phone = phone_match.group(0)
-                        fb_user.is_lead = True
-                        fb_user.lead_status = 'contacted'
-                        db.session.commit()
-
-                        handoff_msg = (
-                            "Баярлалаа, дугаараа үлдээснийг тань хүлээж авлаа. "
-                            "Манай бүртгэлийн ажилтан удахгүй тантай эргэж холбогдох болно."
-                        )
-                        send_facebook_message(sender_id, handoff_msg)
+                    # Fire-and-forget the conversation classifier — it's an
+                    # OpenAI call and shouldn't keep Facebook waiting on
+                    # the webhook response. Errors are logged inside the
+                    # function so failures here don't affect the user.
+                    enqueue_background(classify_conversation, fb_user.id)
 
     return jsonify({'status': 'ok'}), 200
 
@@ -203,7 +215,12 @@ def webhook():
 @app.route('/webhook', methods=['GET'])
 def webhook_verify():
     """Facebook webhook verification"""
-    verify_token = os.getenv('VERIFY_TOKEN', 'magic_bot_verify_token')
+    verify_token = os.getenv('VERIFY_TOKEN', '').strip()
+    if not verify_token:
+        # Fail closed if VERIFY_TOKEN is unset — the previous hard-coded
+        # default ('magic_bot_verify_token') is documented in the repo's
+        # markdown files and would let anyone subscribe arbitrary webhooks.
+        return 'VERIFY_TOKEN not configured', 403
     token = request.args.get('hub.verify_token')
     challenge = request.args.get('hub.challenge')
 

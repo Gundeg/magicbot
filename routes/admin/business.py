@@ -204,66 +204,69 @@ def business_management_units():
     )
 
 
+def _handle_team_member_action(data):
+    """Shared POST handler for the team management endpoints. Returns a
+    Flask response. Used by both /business-management/employees and the
+    legacy /admin/team route so the two views stay in lockstep."""
+    action = data.get('action')
+
+    if action == 'add':
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
+        member = TeamMember(
+            name=name,
+            role=(data.get('role') or '').strip() or None,
+            specialty=(data.get('specialty') or '').strip() or None,
+            bio=(data.get('bio') or '').strip() or None,
+            is_active=True,
+        )
+        db.session.add(member)
+        db.session.commit()
+        return jsonify({'success': True, 'id': member.id})
+
+    if action in ('edit', 'toggle', 'delete'):
+        member = TeamMember.query.get(data.get('id'))
+        if not member:
+            return jsonify({'success': False}), 404
+        if action == 'edit':
+            name = (data.get('name') or '').strip()
+            if not name:
+                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
+            member.name = name
+            member.role = (data.get('role') or '').strip() or None
+            member.specialty = (data.get('specialty') or '').strip() or None
+            member.bio = (data.get('bio') or '').strip() or None
+            db.session.commit()
+            return jsonify({'success': True})
+        if action == 'toggle':
+            member.is_active = not member.is_active
+            db.session.commit()
+            return jsonify({'success': True, 'is_active': member.is_active})
+        # delete
+        db.session.delete(member)
+        db.session.commit()
+        return jsonify({'success': True})
+
+    return jsonify({'success': False, 'error': 'unknown action'}), 400
+
+
+def _list_team_members():
+    return (TeamMember.query
+            .order_by(TeamMember.sort_order.asc(), TeamMember.id.asc())
+            .all())
+
+
 @app.route('/business-management/employees', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def business_management_employees():
     if request.method == 'POST':
-        data = request.get_json() or {}
-        action = data.get('action')
-
-        if action == 'add':
-            member = TeamMember(
-                name=(data.get('name') or '').strip(),
-                role=(data.get('role') or '').strip() or None,
-                specialty=(data.get('specialty') or '').strip() or None,
-                bio=(data.get('bio') or '').strip() or None,
-                is_active=True,
-            )
-            if not member.name:
-                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
-            db.session.add(member)
-            db.session.commit()
-            return jsonify({'success': True, 'id': member.id})
-
-        if action == 'edit':
-            member = TeamMember.query.get(data.get('id'))
-            if not member:
-                return jsonify({'success': False}), 404
-            member.name = (data.get('name') or '').strip()
-            member.role = (data.get('role') or '').strip() or None
-            member.specialty = (data.get('specialty') or '').strip() or None
-            member.bio = (data.get('bio') or '').strip() or None
-            if not member.name:
-                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
-            db.session.commit()
-            return jsonify({'success': True})
-
-        if action == 'toggle':
-            member = TeamMember.query.get(data.get('id'))
-            if not member:
-                return jsonify({'success': False}), 404
-            member.is_active = not member.is_active
-            db.session.commit()
-            return jsonify({'success': True, 'is_active': member.is_active})
-
-        if action == 'delete':
-            member = TeamMember.query.get(data.get('id'))
-            if not member:
-                return jsonify({'success': False}), 404
-            db.session.delete(member)
-            db.session.commit()
-            return jsonify({'success': True})
-
-        return jsonify({'success': False, 'error': 'unknown action'}), 400
-
-    members = (TeamMember.query
-               .order_by(TeamMember.sort_order.asc(), TeamMember.id.asc())
-               .all())
+        return _handle_team_member_action(request.get_json() or {})
     return render_template(
         'business/employees.html',
         active_tab='employees',
-        members=members,
+        members=_list_team_members(),
     )
 
 
@@ -280,25 +283,23 @@ def business_unit_detail(bu_id):
     course in the catalog, not just courses 'owned' by this BU). This is
     acceptable today because Magic has one BU per product_type.
     """
-    # Wrap the ENTIRE view so any error (including missing-column errors
-    # on the initial BusinessLine load) surfaces as a readable plain-text
-    # response instead of a generic 500. Only admins can hit this route
-    # (@admin_required above), so revealing tracebacks is acceptable.
+    # Log the traceback server-side and return a plain text error WITHOUT
+    # the traceback. Even admin-only routes shouldn't leak stack frames,
+    # SQL schema, or file paths — a compromised admin session shouldn't
+    # be able to fingerprint the deployment.
     try:
         return _render_business_unit_detail(bu_id)
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        print(f'business_unit_detail({bu_id}) FAILED: {type(e).__name__}: {e}')
-        print(tb)
+        import logging
+        logging.getLogger(__name__).exception(
+            'business_unit_detail(%s) failed: %s', bu_id, e,
+        )
         from flask import Response
         body = (
             f"=== /business-units/{bu_id} ERROR ===\n\n"
             f"{type(e).__name__}: {e}\n\n"
-            f"--- Traceback ---\n{tb}\n"
-            f"--- End of traceback ---\n\n"
-            f"This page is admin-only; only logged-in admins can see this. "
-            f"Copy the traceback above to share with the developer."
+            f"The full traceback is in the server logs. Share the error class "
+            f"and message above with the developer along with the timestamp."
         )
         return Response(body, status=500, mimetype='text/plain; charset=utf-8')
 
@@ -896,56 +897,8 @@ def products():
 @login_required
 @admin_required
 def team():
+    # Legacy URL — delegates to the same handler used by the new
+    # /business-management/employees route so the two stay in sync.
     if request.method == 'POST':
-        data = request.get_json() or {}
-        action = data.get('action')
-
-        if action == 'add':
-            member = TeamMember(
-                name=(data.get('name') or '').strip(),
-                role=(data.get('role') or '').strip() or None,
-                specialty=(data.get('specialty') or '').strip() or None,
-                bio=(data.get('bio') or '').strip() or None,
-                is_active=True,
-            )
-            if not member.name:
-                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
-            db.session.add(member)
-            db.session.commit()
-            return jsonify({'success': True, 'id': member.id})
-
-        if action == 'edit':
-            member = TeamMember.query.get(data.get('id'))
-            if not member:
-                return jsonify({'success': False}), 404
-            member.name = (data.get('name') or '').strip()
-            member.role = (data.get('role') or '').strip() or None
-            member.specialty = (data.get('specialty') or '').strip() or None
-            member.bio = (data.get('bio') or '').strip() or None
-            if not member.name:
-                return jsonify({'success': False, 'error': 'Нэр шаардлагатай.'}), 400
-            db.session.commit()
-            return jsonify({'success': True})
-
-        if action == 'toggle':
-            member = TeamMember.query.get(data.get('id'))
-            if not member:
-                return jsonify({'success': False}), 404
-            member.is_active = not member.is_active
-            db.session.commit()
-            return jsonify({'success': True, 'is_active': member.is_active})
-
-        if action == 'delete':
-            member = TeamMember.query.get(data.get('id'))
-            if not member:
-                return jsonify({'success': False}), 404
-            db.session.delete(member)
-            db.session.commit()
-            return jsonify({'success': True})
-
-        return jsonify({'success': False, 'error': 'unknown action'}), 400
-
-    members = (TeamMember.query
-               .order_by(TeamMember.sort_order.asc(), TeamMember.id.asc())
-               .all())
-    return render_template('team.html', members=members)
+        return _handle_team_member_action(request.get_json() or {})
+    return render_template('team.html', members=_list_team_members())

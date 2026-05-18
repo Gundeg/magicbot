@@ -29,7 +29,7 @@ class FacebookUser(db.Model):
     is_lead = db.Column(db.Boolean, default=False)
     lead_status = db.Column(db.String(50), default='new')  # new, contacted, converted
     # Funnel state: 'curious' -> 'exploring_courses' -> 'pricing' -> 'ready'
-    funnel_stage = db.Column(db.String(30), default='curious')
+    funnel_stage = db.Column(db.String(30), default='curious', index=True)
     # Last time we sent a proactive nudge (kept null until first nudge fires)
     last_nudge_at = db.Column(db.DateTime)
     # Last time we sent a "still in queue" reassurance during a handoff
@@ -38,7 +38,7 @@ class FacebookUser(db.Model):
     last_mute_ack_at = db.Column(db.DateTime)
     # When set and > now(), the bot will not auto-reply to this user — a human
     # has been pinged and should take over. Cleared automatically once expired.
-    bot_muted_until = db.Column(db.DateTime)
+    bot_muted_until = db.Column(db.DateTime, index=True)
     # AI-classified topic of the conversation (updated after every bot reply)
     conversation_topic = db.Column(db.String(100))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -48,10 +48,12 @@ class FacebookUser(db.Model):
 class Message(db.Model):
     """Chat message history"""
     id = db.Column(db.Integer, primary_key=True)
-    facebook_user_id = db.Column(db.Integer, db.ForeignKey('facebook_user.id'), nullable=False)
+    facebook_user_id = db.Column(
+        db.Integer, db.ForeignKey('facebook_user.id'), nullable=False, index=True
+    )
     sender = db.Column(db.String(20), nullable=False)  # 'user' or 'bot'
     content = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     facebook_user = db.relationship('FacebookUser', backref=db.backref('messages', lazy=True))
 
 
@@ -92,10 +94,12 @@ class FAQ(db.Model):
 class AdminIssue(db.Model):
     """Issues assigned to admin (unresolved by bot)"""
     id = db.Column(db.Integer, primary_key=True)
-    facebook_user_id = db.Column(db.Integer, db.ForeignKey('facebook_user.id'), nullable=False)
-    issue_type = db.Column(db.String(50), nullable=False)  # 'unresolved_query', 'complaint', 'suggestion'
+    facebook_user_id = db.Column(
+        db.Integer, db.ForeignKey('facebook_user.id'), nullable=False, index=True
+    )
+    issue_type = db.Column(db.String(50), nullable=False, index=True)  # 'unresolved_query', 'complaint', 'suggestion'
     content = db.Column(db.Text, nullable=False)
-    status = db.Column(db.String(20), default='open')  # 'open', 'in_progress', 'resolved'
+    status = db.Column(db.String(20), default='open', index=True)  # 'open', 'in_progress', 'resolved'
     assigned_to = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     resolved_at = db.Column(db.DateTime)

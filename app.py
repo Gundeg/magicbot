@@ -12,6 +12,7 @@ This module:
 All domain logic lives in `services.py`, models in `models.py`, route
 handlers in `routes/`. This file is the wiring only.
 """
+import logging
 import os
 from threading import Thread
 
@@ -24,7 +25,15 @@ except ImportError:
 from flask import Flask
 from werkzeug.security import generate_password_hash
 
-from extensions import db, login_manager, csrf, migrate
+from extensions import db, login_manager, csrf, migrate, limiter
+
+# Configure logging once at import. Routes/services import `logging` directly
+# and call `logger.info/warning/error/exception`; pinning the root config here
+# means gunicorn workers and one-shot scripts share the same format.
+logging.basicConfig(
+    level=os.environ.get('LOG_LEVEL', 'INFO').upper(),
+    format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+)
 
 # ===================== APP CONSTRUCTION =====================
 
@@ -75,6 +84,24 @@ def _ensure_sqlite_path_writable(uri):
 app.config['SQLALCHEMY_DATABASE_URI'] = _ensure_sqlite_path_writable(_db_uri)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Cookie hardening. SESSION_COOKIE_SECURE=True is opt-out via env so local
+# HTTP dev doesn't silently lose the session cookie; production should leave
+# the default on. HttpOnly + SameSite=Lax protect against XSS-stolen sessions
+# and most CSRF vectors (Flask-WTF still enforces the explicit token check).
+_cookie_secure_default = 'false' if app.debug else 'true'
+app.config.update(
+    SESSION_COOKIE_SECURE=os.environ.get(
+        'SESSION_COOKIE_SECURE', _cookie_secure_default
+    ).lower() in ('1', 'true', 'yes'),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    REMEMBER_COOKIE_SECURE=os.environ.get(
+        'SESSION_COOKIE_SECURE', _cookie_secure_default
+    ).lower() in ('1', 'true', 'yes'),
+    REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SAMESITE='Lax',
+)
+
 # ===================== EXTENSION WIRING =====================
 
 db.init_app(app)
@@ -89,6 +116,14 @@ csrf.init_app(app)
 # versions/ now instead of services.ensure_schema(). Existing DBs are
 # stamped to the baseline on first boot (see _bootstrap_alembic).
 migrate.init_app(app, db)
+# Storage URI defaults to in-memory; set RATELIMIT_STORAGE_URI in prod
+# (e.g. redis://) so login throttling works across gunicorn workers.
+app.config.setdefault(
+    'RATELIMIT_STORAGE_URI',
+    os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'),
+)
+app.config.setdefault('RATELIMIT_HEADERS_ENABLED', True)
+limiter.init_app(app)
 
 # Models must be imported AFTER db.init_app(app) so the metadata binds correctly.
 # noqa imports are intentional — importing the module registers models on db.
@@ -97,7 +132,7 @@ from models import User  # noqa: E402,F401
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 
 # Tenant identity shown in the admin topbar. Driven by the same env vars as the
@@ -235,22 +270,51 @@ def init_db():
 # Run at import so gunicorn workers initialize the DB on boot.
 # Skipped when running migration commands (set by `flask db ...` invocations)
 # to keep CLI fast and avoid seeding before migrations are applied.
+#
+# Cross-worker race guard: gunicorn --workers=N forks N processes that all
+# import app.py simultaneously, which would race on db.create_all(), the
+# raw ALTER TABLE calls in ensure_schema, and the seeders. We serialize via
+# a file lock (one of the workers wins, the others wait, the rest of the
+# workers see a fully migrated DB by the time they acquire the lock).
 if os.environ.get('FLASK_SKIP_INIT_DB', '').lower() not in ('true', '1', 'yes'):
-    init_db()
+    import tempfile
+    _lock_path = os.path.join(tempfile.gettempdir(), 'magicbot_init_db.lock')
+    try:
+        # fcntl is POSIX-only; on Windows dev we just run init_db without
+        # the lock — there's only one process locally anyway.
+        import fcntl
+        with open(_lock_path, 'w') as _lock_file:
+            fcntl.flock(_lock_file.fileno(), fcntl.LOCK_EX)
+            init_db()
+            fcntl.flock(_lock_file.fileno(), fcntl.LOCK_UN)
+    except ImportError:
+        init_db()
 
 
 # ===================== BACKGROUND TASKS =====================
+#
+# WORKER_ROLE gating: background loops (polling, nudge, clustering) only
+# start when WORKER_ROLE=worker. With gunicorn --workers=N, leaving these
+# threads ungated would spin up N copies of every loop — duplicate Telegram
+# pings, duplicate Page comments, duplicate clustering runs. The intended
+# production setup is one dyno with role=web (no background work) and one
+# dyno with role=worker (only background work, behind a separate Procfile
+# entry: `worker: WORKER_ROLE=worker python -c "import app; import time; time.sleep(float('inf'))"`).
+#
+# For solo dev / single-worker deploys, set WORKER_ROLE=all to start the
+# loops alongside the web server like before.
+_worker_role = os.environ.get('WORKER_ROLE', 'web').strip().lower()
+_run_background_loops = _worker_role in ('worker', 'all')
 
-# Optional Page-post auto-commenting. Disabled by default to avoid duplicate
-# work across gunicorn workers.
-if os.environ.get('ENABLE_POLLING', 'false').lower() == 'true':
+# Optional Page-post auto-commenting.
+if _run_background_loops and os.environ.get('ENABLE_POLLING', 'false').lower() == 'true':
     from services import polling_task
     Thread(target=polling_task, args=(app,), daemon=True).start()
 
 # Optional follow-up nudges to silent leads. Off by default; turn on only
 # after upgrading from Render Free, otherwise the worker spins down before
 # the loop wakes up.
-if os.environ.get('ENABLE_NUDGE', 'false').lower() == 'true':
+if _run_background_loops and os.environ.get('ENABLE_NUDGE', 'false').lower() == 'true':
     from services import nudge_task
     Thread(target=nudge_task, args=(app,), daemon=True).start()
 
@@ -259,7 +323,7 @@ if os.environ.get('ENABLE_NUDGE', 'false').lower() == 'true':
 # deployments; turn on per-service in Render env. Admins can also trigger
 # a one-shot run via the "Шинэчлэх" button on the FAQ tab without flipping
 # this var.
-if os.environ.get('ENABLE_CHAT_CLUSTERING', 'false').lower() == 'true':
+if _run_background_loops and os.environ.get('ENABLE_CHAT_CLUSTERING', 'false').lower() == 'true':
     from services import cluster_task
     Thread(target=cluster_task, args=(app,), daemon=True).start()
 

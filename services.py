@@ -8,6 +8,7 @@ or OpenAI directly.
 import hmac
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -17,10 +18,11 @@ from pathlib import Path
 from threading import Lock
 
 import requests
-from flask import current_app
+from flask import current_app, g, has_app_context
 from flask_login import current_user
 from openai import OpenAI
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 
 from extensions import db
 from models import (
@@ -28,6 +30,47 @@ from models import (
     FacebookUser, FAQ, GeneralSetting, HandoffKeyword, Message, PagePost,
     Product, ProductLink, TeamMember, TrainingSnippet, User,
 )
+
+logger = logging.getLogger(__name__)
+
+
+# ===================== BACKGROUND WORK QUEUE =====================
+# Small thread-pool used to push slow side-effects (OpenAI classify calls,
+# Telegram pings, follow-up FB messages) off the webhook request path so
+# Facebook doesn't retry on slow OpenAI hops. Workers establish their own
+# Flask app context so SQLAlchemy queries inside the callable still work.
+
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
+
+_BG_EXECUTOR = ThreadPoolExecutor(
+    max_workers=int(os.environ.get('BACKGROUND_WORKERS', '4') or '4'),
+    thread_name_prefix='mbot-bg',
+)
+
+
+def enqueue_background(func, *args, **kwargs):
+    """Run `func(*args, **kwargs)` in a worker thread with a Flask app
+    context. Returns the Future for tests; callers in routes ignore it.
+
+    Important: pass primitive IDs (e.g. fb_user.id) rather than ORM
+    instances, because the request-scoped session that loaded the
+    instance will be torn down before the worker runs."""
+    try:
+        app_obj = current_app._get_current_object()
+    except RuntimeError:
+        app_obj = None
+
+    def _runner():
+        try:
+            if app_obj is not None:
+                with app_obj.app_context():
+                    func(*args, **kwargs)
+            else:
+                func(*args, **kwargs)
+        except Exception:
+            logger.exception('background task %s failed', getattr(func, '__name__', func))
+
+    return _BG_EXECUTOR.submit(_runner)
 
 
 # ===================== CONSTANTS / CONFIG =====================
@@ -44,11 +87,17 @@ FACEBOOK_ACCESS_TOKEN = os.environ.get('FACEBOOK_ACCESS_TOKEN', '')
 if not FACEBOOK_ACCESS_TOKEN:
     raise RuntimeError("FACEBOOK_ACCESS_TOKEN environment variable is required")
 FACEBOOK_APP_SECRET = os.environ.get('FACEBOOK_APP_SECRET', '')
-if not FACEBOOK_APP_SECRET:
-    print(
-        "WARNING: FACEBOOK_APP_SECRET not set — accepting all webhook payloads "
-        "unverified. Live-mode deploys MUST set this or Facebook traffic can be "
-        "forged."
+# Allow an explicit dev-mode opt-out so local development without the secret
+# still works, but make the bypass loud and intentional rather than implicit.
+FACEBOOK_ALLOW_UNVERIFIED = (
+    os.environ.get('FACEBOOK_ALLOW_UNVERIFIED', '').lower() in ('1', 'true', 'yes')
+)
+if not FACEBOOK_APP_SECRET and not FACEBOOK_ALLOW_UNVERIFIED:
+    raise RuntimeError(
+        "FACEBOOK_APP_SECRET is required. Set it to your Facebook App Secret "
+        "so HMAC-SHA256 webhook signature verification works. For local dev "
+        "without the secret, set FACEBOOK_ALLOW_UNVERIFIED=1 — never use that "
+        "in production, as it lets anyone forge Messenger traffic."
     )
 # Loaded at import time as a fallback; the live value is fetched by
 # get_google_form_url() which also checks the DB setting written from
@@ -125,12 +174,13 @@ SESSION_GAP_WINDOW = timedelta(hours=24)
 def verify_facebook_signature(raw_body, header_value):
     """Validate X-Hub-Signature-256 against HMAC-SHA256(raw_body, app_secret).
 
-    If FACEBOOK_APP_SECRET is unset we skip verification with a warning so dev
-    deploys don't break before the secret is wired. On Live Mode you MUST set
-    the secret — Facebook will sign every payload and an unsigned request
-    means an attacker is forging Messenger traffic.
+    Hard-required in production: the app refuses to boot without
+    FACEBOOK_APP_SECRET unless FACEBOOK_ALLOW_UNVERIFIED=1 is set explicitly
+    for local dev. The latter bypass is loud and intentional — never set it
+    in production, as it lets attackers forge Messenger traffic.
     """
     if not FACEBOOK_APP_SECRET:
+        # Only reachable when FACEBOOK_ALLOW_UNVERIFIED=1 (dev opt-out).
         return True
     if not header_value or not header_value.startswith('sha256='):
         return False
@@ -190,51 +240,67 @@ def check_rate_limit(sender_id):
 
 # ===================== FACEBOOK API HELPERS =====================
 
+def _fb_auth_headers(extra=None):
+    """Build the Authorization header for Graph API calls so the access
+    token never lands in URL query params (and therefore not in proxy
+    access logs, browser histories, etc.). `extra` merges additional
+    headers like Content-Type."""
+    headers = {"Authorization": f"Bearer {FACEBOOK_ACCESS_TOKEN}"}
+    if extra:
+        headers.update(extra)
+    return headers
+
+
 def send_facebook_message(recipient_id, message_text):
     """Send a message via Facebook Messenger API"""
-    url = f"https://graph.facebook.com/v18.0/me/messages"
-    headers = {"Content-Type": "application/json"}
-    params = {"access_token": FACEBOOK_ACCESS_TOKEN}
+    url = "https://graph.facebook.com/v18.0/me/messages"
     data = {
         "recipient": {"id": recipient_id},
         "message": {"text": message_text}
     }
     try:
-        response = requests.post(url, json=data, headers=headers, params=params)
+        response = requests.post(
+            url,
+            json=data,
+            headers=_fb_auth_headers({"Content-Type": "application/json"}),
+            timeout=10,
+        )
         if response.status_code != 200:
             body = response.text[:500] if response.text else '<empty>'
-            print(
-                f"Send API FAILED recipient={recipient_id} "
-                f"status={response.status_code} body={body}"
+            logger.warning(
+                "Send API FAILED recipient=%s status=%s body=%s",
+                recipient_id, response.status_code, body,
             )
             return False
         return True
     except Exception as e:
-        print(f"Error sending message to recipient={recipient_id}: {e}")
+        logger.exception("Error sending message to recipient=%s: %s", recipient_id, e)
         return False
 
 
 def get_facebook_user_info(facebook_id):
     """Get user info from Facebook's User Profile API. Returns {} on any failure."""
     url = f"https://graph.facebook.com/v18.0/{facebook_id}"
-    params = {"fields": "name,first_name,last_name", "access_token": FACEBOOK_ACCESS_TOKEN}
+    params = {"fields": "name,first_name,last_name"}
     try:
-        response = requests.get(url, params=params, timeout=5)
+        response = requests.get(
+            url, params=params, headers=_fb_auth_headers(), timeout=5,
+        )
         if response.status_code == 200:
             data = response.json() or {}
             if not data.get('name'):
-                print(
-                    f"FB user profile: 200 OK but missing name for psid={facebook_id} "
-                    f"body={str(data)[:200]}"
+                logger.info(
+                    "FB user profile: 200 OK but missing name for psid=%s body=%s",
+                    facebook_id, str(data)[:200],
                 )
             return data
-        print(
-            f"FB user profile failed psid={facebook_id} status={response.status_code} "
-            f"body={response.text[:300]}"
+        logger.warning(
+            "FB user profile failed psid=%s status=%s body=%s",
+            facebook_id, response.status_code, response.text[:300],
         )
         return {}
     except Exception as e:
-        print(f"FB user profile exception psid={facebook_id}: {e}")
+        logger.exception("FB user profile exception psid=%s: %s", facebook_id, e)
         return {}
 
 
@@ -259,15 +325,14 @@ def get_recent_messages():
     url = f"https://graph.facebook.com/v18.0/{FACEBOOK_PAGE_ID}/conversations"
     params = {
         "fields": "id,senders,participants,former_participants,wallpaper,snippet,updated_time,message_count,unread_count,subject,can_reply,former_participants,info,link,name,email,page_name,wallpaper,former_participants",
-        "access_token": FACEBOOK_ACCESS_TOKEN
     }
     try:
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, headers=_fb_auth_headers(), timeout=10)
         if response.status_code == 200:
             return response.json().get('data', [])
         return []
     except Exception as e:
-        print(f"Error getting messages: {e}")
+        logger.exception("Error getting messages: %s", e)
         return []
 
 
@@ -277,28 +342,31 @@ def get_page_posts():
     params = {
         "fields": "id,message,created_time,type,story",
         "limit": 10,
-        "access_token": FACEBOOK_ACCESS_TOKEN
     }
     try:
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, headers=_fb_auth_headers(), timeout=10)
         if response.status_code == 200:
             return response.json().get('data', [])
         return []
     except Exception as e:
-        print(f"Error getting posts: {e}")
+        logger.exception("Error getting posts: %s", e)
         return []
 
 
 def post_comment_on_page(post_id, comment_text):
     """Post a comment on a Facebook Page post"""
     url = f"https://graph.facebook.com/v18.0/{post_id}/comments"
-    params = {"access_token": FACEBOOK_ACCESS_TOKEN}
     data = {"message": comment_text}
     try:
-        response = requests.post(url, json=data, params=params)
+        response = requests.post(
+            url,
+            json=data,
+            headers=_fb_auth_headers({"Content-Type": "application/json"}),
+            timeout=10,
+        )
         return response.status_code == 201
     except Exception as e:
-        print(f"Error posting comment: {e}")
+        logger.exception("Error posting comment: %s", e)
         return False
 
 
@@ -430,8 +498,17 @@ def ensure_schema():
 
 def classify_conversation(fb_user):
     """Use gpt-4o-mini to classify what business line (or generic category)
-    a user's conversation is about, then persist to facebook_user.conversation_topic."""
+    a user's conversation is about, then persist to facebook_user.conversation_topic.
+
+    Accepts either a FacebookUser instance or its primary key. The id form
+    is what background-thread callers use, since the request-scoped session
+    that originally loaded the instance is gone by the time the worker runs."""
     try:
+        if isinstance(fb_user, int):
+            fb_user = db.session.get(FacebookUser, fb_user)
+            if fb_user is None:
+                return
+
         recent_messages = (
             Message.query
             .filter_by(facebook_user_id=fb_user.id, sender='user')
@@ -615,7 +692,25 @@ FUNNEL_RULES = {
 # ===================== SETTINGS GETTERS =====================
 
 def get_setting(key, default=''):
-    """Read a value from GeneralSetting. Returns default if missing or blank."""
+    """Read a value from GeneralSetting. Returns default if missing or blank.
+
+    Cached per-request via flask.g so build_system_prompt's 5-6 settings
+    lookups during a single webhook hit collapse into 1 query. Falls back
+    to an uncached fetch outside a request context (e.g. background
+    threads, CLI), which still uses the SQLAlchemy session-level cache.
+    """
+    if has_app_context():
+        cache = getattr(g, '_setting_cache', None)
+        if cache is None:
+            cache = {}
+            g._setting_cache = cache
+        if key in cache:
+            value = cache[key]
+            return value if value else default
+        row = GeneralSetting.query.filter_by(key=key).first()
+        value = row.value if (row and row.value and row.value.strip()) else None
+        cache[key] = value
+        return value if value else default
     row = GeneralSetting.query.filter_by(key=key).first()
     if row and row.value and row.value.strip():
         return row.value
@@ -837,7 +932,11 @@ def _format_business_line_entry(b):
 def _format_business_lines():
     """Return (answer_block, refer_block, paused_block) — active lines split by
     action, plus a block for paused services so the bot knows not to sell them."""
+    # Eager-load products and their links so the prompt build is 1 query
+    # instead of 1 + (lines) + (products) + (products × links). Hot path:
+    # this runs on every webhook message.
     all_lines = (BusinessLine.query
+                 .options(joinedload(BusinessLine.products).joinedload(Product.links))
                  .order_by(BusinessLine.sort_order.asc(), BusinessLine.id.asc())
                  .all())
     answer, refer, paused = [], [], []
@@ -2480,17 +2579,18 @@ def cluster_chat_questions(lookback_days=30, max_questions=400):
         return 0
 
     now = datetime.utcnow()
-    # Wipe everything except clusters already promoted to FAQ.
     promoted_titles = {
         c.title for c in ChatQuestionCluster.query.filter(
             ChatQuestionCluster.promoted_to_faq_id.isnot(None)
         ).all()
     }
-    ChatQuestionCluster.query.filter(
-        ChatQuestionCluster.promoted_to_faq_id.is_(None)
-    ).delete(synchronize_session=False)
 
-    inserted = 0
+    # Validate and stage new rows BEFORE deleting the old ones. If the
+    # LLM returned junk, parsing throws here and we leave the existing
+    # clusters untouched instead of wiping them and ending up with
+    # nothing. Previously: delete-then-insert would empty the table on
+    # any parse failure.
+    staged = []
     for c in clusters:
         if not isinstance(c, dict):
             continue
@@ -2508,17 +2608,41 @@ def cluster_chat_questions(lookback_days=30, max_questions=400):
         if not isinstance(samples, list):
             samples = []
         samples = [str(s).strip() for s in samples if str(s).strip()][:5]
-        db.session.add(ChatQuestionCluster(
-            title=title,
-            representative_question=rep,
-            sample_questions=_json.dumps(samples, ensure_ascii=False),
-            count=max(cnt, len(samples)),
-            first_seen_at=since,
-            last_seen_at=now,
-        ))
-        inserted += 1
-    db.session.commit()
-    print(f'cluster_chat_questions: wrote {inserted} cluster(s) from {len(questions)} questions.')
+        staged.append({
+            'title': title,
+            'representative_question': rep,
+            'sample_questions': _json.dumps(samples, ensure_ascii=False),
+            'count': max(cnt, len(samples)),
+            'first_seen_at': since,
+            'last_seen_at': now,
+        })
+
+    if not staged:
+        logger.warning(
+            'cluster_chat_questions: parsed 0 valid clusters from response; '
+            'leaving existing clusters intact.'
+        )
+        return 0
+
+    # Atomic swap: delete old, insert new, commit together. If anything
+    # fails the rollback restores the pre-swap state.
+    try:
+        ChatQuestionCluster.query.filter(
+            ChatQuestionCluster.promoted_to_faq_id.is_(None)
+        ).delete(synchronize_session=False)
+        for row in staged:
+            db.session.add(ChatQuestionCluster(**row))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        logger.exception('cluster_chat_questions: atomic swap failed; rolled back.')
+        return 0
+
+    inserted = len(staged)
+    logger.info(
+        'cluster_chat_questions: wrote %s cluster(s) from %s questions.',
+        inserted, len(questions),
+    )
     return inserted
 
 

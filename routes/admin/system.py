@@ -9,14 +9,11 @@ from flask_login import current_user, login_required, logout_user
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app import app
+from app import app, MIN_ADMIN_PASSWORD_LENGTH
 from auth import admin_required, super_admin_required
 from extensions import db
 from models import AuditEntry, GeneralSetting, User
 from services import log_admin_action
-
-
-MIN_ADMIN_PASSWORD_LENGTH = 12
 
 
 # ===================== SETTINGS =====================
@@ -28,7 +25,7 @@ MIN_ADMIN_PASSWORD_LENGTH = 12
 # without redeploying. Returns plain text with the script's stdout so
 # the result is readable in the browser without a template.
 
-@app.route('/admin/api/run-migration', methods=['POST', 'GET'])
+@app.route('/admin/api/run-migration', methods=['POST'])
 @login_required
 @admin_required
 def run_migration_now():
@@ -99,7 +96,7 @@ def run_migration_now():
 # ticket, Office license form, audit form, report form, course form).
 # Idempotent: re-running attaches only the missing links.
 
-@app.route('/admin/api/seed-discovery-snippets', methods=['POST', 'GET'])
+@app.route('/admin/api/seed-discovery-snippets', methods=['POST'])
 @login_required
 @admin_required
 def seed_discovery_snippets_now():
@@ -130,7 +127,7 @@ def seed_discovery_snippets_now():
     )
 
 
-@app.route('/admin/api/seed-default-links', methods=['POST', 'GET'])
+@app.route('/admin/api/seed-default-links', methods=['POST'])
 @login_required
 @admin_required
 def seed_default_links_now():
