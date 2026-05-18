@@ -180,8 +180,10 @@ def settings():
         )
         return jsonify({'success': True})
 
-    settings_dict = {s.key: s.value for s in GeneralSetting.query.all()}
-    return render_template('settings.html', settings=settings_dict)
+    # Legacy GET — settings.html was removed in Phase 6. The fields
+    # split across the new Business Management / Bot Settings pages,
+    # so redirect to the General Information tab as the closest match.
+    return redirect(url_for('business_management_general'))
 
 
 # ===================== DOCS =====================

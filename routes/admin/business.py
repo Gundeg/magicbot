@@ -565,8 +565,10 @@ def courses():
                 'archived': archived,
             })
 
-    courses_rows = Course.query.all()
-    return render_template('courses.html', courses=courses_rows)
+    # Legacy GET — template was removed in Phase 6. Redirect to the new
+    # Business Management page; the POST branch above still serves the
+    # JSON CRUD calls coming from the new UI.
+    return redirect(url_for('business_management_units'))
 
 
 # ===================== SERVICES =====================
@@ -637,10 +639,8 @@ def services():
 
         return jsonify({'success': False, 'error': 'unknown action'}), 400
 
-    items = (Service.query
-             .order_by(Service.sort_order.asc(), Service.id.asc())
-             .all())
-    return render_template('services.html', items=items)
+    # Legacy GET — template was removed in Phase 6.
+    return redirect(url_for('business_management_units'))
 
 
 # Software route removed in Phase 1 — software rows migrated to Product
@@ -723,10 +723,8 @@ def business_lines():
 
         return jsonify({'success': False, 'error': 'unknown action'}), 400
 
-    lines = (BusinessLine.query
-             .order_by(BusinessLine.sort_order.asc(), BusinessLine.id.asc())
-             .all())
-    return render_template('business_lines.html', lines=lines)
+    # Legacy GET — template was removed in Phase 6.
+    return redirect(url_for('business_management_units'))
 
 
 # ===================== PRODUCTS =====================
@@ -865,30 +863,8 @@ def products():
 
         return jsonify({'success': False, 'error': 'unknown action'}), 400
 
-    all_products = (Product.query
-                    .options(joinedload(Product.business_line),
-                             joinedload(Product.links))
-                    .order_by(Product.business_line_id.asc(),
-                              Product.sort_order.asc(),
-                              Product.id.asc())
-                    .all())
-    # Pre-serialize each product's links to a plain dict list. Jinja2's dict
-    # literal can't contain a Python list comprehension, so building the
-    # data-product JSON inline in the template fails to parse.
-    for p in all_products:
-        p._links_json = [
-            {
-                'description': l.description,
-                'url': l.url,
-                'note': l.note or '',
-                'is_active': bool(l.is_active),
-                'sort_order': l.sort_order,
-            }
-            for l in p.links
-        ]
-    lines = BusinessLine.query.order_by(BusinessLine.sort_order.asc(),
-                                        BusinessLine.id.asc()).all()
-    return render_template('products.html', products=all_products, business_lines=lines)
+    # Legacy GET — template was removed in Phase 6.
+    return redirect(url_for('business_management_units'))
 
 
 # ===================== TEAM =====================
@@ -897,8 +873,8 @@ def products():
 @login_required
 @admin_required
 def team():
-    # Legacy URL — delegates to the same handler used by the new
-    # /business-management/employees route so the two stay in sync.
+    # Legacy URL — POSTs share the new handler; GETs redirect to the
+    # canonical employees page (team.html was removed in Phase 6).
     if request.method == 'POST':
         return _handle_team_member_action(request.get_json() or {})
-    return render_template('team.html', members=_list_team_members())
+    return redirect(url_for('business_management_employees'))
