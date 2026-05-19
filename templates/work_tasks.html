@@ -106,6 +106,41 @@
     </div>
 </div>
 
+{# Classification controller — pulled out of the Leads tab card-header
+   so admins can find it from any tab. The setting is persisted to the
+   classification_lookback_days GeneralSetting key on each Ангилах
+   click. Without it, the classifier scans the past 30 days by default
+   and re-processes already-classified users on every run. #}
+<div class="card mb-3">
+    <div class="card-body py-2 d-flex flex-wrap align-items-center gap-3">
+        <div class="flex-grow-1 fs-85">
+            <strong><i class="bi bi-magic"></i> Харилцаа ангилах</strong>
+            <span class="text-muted">
+                — сүүлийн N хоногийн мессеж бичсэн хэрэглэгчдийг AI ашиглан сэдвээр нь ангилна.
+                Утга бага байх тусам цөөн чат хамрагдана.
+            </span>
+        </div>
+        <div class="input-group input-group-sm" style="width: auto;">
+            <span class="input-group-text" id="classifyDaysLabel"
+                  title="Хэдэн өдрийн сүүлийн мессежийг ангилахад ашиглах вэ?">
+                Сүүлийн
+            </span>
+            <input type="number" class="form-control text-end"
+                   id="classifyDays" name="classify_days"
+                   style="width: 70px;"
+                   min="1" max="{{ classification_lookback_max }}"
+                   value="{{ classification_lookback_days }}"
+                   aria-labelledby="classifyDaysLabel"
+                   title="1-{{ classification_lookback_max }} хоног. Ангилах товч дарахад автоматаар хадгалагдана.">
+            <span class="input-group-text">хоног</span>
+        </div>
+        <button type="button" class="btn btn-sm btn-brand" id="classifyBtn"
+                title="AI ашиглан зүүн дахь хоногийн дотор мессеж бичсэн хэрэглэгчдийн харилцааг ангилна">
+            <i class="bi bi-magic"></i> Ангилах
+        </button>
+    </div>
+</div>
+
 <ul class="nav nav-tabs wt-tabs mb-3" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link {% if tab == 'hot_prospects' %}active{% endif %}"
@@ -183,24 +218,8 @@
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <span><i class="bi bi-people"></i> Утсаа үлдээсэн лидүүд</span>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <div class="input-group input-group-sm" style="width: auto;">
-                        <span class="input-group-text" id="classifyDaysLabel"
-                              title="Хэдэн өдрийн сүүлийн мессежийг ангилахад ашиглах вэ?">
-                            Сүүлийн
-                        </span>
-                        <input type="number" class="form-control text-end"
-                               id="classifyDays" name="classify_days"
-                               style="width: 70px;"
-                               min="1" max="{{ classification_lookback_max }}"
-                               value="{{ classification_lookback_days }}"
-                               aria-labelledby="classifyDaysLabel"
-                               title="1-{{ classification_lookback_max }} хоног. Ангилах товч дарахад автоматаар хадгалагдана.">
-                        <span class="input-group-text">хоног</span>
-                    </div>
-                    <button type="button" class="btn btn-sm btn-light" id="classifyBtn"
-                            title="AI ашиглан зүүн дахь хоногийн дотор мессеж бичсэн хэрэглэгчдийн харилцааг ангилна">
-                        <i class="bi bi-magic"></i> Ангилах
-                    </button>
+                    {# "Ангилах" товч ба хоногийн утга хуудасны дээд хэсэгт байна
+                       — энд лидийн жагсаалттай шууд холбоотой үйлдлүүдийг л үлдээв. #}
                     <button type="button" class="btn btn-sm btn-light" id="backfillBtn"
                             title="Facebook-аас нэрийг дахин татах (Unknown гэсэн бүх хэрэглэгчид)">
                         <i class="bi bi-arrow-clockwise"></i> Нэр шинэчлэх

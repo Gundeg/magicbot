@@ -1075,23 +1075,20 @@ def invalidate_handoff_poll_cache():
 def trigger_handoff(fb_user, reason, user_message, send_user_message=True):
     """Signal that this customer needs staff attention: create an AdminIssue
     (with type='handoff'), ping Telegram, and optionally send the user a
-    polite waiting message. The bot stays in advisory mode after this — it
-    keeps helping the customer without re-routing them to staff — until
-    either a staff member manually "takes over" the chat (separate action
-    that sets bot_muted_until) or the admin marks the issue resolved.
+    polite waiting message.
+
+    The bot DOES NOT mute itself here — it stays in advisory mode and
+    keeps replying to subsequent customer questions. Muting happens only
+    when staff explicitly take over the chat via take_over_chat (the
+    "Хариуцах" button on Work Tasks). When the staff later marks the
+    issue resolved, the bot is automatically re-enabled (see the resolve
+    handler in routes/admin/work_tasks.py), and staff can do that before
+    the take-over timer expires.
 
     Pass `send_user_message=False` when the bot has already sent the
     customer a deferring reply (see bot_response_implies_handoff) so the
     user doesn't receive two back-to-back messages.
-
-    Auto-mute on handoff is opt-in via the mute_duration_hours setting:
-    leave it at 0 (default) for the staff-takeover workflow where the
-    bot stays available; set it > 0 only if you want immediate silence
-    after every handoff."""
-    hours = get_mute_duration_hours()
-    if hours > 0:
-        fb_user.bot_muted_until = datetime.utcnow() + timedelta(hours=hours)
-
+    """
     off_hours = _is_off_hours()
 
     issue = AdminIssue(
