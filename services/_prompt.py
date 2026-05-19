@@ -145,6 +145,24 @@ def _format_team_members():
     return "\n".join(lines)
 
 
+def _format_links_block(owner, indent='    '):
+    """Render the "Холбоосууд:" sub-block for any catalog item that has a
+    `links` relationship (Product, Service, Course). Returns '' when there
+    are no active links. `indent` lets each formatter match its surrounding
+    list nesting — products are quoted under their business line (4-space
+    indent) while services and courses start at the outer level (2-space)."""
+    try:
+        active_links = [l for l in (owner.links or []) if l.is_active]
+    except Exception:
+        return ''
+    if not active_links:
+        return ''
+    lines = [f"{indent}Холбоосууд:"]
+    for l in sorted(active_links, key=lambda x: (x.sort_order, x.id)):
+        lines.append(f"{indent}  - {l.description}: {l.url}")
+    return "\n".join(lines)
+
+
 def _format_product_entry(p):
     """One product under a business line, with its active ProductLinks
     listed beneath it. Each link's `kind` is preserved so the bot can
@@ -162,11 +180,9 @@ def _format_product_entry(p):
         lines.append(f"    Тайлбар: {p.description}")
     if p.status_note:
         lines.append(f"    Тэмдэглэл: {p.status_note}")
-    active_links = [l for l in p.links if l.is_active]
-    if active_links:
-        lines.append("    Холбоосууд:")
-        for l in sorted(active_links, key=lambda x: (x.sort_order, x.id)):
-            lines.append(f"      - {l.description}: {l.url}")
+    links_block = _format_links_block(p, indent='    ')
+    if links_block:
+        lines.append(links_block)
     return "\n".join(lines)
 
 
@@ -217,9 +233,9 @@ def _format_business_line_entry(b):
 
 
 def _format_service_entry(s):
-    """One service in the catalog, with its active ServiceLinks listed beneath.
-    Mirrors _format_product_entry so the bot sees services with the same shape
-    as products and can quote the right form URL when the user asks about them."""
+    """One service in the catalog, with its active ServiceLinks listed
+    beneath. Services aren't FK'd to a BusinessLine, so they render at the
+    outer indent level (no leading bullet inside another list)."""
     parts = [f"- {s.name}"]
     if s.description:
         parts.append(f"  Тайлбар: {s.description}")
@@ -227,11 +243,9 @@ def _format_service_entry(s):
         parts.append(f"  Үргэлжлэх хугацаа: {s.duration}")
     if s.status_note:
         parts.append(f"  Тэмдэглэл: {s.status_note}")
-    active_links = [l for l in (s.links or []) if l.is_active]
-    if active_links:
-        parts.append("  Холбоосууд:")
-        for l in sorted(active_links, key=lambda x: (x.sort_order, x.id)):
-            parts.append(f"    - {l.description}: {l.url}")
+    links_block = _format_links_block(s, indent='  ')
+    if links_block:
+        parts.append(links_block)
     return "\n".join(parts)
 
 
@@ -300,17 +314,9 @@ def _format_course_entry(c, today_date):
         line += f"\n  Тайлбар: {c.description}"
     if c.status_note:
         line += f"\n  Тэмдэглэл: {c.status_note}"
-    active_links = []
-    try:
-        active_links = [l for l in (c.links or []) if l.is_active]
-    except Exception:
-        # Defensive: CourseLink table might not exist on a partially-migrated
-        # DB. Fall back to no links rather than crashing the prompt build.
-        active_links = []
-    if active_links:
-        line += "\n  Холбоосууд:"
-        for l in sorted(active_links, key=lambda x: (x.sort_order, x.id)):
-            line += f"\n    - {l.description}: {l.url}"
+    links_block = _format_links_block(c, indent='  ')
+    if links_block:
+        line += "\n" + links_block
     return line
 
 
@@ -320,15 +326,14 @@ def _format_courses_canonical():
     bot should not be quoting them as upcoming. Sorts ascending so the
     nearest class is offered first."""
     today = datetime.utcnow().date()
-    # Eager-load CourseLinks so _format_course_entry can render per-course
-    # form URLs without an N+1 query against the link table.
     try:
-        active = (Course.query
-                  .options(joinedload(Course.links))
-                  .filter_by(is_active=True)
-                  .all())
+        all_courses = (Course.query
+                       .options(joinedload(Course.links))
+                       .all())
     except Exception:
-        active = Course.query.filter_by(is_active=True).all()
+        all_courses = Course.query.all()
+    active = [c for c in all_courses if c.is_active]
+    inactive = [c for c in all_courses if not c.is_active]
 
     def is_quotable(c):
         if c.course_type == _svc.SELF_PACED_COURSE_TYPE:
@@ -351,13 +356,45 @@ def _format_courses_canonical():
     active_text = "\n".join(_format_course_entry(c, today) for c in quotable)
 
     paused_or_stale = []
-    inactive = Course.query.filter_by(is_active=False).all()
     for c in inactive + inactive_or_stale:
         note = c.status_note or "түр зогссон"
         tag = f"#{c.course_number} " if c.course_number else ""
         paused_or_stale.append(f"- {tag}{c.name}: {note}")
 
     return active_text, "\n".join(paused_or_stale)
+
+
+def _format_company_contact_block():
+    """Surface admin-settable contact channels — website, office hours,
+    company email — so the bot can answer "хэдэн цагт ажилладаг вэ?",
+    "сайт байгаа юу?", "имэйлээр холбогдож болох уу?" without having
+    to defer to staff. Each field renders only when the admin has set
+    it (no placeholder text the LLM might quote verbatim).
+
+    Office hours are stored as `office_hours_start` / `office_hours_end`
+    (int 0–23) in GeneralSetting; the same values drive _is_off_hours()
+    so the bot's user-facing claim stays consistent with the handoff
+    routing decision."""
+    parts = []
+    website = _svc.get_business_website_url()
+    if website:
+        parts.append(f"Албан ёсны вэбсайт: {website}")
+    email = _svc.get_setting('center_email', '')
+    if email:
+        parts.append(f"Имэйл хаяг: {email}")
+    try:
+        oh_start = int(_svc.get_setting('office_hours_start', '8') or '8')
+        oh_end = int(_svc.get_setting('office_hours_end', '22') or '22')
+        parts.append(
+            f"Ажлын цаг (Улаанбаатарын цагаар): {oh_start:02d}:00–{oh_end:02d}:00. "
+            f"Энэ цагийн гадуур мессеж бичсэн хэрэглэгчид 'маргааш ажлын цагт "
+            f"хариулна' гэж зөөлөн мэдэгдэж болно."
+        )
+    except (ValueError, TypeError):
+        pass
+    if not parts:
+        return ''
+    return "КОМПАНИЙН ХОЛБОО БАРИХ:\n" + "\n".join(f"  • {p}" for p in parts) + "\n"
 
 
 def _format_current_time_block():
@@ -405,6 +442,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
     training = _svc.get_training_content()
     persona = _svc.get_bot_persona()
     current_time_block = _format_current_time_block()
+    contact_block = _format_company_contact_block()
     faqs = FAQ.query.all()
     faq_text = "\n".join([f"Q: {faq.question}\nA: {faq.answer}" for faq in faqs])
 
@@ -526,7 +564,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
 - Анги тус бүрд [#NNNN] гэсэн дугаар бий бол хариултдаа дурдвал админд хяналт тавихад тус болно (хэрэглэгчид заавал биш).
 ==========================
 
-СУРГАЛТЫН ТӨВИЙН ЕРӨНХИЙ МЭДЭЭЛЭЛ:
+{contact_block}СУРГАЛТЫН ТӨВИЙН ЕРӨНХИЙ МЭДЭЭЛЭЛ:
 {training}
 {snippets_section}{team_section}{biz_section}{services_section}
 ТҮГЭЭМЭЛ АСУУЛТУУД:
