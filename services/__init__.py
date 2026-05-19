@@ -851,10 +851,15 @@ from services._prompt import (  # noqa: E402
 
 def generate_bot_response(user_message, conversation_history,
                           session_state='new', funnel_stage='curious',
-                          user_first_name='', handoff_pending=False):
+                          user_first_name='', handoff_pending=False,
+                          handoff_just_triggered=False):
     """Generate bot response using OpenAI. `handoff_pending=True` enables
     advisory mode in the system prompt — bot keeps helping but doesn't
-    re-route the customer to staff (since the handoff was already fired)."""
+    re-route the customer to staff (since the handoff was already fired).
+    `handoff_just_triggered=True` is set for the SINGLE reply right after
+    a fresh handoff fires this turn; it overrides advisory mode so the
+    bot can craft a warm, mood-aware acknowledgement that mentions staff
+    routing and the office-hours ETA."""
     try:
         messages = [{
             "role": "system",
@@ -863,6 +868,7 @@ def generate_bot_response(user_message, conversation_history,
                 funnel_stage=funnel_stage,
                 user_first_name=user_first_name,
                 handoff_pending=handoff_pending,
+                handoff_just_triggered=handoff_just_triggered,
             ),
         }]
         messages.extend(conversation_history)
@@ -877,6 +883,19 @@ def generate_bot_response(user_message, conversation_history,
         return response.choices[0].message.content
     except Exception as e:
         logger.error("Error generating response: %s", e)
+        # If OpenAI fails right after a handoff fires, the dynamic
+        # acknowledgement won't arrive — fall back to the static template
+        # so the customer still hears something instead of a generic
+        # "try again later" error.
+        if handoff_just_triggered:
+            if _is_off_hours():
+                try:
+                    oh_start = int(get_setting('office_hours_start', '8') or '8')
+                    oh_end = int(get_setting('office_hours_end', '22') or '22')
+                except ValueError:
+                    oh_start, oh_end = 8, 22
+                return HANDOFF_USER_REPLY_OFF_HOURS.format(start=oh_start, end=oh_end)
+            return HANDOFF_USER_REPLY
         return "Уучлаарай, түр зуурын саатал гарсан байна. Хэдхэн минутын дараа дахин бичээрэй."
 
 
@@ -927,6 +946,30 @@ HANDOFF_USER_REPLY_OFF_HOURS = (
 # Injected into the system prompt when the user is in a handoff window
 # (bot_muted_until > now). Tells the bot to keep helping the customer
 # without re-routing them to staff again — that step has already fired.
+# Hard rule on Mongolian fluency. gpt-4o-mini occasionally slips into
+# AI-translation-flavoured constructions (wrong case on subject pronouns,
+# verbose noun-clause objects, machine-translated idioms). The model needs
+# explicit ✗/✓ pairs to anchor on; the named-error pattern is the same
+# trick we use elsewhere in the prompt to lock down behaviour.
+LANGUAGE_QUALITY_RULE = (
+    "МОНГОЛ ХЭЛНИЙ ЧАНАР (БҮХ ХАРИУЛТАНД):\n"
+    "Полишлогдсон, амьд хүний ярианы хэлээр бич. Машин орчуулга шиг "
+    "сонсогддог хатуу бүтэц, хэт албан ёсны хэллэг, утгагүй нэрлэх "
+    "хэллэгээс зайлсхий. Subject pronoun-ыг үргэлж нэрлэх (nominative) "
+    "хэлбэрээр бич — genitive (миний/танай/түүний) субьект болгож "
+    "бүү ашигла.\n"
+    "✗ 'Миний бэлэн байна'       → ✓ 'Би бэлэн байна'\n"
+    "✗ 'Танай асуух уу?'           → ✓ 'Та асуух уу?' / 'Танд асуулт байна уу?'\n"
+    "✗ 'Хариултын явцыг ярилцаад үзэх үү?' → ✓ 'Танд яаж туслахыг "
+    "хүсэж байна?' / 'Юу тодруулж өгье?'\n"
+    "✗ 'Та тусламж хүсэх боломжтой' → ✓ 'Танд тусалъя' / 'Туслахад "
+    "баяртай байна'\n"
+    "✗ 'Мэдээллийг өгөх боломжтой' → ✓ 'Мэдээллээ хэлж өгье'\n"
+    "Хэт урт, нэр үгийн жагсаалттай өгүүлбэр бүү бич. Богино, шууд, "
+    "найз шиг найрсаг өгүүлбэр илүү тохиромжтой."
+)
+
+
 HANDOFF_ADVISORY_RULE = (
     "ХАНДОФФ ХҮЛЭЭЛТИЙН ГОРИМ (advisory):\n"
     "Энэ хэрэглэгч аль хэдийн ажилтанд дамжуулагдсан. Ажилтан удахгүй "
@@ -943,6 +986,40 @@ HANDOFF_ADVISORY_RULE = (
     "Хэдхэн хариултанд нэг л удаа давтаж, спам бүү бол.\n"
     "  • Хэрэв хэрэглэгч 'хэзээ хариулах вэ?', 'хэн хариулдаг вэ?' гэх "
     "мэт асуулт асуувал ажлын цагийн доторх ETA-г шулуун хэлж тайвшруул."
+)
+
+# Injected into the system prompt for the ONE reply right after a handoff
+# was just triggered. Overrides HANDOFF_ADVISORY_RULE for this turn so the
+# bot CAN (and should) mention staff routing — this is the first-time
+# acknowledgement. Tells the bot to read the user's emotional tone, use
+# the company contact block's office hours, and keep the door open for
+# continued conversation rather than emitting a cold "we got your
+# message" template.
+HANDOFF_JUST_TRIGGERED_RULE = (
+    "ХАНДОФФ ШИНЭЭР ТРИГГЕР БОЛСОН — ЭНЭ ХАРИУЛТ НЬ АЖИЛТАНД "
+    "ДАМЖУУЛСНЫ АНХ УДААГИЙН МЭДЭГДЭЛ (advisory-биш, чиглүүлж БОЛНО):\n"
+    "  1) Хэрэглэгчийн сүүлийн мессежийн сэтгэл хөдлөлийг (бухимдсан, "
+    "эргэлзэлтэй, яаралтай, эерэг г.м.) уншиж empathy-тэй хариулна — "
+    "сэтгэлзүйн ажилтан шиг.\n"
+    "  2) 'КОМПАНИЙН ХОЛБОО БАРИХ' хэсэгт байгаа ажлын цагийг ашиглаж: "
+    "одоо ажлын цагийн дотор бол '~10-30 минутын дотор ажилтан "
+    "хариулна' гэж хэл; ажлын цагийн гадуур бол 'манай ажилтан "
+    "маргааш {start}:00–{end}:00 ажлын цагт хариулна' гэж тодорхой "
+    "тоо хэлж тайвшруул.\n"
+    "  3) WARM SALESMAN тоноор сонголтыг үлдээ: 'Хүлээж байх хооронд "
+    "танд тусламж хэрэгтэй бол би энд байна — анги, үнэ, бусад "
+    "үйлчилгээний талаар асуух зүйл байвал чөлөөтэй бичээрэй' гэх "
+    "мэт. Хэрэглэгчийг ганцаардуулахгүй, ярианы хаалгыг нээлттэй "
+    "үлдээ.\n"
+    "  4) Хэрэглэгч сонирхож байсан асуулттай ХОЛБООТОЙ нэг "
+    "follow-up өгүүлбэр санал болго (жишээ нь: 'Энэ хооронд танд "
+    "тохирох ангийн талаар яриад үзэх үү?' эсвэл 'Хүсвэл аудитын "
+    "процессыг тайлбарлая').\n"
+    "  5) ХҮЙТЭН template-маягт хариулт битгий бичих: 'Таны мессежийг "
+    "хүлээж авлаа' гэж зөвхөн хэлээд орхих ёсгүй. Шууд утга, дулаахан "
+    "өнгөтэй, хэрэглэгчид тохирсон хариулт өг.\n"
+    "  6) Энэ ӨВӨРМӨЦ турш HANDOFF ADVISORY-ын 'дахин үл-чиглүүл' "
+    "дүрмийг ҮЛ ХАМААРНА — ажилтны тухай дурдах НЬ зөв."
 )
 
 

@@ -20,7 +20,7 @@ from datetime import datetime
 from sqlalchemy.orm import joinedload
 
 from extensions import db
-from models import (BusinessLine, Course, FAQ, Product, TeamMember,
+from models import (BusinessLine, Course, FAQ, Product, Service, TeamMember,
                     TrainingSnippet)
 
 import services as _svc
@@ -145,6 +145,24 @@ def _format_team_members():
     return "\n".join(lines)
 
 
+def _format_links_block(owner, indent='    '):
+    """Render the "Холбоосууд:" sub-block for any catalog item that has a
+    `links` relationship (Product, Service, Course). Returns '' when there
+    are no active links. `indent` lets each formatter match its surrounding
+    list nesting — products are quoted under their business line (4-space
+    indent) while services and courses start at the outer level (2-space)."""
+    try:
+        active_links = [l for l in (owner.links or []) if l.is_active]
+    except Exception:
+        return ''
+    if not active_links:
+        return ''
+    lines = [f"{indent}Холбоосууд:"]
+    for l in sorted(active_links, key=lambda x: (x.sort_order, x.id)):
+        lines.append(f"{indent}  - {l.description}: {l.url}")
+    return "\n".join(lines)
+
+
 def _format_product_entry(p):
     """One product under a business line, with its active ProductLinks
     listed beneath it. Each link's `kind` is preserved so the bot can
@@ -162,11 +180,9 @@ def _format_product_entry(p):
         lines.append(f"    Тайлбар: {p.description}")
     if p.status_note:
         lines.append(f"    Тэмдэглэл: {p.status_note}")
-    active_links = [l for l in p.links if l.is_active]
-    if active_links:
-        lines.append("    Холбоосууд:")
-        for l in sorted(active_links, key=lambda x: (x.sort_order, x.id)):
-            lines.append(f"      - {l.description}: {l.url}")
+    links_block = _format_links_block(p, indent='    ')
+    if links_block:
+        lines.append(links_block)
     return "\n".join(lines)
 
 
@@ -216,6 +232,38 @@ def _format_business_line_entry(b):
     return "".join(parts)
 
 
+def _format_service_entry(s):
+    """One service in the catalog, with its active ServiceLinks listed
+    beneath. Services aren't FK'd to a BusinessLine, so they render at the
+    outer indent level (no leading bullet inside another list)."""
+    parts = [f"- {s.name}"]
+    if s.description:
+        parts.append(f"  Тайлбар: {s.description}")
+    if s.duration:
+        parts.append(f"  Үргэлжлэх хугацаа: {s.duration}")
+    if s.status_note:
+        parts.append(f"  Тэмдэглэл: {s.status_note}")
+    links_block = _format_links_block(s, indent='  ')
+    if links_block:
+        parts.append(links_block)
+    return "\n".join(parts)
+
+
+def _format_services():
+    """Build the active-services block — audit, tax, CPA outsource, etc.
+    Without this, the bot has no way to quote ServiceLink URLs (the request
+    forms) and falls back to deferring to staff when a user asks about a
+    service it should be confirming + offering directly."""
+    services = (Service.query
+                .options(joinedload(Service.links))
+                .filter_by(is_active=True)
+                .order_by(Service.sort_order.asc(), Service.id.asc())
+                .all())
+    if not services:
+        return ''
+    return "\n\n".join(_format_service_entry(s) for s in services)
+
+
 def _format_business_lines():
     """Return (answer_block, refer_block, paused_block) — active lines split by
     action, plus a block for paused services so the bot knows not to sell them."""
@@ -243,7 +291,11 @@ def _format_business_lines():
 def _format_course_entry(c, today_date):
     """Single line for a course in the canonical catalog block. Self-paced
     courses (100% Online) skip start/end dates; courses with a known
-    duration_days quote it; admins' status_note is appended verbatim."""
+    duration_days quote it; admins' status_note is appended verbatim.
+
+    Active CourseLinks (registration form, syllabus, exam form, etc.) are
+    listed underneath the course so the bot can quote per-course URLs
+    rather than only the global registration link in GeneralSetting."""
     head = f"- [#{c.course_number}] " if c.course_number else "- "
     head += f"{c.name} ({c.course_type}): {int(c.price):,}₮"
 
@@ -262,6 +314,9 @@ def _format_course_entry(c, today_date):
         line += f"\n  Тайлбар: {c.description}"
     if c.status_note:
         line += f"\n  Тэмдэглэл: {c.status_note}"
+    links_block = _format_links_block(c, indent='  ')
+    if links_block:
+        line += "\n" + links_block
     return line
 
 
@@ -271,7 +326,14 @@ def _format_courses_canonical():
     bot should not be quoting them as upcoming. Sorts ascending so the
     nearest class is offered first."""
     today = datetime.utcnow().date()
-    active = Course.query.filter_by(is_active=True).all()
+    try:
+        all_courses = (Course.query
+                       .options(joinedload(Course.links))
+                       .all())
+    except Exception:
+        all_courses = Course.query.all()
+    active = [c for c in all_courses if c.is_active]
+    inactive = [c for c in all_courses if not c.is_active]
 
     def is_quotable(c):
         if c.course_type == _svc.SELF_PACED_COURSE_TYPE:
@@ -294,13 +356,45 @@ def _format_courses_canonical():
     active_text = "\n".join(_format_course_entry(c, today) for c in quotable)
 
     paused_or_stale = []
-    inactive = Course.query.filter_by(is_active=False).all()
     for c in inactive + inactive_or_stale:
         note = c.status_note or "түр зогссон"
         tag = f"#{c.course_number} " if c.course_number else ""
         paused_or_stale.append(f"- {tag}{c.name}: {note}")
 
     return active_text, "\n".join(paused_or_stale)
+
+
+def _format_company_contact_block():
+    """Surface admin-settable contact channels — website, office hours,
+    company email — so the bot can answer "хэдэн цагт ажилладаг вэ?",
+    "сайт байгаа юу?", "имэйлээр холбогдож болох уу?" without having
+    to defer to staff. Each field renders only when the admin has set
+    it (no placeholder text the LLM might quote verbatim).
+
+    Office hours are stored as `office_hours_start` / `office_hours_end`
+    (int 0–23) in GeneralSetting; the same values drive _is_off_hours()
+    so the bot's user-facing claim stays consistent with the handoff
+    routing decision."""
+    parts = []
+    website = _svc.get_business_website_url()
+    if website:
+        parts.append(f"Албан ёсны вэбсайт: {website}")
+    email = _svc.get_setting('center_email', '')
+    if email:
+        parts.append(f"Имэйл хаяг: {email}")
+    try:
+        oh_start = int(_svc.get_setting('office_hours_start', '8') or '8')
+        oh_end = int(_svc.get_setting('office_hours_end', '22') or '22')
+        parts.append(
+            f"Ажлын цаг (Улаанбаатарын цагаар): {oh_start:02d}:00–{oh_end:02d}:00. "
+            f"Энэ цагийн гадуур мессеж бичсэн хэрэглэгчид 'маргааш ажлын цагт "
+            f"хариулна' гэж зөөлөн мэдэгдэж болно."
+        )
+    except (ValueError, TypeError):
+        pass
+    if not parts:
+        return ''
+    return "КОМПАНИЙН ХОЛБОО БАРИХ:\n" + "\n".join(f"  • {p}" for p in parts) + "\n"
 
 
 def _format_current_time_block():
@@ -342,12 +436,20 @@ def _format_current_time_block():
     )
 
 
-def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name='', handoff_pending=False):
+def build_system_prompt(session_state='new', funnel_stage='curious',
+                        user_first_name='', handoff_pending=False,
+                        handoff_just_triggered=False):
     """Build system prompt with training, FAQ, session-state, funnel,
-    and (optionally) handoff-advisory context."""
+    and (optionally) handoff-advisory context.
+
+    `handoff_just_triggered=True` takes precedence over `handoff_pending`:
+    when both are set, the just-triggered rule is injected and the
+    advisory rule is skipped (they serve different turns of the handoff
+    flow and conflict on whether the bot may mention staff routing)."""
     training = _svc.get_training_content()
     persona = _svc.get_bot_persona()
     current_time_block = _format_current_time_block()
+    contact_block = _format_company_contact_block()
     faqs = FAQ.query.all()
     faq_text = "\n".join([f"Q: {faq.question}\nA: {faq.answer}" for faq in faqs])
 
@@ -356,6 +458,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
     snippets_text = _format_training_snippets()
     team_text = _format_team_members()
     answer_lines, refer_lines, paused_services = _format_business_lines()
+    services_text = _format_services()
 
     google_form_url = _svc.get_google_form_url()
     if google_form_url:
@@ -414,15 +517,17 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
                 "  1) Доорх жагсаалтаас тухайн үйлчилгээний тайлбарыг "
                 "ашиглан 1-2 богино өгүүлбэрээр \"Тийм ээ, бид энэ "
                 "үйлчилгээг үзүүлдэг — ...\" гэж баталгаажуулна.\n"
-                "  2) \"Сонирхож байна уу? Дэлгэрэнгүйг танд илгээх "
-                "үү?\" гэж тодруулна.\n"
-                "  3) Хэрэглэгч сонирхож байгаагаа илэрхийлбэл "
-                "БҮРТГЭЛИЙН ЛИНК-ийг өгөөд \"Эсвэл утасны дугаараа "
-                "үлдээвэл манай ажилтан танд эргэж холбогдоно\" гэж "
-                "нэм. Энэ хоёрын аль нэгийг хэрэглэгчид сонгох "
-                "боломж өг — заавал утас лавлахгүй.\n"
+                "  2) Доорх \"ҮЙЛЧИЛГЭЭНИЙ КАТАЛОГ\" хэсгээс энэ үйлчилгээний "
+                "захиалгын линкийг (ServiceLink) ШУУД энэ хариултдаа оруул "
+                "— ажилтны хариуг хүлээлгэлгүй хэрэглэгч өөрөө формоор "
+                "захиалга өгөх боломжтой.\n"
+                "  3) \"Танд энэ үйлчилгээтэй холбоотой тодруулах асуулт "
+                "байна уу? Эсвэл утасны дугаараа үлдээвэл манай ажилтан "
+                "эргэж холбогдоно\" гэж нэм. Хэрэглэгчид сонгох эрх өг.\n"
                 "  4) Үнэ, тусгай нөхцөлийн дэлгэрэнгүй асуулт ирвэл "
                 "ажилтан хариулна гэж зөвлөнө.\n"
+                "  ✗ \"Таны асуултыг манай мэргэжилтэнд шилжүүлж байна\" "
+                "гэж ЗААВАЛ БҮҮ хэл — линк бий бол шууд линкийг өг.\n"
                 f"{refer_lines}\n"
             )
         if paused_services:
@@ -432,6 +537,16 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
                 "дахин нээгдэх үед мэдэгдэж болох эсэхийг тодруулна уу:\n"
                 f"{paused_services}\n"
             )
+
+    services_section = ''
+    if services_text:
+        services_section = (
+            "\nҮЙЛЧИЛГЭЭНИЙ КАТАЛОГ (захиалгын форм/линкүүдтэй) — "
+            "Хэрэглэгч аль нэг үйлчилгээний талаар асуухад доорх "
+            "тайлбар + ХОЛБООСЫГ ШУУД хариултдаа ашигла. Линк бий "
+            "бол ажилтан руу шилжүүлэхгүйгээр өөрөө хариулж болно:\n"
+            f"{services_text}\n"
+        )
 
     allowed_types_line = ", ".join(f'"{t}"' for t in _svc.ALLOWED_COURSE_TYPES)
     paused_courses_section = (
@@ -456,15 +571,15 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
 - Анги тус бүрд [#NNNN] гэсэн дугаар бий бол хариултдаа дурдвал админд хяналт тавихад тус болно (хэрэглэгчид заавал биш).
 ==========================
 
-СУРГАЛТЫН ТӨВИЙН ЕРӨНХИЙ МЭДЭЭЛЭЛ:
+{contact_block}СУРГАЛТЫН ТӨВИЙН ЕРӨНХИЙ МЭДЭЭЛЭЛ:
 {training}
-{snippets_section}{team_section}{biz_section}
+{snippets_section}{team_section}{biz_section}{services_section}
 ТҮГЭЭМЭЛ АСУУЛТУУД:
 {faq_text}
 
 {registration_block}{name_block}{funnel_rule}
 
-{(_svc.HANDOFF_ADVISORY_RULE + chr(10) + chr(10)) if handoff_pending else ''}БОРЛУУЛАЛТЫН ЗАН ҮЙЛ (туршлагатай зөвлөгчийн загвар — найрсаг, тулгахгүй):
+{(_svc.HANDOFF_JUST_TRIGGERED_RULE + chr(10) + chr(10)) if handoff_just_triggered else (_svc.HANDOFF_ADVISORY_RULE + chr(10) + chr(10)) if handoff_pending else ''}БОРЛУУЛАЛТЫН ЗАН ҮЙЛ (туршлагатай зөвлөгчийн загвар — найрсаг, тулгахгүй):
 
 A. ИДЭВХТЭЙ СОНСОЛТ:
    Хэрэглэгчийн өгсөн гол үг/санааг хариултынхаа эхэнд 1 өгүүлбэрээр буцааж
@@ -522,6 +637,8 @@ F. ӨМНӨХ ХАРИЛЦАА ГҮН:
    баяжуул. Жишээ: "Та эхэндээ ажилтай гэж хэлсэн — тиймээс оройн анги
    танд илүү тохиромжтой байж магадгүй." Богино санах ой = итгэлцлийн
    суурь.
+
+{_svc.LANGUAGE_QUALITY_RULE}
 
 ЧУХАЛ ДҮРМҮҮД:
 {session_rule}

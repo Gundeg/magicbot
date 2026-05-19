@@ -141,6 +141,7 @@ def webhook():
                         fb_user.bot_muted_until = None
                         db.session.commit()
                     handoff_pending = is_in_handoff(fb_user)
+                    handoff_just_triggered = False
 
                     # Skip the keyword-handoff check if the user is already
                     # in advisory mode — they've been routed to staff
@@ -148,8 +149,20 @@ def webhook():
                     if not handoff_pending:
                         handoff, reason = should_handoff(message_text, fb_user)
                         if handoff:
-                            trigger_handoff(fb_user, reason, message_text)
-                            continue
+                            # Fire the AdminIssue + Telegram ping but DON'T
+                            # send the static user message — fall through
+                            # to the LLM so the acknowledgement is warm,
+                            # mood-aware, and quotes the right office-hours
+                            # ETA. The HANDOFF_JUST_TRIGGERED rule the
+                            # prompt builder will inject overrides advisory
+                            # mode for this one turn so the bot can still
+                            # mention staff routing.
+                            trigger_handoff(
+                                fb_user, reason, message_text,
+                                send_user_message=False,
+                            )
+                            handoff_pending = True
+                            handoff_just_triggered = True
 
                     # Pull only the last 10 messages instead of the entire
                     # conversation. For a chatty user `.all()` was loading
@@ -171,6 +184,7 @@ def webhook():
                         funnel_stage=fb_user.funnel_stage or 'curious',
                         user_first_name=first_name_of(fb_user.name),
                         handoff_pending=handoff_pending,
+                        handoff_just_triggered=handoff_just_triggered,
                     )
 
                     bot_msg = Message(
