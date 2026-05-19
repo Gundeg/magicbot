@@ -946,6 +946,30 @@ HANDOFF_USER_REPLY_OFF_HOURS = (
 # Injected into the system prompt when the user is in a handoff window
 # (bot_muted_until > now). Tells the bot to keep helping the customer
 # without re-routing them to staff again — that step has already fired.
+# Hard rule on Mongolian fluency. gpt-4o-mini occasionally slips into
+# AI-translation-flavoured constructions (wrong case on subject pronouns,
+# verbose noun-clause objects, machine-translated idioms). The model needs
+# explicit ✗/✓ pairs to anchor on; the named-error pattern is the same
+# trick we use elsewhere in the prompt to lock down behaviour.
+LANGUAGE_QUALITY_RULE = (
+    "МОНГОЛ ХЭЛНИЙ ЧАНАР (БҮХ ХАРИУЛТАНД):\n"
+    "Полишлогдсон, амьд хүний ярианы хэлээр бич. Машин орчуулга шиг "
+    "сонсогддог хатуу бүтэц, хэт албан ёсны хэллэг, утгагүй нэрлэх "
+    "хэллэгээс зайлсхий. Subject pronoun-ыг үргэлж нэрлэх (nominative) "
+    "хэлбэрээр бич — genitive (миний/танай/түүний) субьект болгож "
+    "бүү ашигла.\n"
+    "✗ 'Миний бэлэн байна'       → ✓ 'Би бэлэн байна'\n"
+    "✗ 'Танай асуух уу?'           → ✓ 'Та асуух уу?' / 'Танд асуулт байна уу?'\n"
+    "✗ 'Хариултын явцыг ярилцаад үзэх үү?' → ✓ 'Танд яаж туслахыг "
+    "хүсэж байна?' / 'Юу тодруулж өгье?'\n"
+    "✗ 'Та тусламж хүсэх боломжтой' → ✓ 'Танд тусалъя' / 'Туслахад "
+    "баяртай байна'\n"
+    "✗ 'Мэдээллийг өгөх боломжтой' → ✓ 'Мэдээллээ хэлж өгье'\n"
+    "Хэт урт, нэр үгийн жагсаалттай өгүүлбэр бүү бич. Богино, шууд, "
+    "найз шиг найрсаг өгүүлбэр илүү тохиромжтой."
+)
+
+
 HANDOFF_ADVISORY_RULE = (
     "ХАНДОФФ ХҮЛЭЭЛТИЙН ГОРИМ (advisory):\n"
     "Энэ хэрэглэгч аль хэдийн ажилтанд дамжуулагдсан. Ажилтан удахгүй "
