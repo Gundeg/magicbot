@@ -20,7 +20,7 @@ from datetime import datetime
 from sqlalchemy.orm import joinedload
 
 from extensions import db
-from models import (BusinessLine, Course, FAQ, Product, TeamMember,
+from models import (BusinessLine, Course, FAQ, Product, Service, TeamMember,
                     TrainingSnippet)
 
 import services as _svc
@@ -216,6 +216,40 @@ def _format_business_line_entry(b):
     return "".join(parts)
 
 
+def _format_service_entry(s):
+    """One service in the catalog, with its active ServiceLinks listed beneath.
+    Mirrors _format_product_entry so the bot sees services with the same shape
+    as products and can quote the right form URL when the user asks about them."""
+    parts = [f"- {s.name}"]
+    if s.description:
+        parts.append(f"  Тайлбар: {s.description}")
+    if s.duration:
+        parts.append(f"  Үргэлжлэх хугацаа: {s.duration}")
+    if s.status_note:
+        parts.append(f"  Тэмдэглэл: {s.status_note}")
+    active_links = [l for l in (s.links or []) if l.is_active]
+    if active_links:
+        parts.append("  Холбоосууд:")
+        for l in sorted(active_links, key=lambda x: (x.sort_order, x.id)):
+            parts.append(f"    - {l.description}: {l.url}")
+    return "\n".join(parts)
+
+
+def _format_services():
+    """Build the active-services block — audit, tax, CPA outsource, etc.
+    Without this, the bot has no way to quote ServiceLink URLs (the request
+    forms) and falls back to deferring to staff when a user asks about a
+    service it should be confirming + offering directly."""
+    services = (Service.query
+                .options(joinedload(Service.links))
+                .filter_by(is_active=True)
+                .order_by(Service.sort_order.asc(), Service.id.asc())
+                .all())
+    if not services:
+        return ''
+    return "\n\n".join(_format_service_entry(s) for s in services)
+
+
 def _format_business_lines():
     """Return (answer_block, refer_block, paused_block) — active lines split by
     action, plus a block for paused services so the bot knows not to sell them."""
@@ -356,6 +390,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
     snippets_text = _format_training_snippets()
     team_text = _format_team_members()
     answer_lines, refer_lines, paused_services = _format_business_lines()
+    services_text = _format_services()
 
     google_form_url = _svc.get_google_form_url()
     if google_form_url:
@@ -414,15 +449,17 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
                 "  1) Доорх жагсаалтаас тухайн үйлчилгээний тайлбарыг "
                 "ашиглан 1-2 богино өгүүлбэрээр \"Тийм ээ, бид энэ "
                 "үйлчилгээг үзүүлдэг — ...\" гэж баталгаажуулна.\n"
-                "  2) \"Сонирхож байна уу? Дэлгэрэнгүйг танд илгээх "
-                "үү?\" гэж тодруулна.\n"
-                "  3) Хэрэглэгч сонирхож байгаагаа илэрхийлбэл "
-                "БҮРТГЭЛИЙН ЛИНК-ийг өгөөд \"Эсвэл утасны дугаараа "
-                "үлдээвэл манай ажилтан танд эргэж холбогдоно\" гэж "
-                "нэм. Энэ хоёрын аль нэгийг хэрэглэгчид сонгох "
-                "боломж өг — заавал утас лавлахгүй.\n"
+                "  2) Доорх \"ҮЙЛЧИЛГЭЭНИЙ КАТАЛОГ\" хэсгээс энэ үйлчилгээний "
+                "захиалгын линкийг (ServiceLink) ШУУД энэ хариултдаа оруул "
+                "— ажилтны хариуг хүлээлгэлгүй хэрэглэгч өөрөө формоор "
+                "захиалга өгөх боломжтой.\n"
+                "  3) \"Танд энэ үйлчилгээтэй холбоотой тодруулах асуулт "
+                "байна уу? Эсвэл утасны дугаараа үлдээвэл манай ажилтан "
+                "эргэж холбогдоно\" гэж нэм. Хэрэглэгчид сонгох эрх өг.\n"
                 "  4) Үнэ, тусгай нөхцөлийн дэлгэрэнгүй асуулт ирвэл "
                 "ажилтан хариулна гэж зөвлөнө.\n"
+                "  ✗ \"Таны асуултыг манай мэргэжилтэнд шилжүүлж байна\" "
+                "гэж ЗААВАЛ БҮҮ хэл — линк бий бол шууд линкийг өг.\n"
                 f"{refer_lines}\n"
             )
         if paused_services:
@@ -432,6 +469,16 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
                 "дахин нээгдэх үед мэдэгдэж болох эсэхийг тодруулна уу:\n"
                 f"{paused_services}\n"
             )
+
+    services_section = ''
+    if services_text:
+        services_section = (
+            "\nҮЙЛЧИЛГЭЭНИЙ КАТАЛОГ (захиалгын форм/линкүүдтэй) — "
+            "Хэрэглэгч аль нэг үйлчилгээний талаар асуухад доорх "
+            "тайлбар + ХОЛБООСЫГ ШУУД хариултдаа ашигла. Линк бий "
+            "бол ажилтан руу шилжүүлэхгүйгээр өөрөө хариулж болно:\n"
+            f"{services_text}\n"
+        )
 
     allowed_types_line = ", ".join(f'"{t}"' for t in _svc.ALLOWED_COURSE_TYPES)
     paused_courses_section = (
@@ -458,7 +505,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
 
 СУРГАЛТЫН ТӨВИЙН ЕРӨНХИЙ МЭДЭЭЛЭЛ:
 {training}
-{snippets_section}{team_section}{biz_section}
+{snippets_section}{team_section}{biz_section}{services_section}
 ТҮГЭЭМЭЛ АСУУЛТУУД:
 {faq_text}
 
