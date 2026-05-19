@@ -49,15 +49,33 @@ The last super_admin cannot be demoted or self-demote; the toggle handler enforc
 ## System prompt assembly (the bot's "brain")
 
 Built fresh per request in `services/_prompt.py:build_system_prompt`. Sources in order:
-persona → current time block → canonical course list → training_content (legacy, may be empty)
-→ training snippets (★high first) → team members → business lines (answer / refer / paused)
-→ FAQs → registration-link block → session-state rule → funnel rule → behavioral rules.
+persona → current time block → **company contact block** (website / email / office hours, when set) →
+canonical course list with per-course CourseLinks → training_content (legacy, may be empty)
+→ training snippets (★high first) → team members → business lines + Products + ProductLinks →
+**Service catalog + ServiceLinks** (the "ҮЙЛЧИЛГЭЭНИЙ КАТАЛОГ" block) →
+FAQs → registration-link block → session-state rule → funnel rule →
+HANDOFF_JUST_TRIGGERED_RULE (for the one turn after handoff fires) **OR** HANDOFF_ADVISORY_RULE
+(while a handoff is open) → sales-behaviour A–F → LANGUAGE_QUALITY_RULE → ЧУХАЛ ДҮРМҮҮД 1–10.
+
+Shared link rendering: `_format_links_block(owner, indent)` is the single helper used by all
+three entry formatters (Product / Service / Course). When adding a new linkable model, reuse it.
+
+**Bot-knowledge gaps that have been closed** (don't re-introduce):
+- Services + ServiceLinks were previously invisible to the bot — closed by `_format_services()`.
+- CourseLinks were previously invisible — closed by `_format_links_block(c, indent='  ')` in `_format_course_entry`.
+- `business_website_url`, `center_email`, `office_hours_start/end` weren't surfaced — closed by `_format_company_contact_block()`.
+
+**Bot-knowledge gaps still open** (intentional, not bugs):
+- Bot cannot browse the web. To give it deeper knowledge of services / processes, admins must paste content into Service `description`, FAQ answers, or ★high Training Snippets. A future "Knowledge Base" feature was scoped and deferred — user picked Option A (use existing fields).
+- ЧУХАЛ ДҮРМҮҮД are code-only — not admin-editable. See [[bot-rules-location]] memory entry.
+- `ConversationTopic` (per-user classified topics) isn't fed back into the prompt for personalization.
 
 **Leverage hierarchy for fixing bot behavior** (smallest to largest blast radius):
 1. **Snippet** — one rule for one question. Default choice.
 2. **FAQ** — when many users ask the same thing.
 3. **Catalog edit** — when the data is wrong, not the wording.
 4. **Persona** — only when the bot's *voice* is off, not its *facts*.
+5. **Code (`services/_prompt.py` or `__init__.py` constants)** — only when the override needs to ship to every customer and snippet wording can't reach it.
 
 ## Latent / legacy fields — DO NOT trust without checking
 
@@ -120,6 +138,8 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 - `services/__init__.py:trigger_handoff` used to auto-mute the bot via `mute_duration_hours`. That's been removed — DO NOT add it back; the bot must keep advisory-replying after handover until staff `take_over_chat`.
 - `seed_default_magic_links` historically missed a `GeneralSetting` import — it's fixed, but any new helper that touches `GeneralSetting.query` must import it from `models`.
 - `classification_lookback_days` controller lives at the top of `work_tasks.html` (outside any tab) so it's visible from the default Hot Prospects landing. Don't move it back into a single tab.
+- **"Bot is silent" is most often a Facebook plumbing issue, not a code issue.** When the user reports silence and the admin panel shows zero muted users, START by checking Render logs for `POST /webhook` entries from Facebook (admin polling traffic shows up as `/admin/api/handoff-poll`, ignore that). If there are no POSTs, the Facebook ↔ Render link is broken — see the [[fb-webhook-silence]] memory recipe. Don't read code first.
+- **The webhook trigger now falls through to LLM generation** instead of sending a static handoff message. The webhook sets `handoff_just_triggered=True` and continues to `generate_bot_response`; the prompt builder injects `HANDOFF_JUST_TRIGGERED_RULE` which overrides advisory mode for that one turn. Static `HANDOFF_USER_REPLY` / `HANDOFF_USER_REPLY_OFF_HOURS` are now only used as the OpenAI-failure fallback inside `generate_bot_response`.
 
 ## When seeding or migrating data
 
@@ -132,6 +152,7 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 - Chat-facing `description` columns (ProductLink / ServiceLink / CourseLink): imperative form. `Аудит хийлгэе`, `Тайлан гаргуулая`, `MS Office лиценз авая`. Not `... захиалгын форм`.
 - Admin labels: natural Mongolian, untranslated terms (`Persona`, `Snippet`) are OK when used in pairs (`Ботын дүр (Persona)`).
 - New admin manual sections always include: a "Юу", "Хэзээ ашиглах вэ?", and a ✓/✗ example pair.
+- **Bot output (LLM-generated)**: must read like polished native Mongolian, not machine-translated. `LANGUAGE_QUALITY_RULE` in `services/__init__.py` is the prompt-side anchor — it carries explicit ✗/✓ pairs for the specific failures the user has flagged (genitive subjects like "Миний бэлэн байна", verbose "X-ийн боломжтой" stacks, dead noun-clause questions). When adding new bot-output examples to any prompt rule, follow the same paired-example pattern.
 
 ## Commit + push protocol
 
