@@ -180,11 +180,25 @@
     {# ── Tab 2: Confirmed leads (rich table from old leads.html) ──── #}
     <div class="tab-pane fade {% if tab == 'leads' %}show active{% endif %}" id="leadsTab" role="tabpanel">
         <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <span><i class="bi bi-people"></i> Утсаа үлдээсэн лидүүд</span>
-                <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <div class="input-group input-group-sm" style="width: auto;">
+                        <span class="input-group-text" id="classifyDaysLabel"
+                              title="Хэдэн өдрийн сүүлийн мессежийг ангилахад ашиглах вэ?">
+                            Сүүлийн
+                        </span>
+                        <input type="number" class="form-control text-end"
+                               id="classifyDays" name="classify_days"
+                               style="width: 70px;"
+                               min="1" max="{{ classification_lookback_max }}"
+                               value="{{ classification_lookback_days }}"
+                               aria-labelledby="classifyDaysLabel"
+                               title="1-{{ classification_lookback_max }} хоног. Ангилах товч дарахад автоматаар хадгалагдана.">
+                        <span class="input-group-text">хоног</span>
+                    </div>
                     <button type="button" class="btn btn-sm btn-light" id="classifyBtn"
-                            title="AI ашиглан харилцааг ангилах">
+                            title="AI ашиглан зүүн дахь хоногийн дотор мессеж бичсэн хэрэглэгчдийн харилцааг ангилна">
                         <i class="bi bi-magic"></i> Ангилах
                     </button>
                     <button type="button" class="btn btn-sm btn-light" id="backfillBtn"
@@ -594,10 +608,14 @@
             btn.disabled = true;
             const original = btn.innerHTML;
             btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Ангилж байна...';
+            const daysInput = document.getElementById('classifyDays');
+            const lookback = daysInput ? parseInt(daysInput.value, 10) : NaN;
+            const body = Number.isFinite(lookback) ? JSON.stringify({lookback_days: lookback}) : null;
             fetch(classifyUrl, {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: {'Content-Type': 'application/json'},
+                body: body,
             })
             .then(async r => {
                 // Always parse as JSON, but tolerate the error path (HTML

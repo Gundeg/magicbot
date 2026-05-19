@@ -59,18 +59,21 @@ def _parse_links_payload(raw_links):
 # Settings keys that belong on the General Information tab. Phase 2 of the
 # admin IA reorg redistributed Settings; this is the Business Management
 # half. Bot config keys (handoff, hours, telegram) live in Bot Settings.
+#
+# center_phone / center_address were removed in the v2 cleanup — they
+# duplicated main_office_phone / main_office_address, which the prompt
+# builder already used as the fallback. Old GeneralSetting rows for the
+# dropped keys stay in the DB but the form no longer touches them.
+# classification_lookback_days moved to the Work Tasks page so the
+# controller lives next to the "Re-classify" button.
 BUSINESS_GENERAL_KEYS = (
     'center_name',
     'center_description',
-    'center_phone',
     'center_email',
-    'center_address',
     'main_office_address',
     'main_office_phone',
+    'business_website_url',
     'google_form_url',
-    # Days of message history the topic classifier reads per user.
-    # Clamped to [1, 30] server-side in services.get_classification_lookback_days.
-    'classification_lookback_days',
 )
 
 

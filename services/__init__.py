@@ -727,6 +727,13 @@ def get_main_office_phone():
     return get_setting('main_office_phone', '')
 
 
+def get_business_website_url():
+    """Company-wide marketing website URL. Surfaced by the prompt so the bot
+    can answer "what's your website?" / "сайт" / "вэбсайт" without admins
+    having to add a separate ProductLink for it."""
+    return get_setting('business_website_url', '')
+
+
 ALLOWED_COURSE_TYPES = ('100% Online', 'Hybrid', 'Online with Teacher', 'Classroom')
 SELF_PACED_COURSE_TYPE = '100% Online'
 

@@ -36,12 +36,6 @@
                 </select>
                 <div class="form-text">Амралт эсвэл ажилтан цөөн үед "Идэвхтэй" болгож болно.</div>
             </div>
-            <div class="mb-3">
-                <label class="form-label" for="mute_duration_hours">Ботыг чимээгүй болгох цаг (handoff болсны дараа)</label>
-                <input type="number" min="0" max="168" class="form-control" id="mute_duration_hours"
-                       name="mute_duration_hours" value="{{ settings.get('mute_duration_hours', '2') }}">
-                <div class="form-text">0 = чимээгүй болгохгүй. Дээд тал 168 цаг (7 хоног).</div>
-            </div>
         </div>
     </div>
 
@@ -170,7 +164,7 @@
         e.preventDefault();
         const data = {};
         // Most fields are simple key/value pairs.
-        ['handoff_sensitivity','mute_duration_hours','telegram_chat_ids',
+        ['handoff_sensitivity','telegram_chat_ids',
          'office_hours_start','office_hours_end','hot_prospect_stages',
          'training_comment','celebration_comment','default_comment',
          'handoff_message','bot_welcome'].forEach(k => {

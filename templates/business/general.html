@@ -11,55 +11,63 @@
 <div class="alert alert-light border d-flex gap-2 align-items-start py-2 mb-3 fs-85">
     <i class="bi bi-building mt-1 flex-shrink-0 text-brand"></i>
     <div>
-        Энэ хэсэгт компанийн нийтлэг мэдээлэл хадгална: гол оффисын хаяг/утас, сургалтын
-        төвийн нэр, бүртгэлийн форм гэх мэт. Бот эдгээрийг өөрийн хариултанд иш татна.
+        Энэ хэсэгт компанийн нийтлэг мэдээлэл хадгална: нэр, утас, хаяг, имэйл, вэбсайт,
+        ерөнхий танилцуулга. Бизнесийн нэгж өөрийн утас/хаяг/имэйлгүй бол энд хадгалсан
+        утгууд ботын хариултанд автоматаар орлох болно.
     </div>
 </div>
 
-<div class="card">
+<div class="card mb-3">
     <div class="card-header">
         <i class="bi bi-info-circle"></i> Компанийн ерөнхий мэдээлэл
     </div>
     <div class="card-body">
         <form id="generalForm" class="row g-3" autocomplete="off">
             <div class="col-md-6">
-                <label class="form-label" for="center_name">Сургалтын төвийн нэр</label>
+                <label class="form-label" for="center_name">Компанийн нэр</label>
                 <input type="text" class="form-control" id="center_name" name="center_name"
-                       value="{{ settings.center_name or '' }}">
+                       value="{{ settings.center_name or '' }}"
+                       placeholder="Magic Financial Group">
             </div>
             <div class="col-md-6">
-                <label class="form-label" for="center_phone">Төвийн утас</label>
-                <input type="text" class="form-control" id="center_phone" name="center_phone"
-                       value="{{ settings.center_phone or '' }}">
+                <label class="form-label" for="business_website_url">Бизнесийн вэбсайт</label>
+                <input type="url" class="form-control" id="business_website_url" name="business_website_url"
+                       value="{{ settings.business_website_url or '' }}"
+                       placeholder="https://magicgroup.mn">
+                <div class="form-text">Манай гол вэбсайт. Бот энэ линкийг "вэбсайт", "сайт" асуултанд иш татна.</div>
             </div>
-            <div class="col-md-12">
-                <label class="form-label" for="center_description">Төвийн тайлбар</label>
-                <textarea class="form-control" id="center_description" name="center_description"
-                          rows="3">{{ settings.center_description or '' }}</textarea>
+
+            <div class="col-md-6">
+                <label class="form-label" for="main_office_phone">Үндсэн утас</label>
+                <input type="text" class="form-control" id="main_office_phone" name="main_office_phone"
+                       value="{{ settings.main_office_phone or '' }}"
+                       placeholder="7288-7288">
+                <div class="form-text">Бизнесийн нэгж өөрийн утасгүй бол энэ дугаар ашиглагдана.</div>
             </div>
             <div class="col-md-6">
-                <label class="form-label" for="center_email">Төвийн имэйл</label>
+                <label class="form-label" for="center_email">Үндсэн имэйл</label>
                 <input type="email" class="form-control" id="center_email" name="center_email"
-                       value="{{ settings.center_email or '' }}">
-            </div>
-            <div class="col-md-6">
-                <label class="form-label" for="center_address">Төвийн хаяг</label>
-                <input type="text" class="form-control" id="center_address" name="center_address"
-                       value="{{ settings.center_address or '' }}">
+                       value="{{ settings.center_email or '' }}"
+                       placeholder="contact@magicgroup.mn">
+                <div class="form-text">Бизнесийн нэгж өөрийн имэйлгүй бол энэ имэйл ашиглагдана.</div>
             </div>
 
-            <div class="col-12"><hr class="my-2"></div>
-
-            <div class="col-md-6">
-                <label class="form-label" for="main_office_address">Гол оффисын хаяг</label>
+            <div class="col-md-12">
+                <label class="form-label" for="main_office_address">Үндсэн хаяг</label>
                 <input type="text" class="form-control" id="main_office_address" name="main_office_address"
-                       value="{{ settings.main_office_address or '' }}">
+                       value="{{ settings.main_office_address or '' }}"
+                       placeholder="БЗД 13-р хороолол, UB Tower, 15 давхар 1502">
                 <div class="form-text">Бизнесийн нэгж өөрийн хаяггүй бол энэ хаяг ашиглагдана.</div>
             </div>
-            <div class="col-md-6">
-                <label class="form-label" for="main_office_phone">Гол оффисын утас</label>
-                <input type="text" class="form-control" id="main_office_phone" name="main_office_phone"
-                       value="{{ settings.main_office_phone or '' }}">
+
+            <div class="col-md-12">
+                <label class="form-label" for="center_description">Компанийн ерөнхий танилцуулга</label>
+                <textarea class="form-control" id="center_description" name="center_description"
+                          rows="4" placeholder="Магиc Financial Group нь ... оноос хойш ...">{{ settings.center_description or '' }}</textarea>
+                <div class="form-text">
+                    Компанийн товч танилцуулга — үүсгэн байгуулагдсан он, гол үйл ажиллагаа, охин компаниуд гэх мэт.
+                    Бот үүнийг "та хэн бэ?", "Magic Group гэж юу вэ?" гэх асуултанд иш татна.
+                </div>
             </div>
 
             <div class="col-12"><hr class="my-2"></div>
@@ -68,21 +76,9 @@
                 <label class="form-label" for="google_form_url">Нийтлэг бүртгэлийн форм (URL)</label>
                 <input type="url" class="form-control" id="google_form_url" name="google_form_url"
                        value="{{ settings.google_form_url or '' }}">
-                <div class="form-text">Бот зориуд салангид холбоосгүй сургалт/үйлчилгээний хувьд эндэх линкийг иш татна.</div>
-            </div>
-
-            <div class="col-12"><hr class="my-2"></div>
-
-            <div class="col-md-6">
-                <label class="form-label" for="classification_lookback_days">
-                    Харилцааны ангиллын хугацаа (хоног)
-                </label>
-                <input type="number" min="1" max="30" step="1"
-                       class="form-control" id="classification_lookback_days"
-                       name="classification_lookback_days"
-                       value="{{ settings.classification_lookback_days or '30' }}">
                 <div class="form-text">
-                    Лидийн харилцааг ангилахдаа хэдэн өдрийн мессежийг харах вэ? 1-30 хооронд. 30 хоног дээд хязгаар.
+                    Сургалт, үйлчилгээ салангид холбоосгүй үед бот энэхүү линкийг иш татан "бүртгүүлэх"
+                    урсгал руу хэрэглэгчийг чиглүүлнэ.
                 </div>
             </div>
 

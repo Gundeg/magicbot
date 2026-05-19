@@ -416,8 +416,14 @@
                section, the active state lights up whenever the admin is
                on ANY page belonging to that section. #}
 
+            {# Бизнес & бот болон Систем хэсгүүд нь зөвхөн админ+ эрхтэй
+               хэрэглэгчдэд харагдана. Бүртгэлийн ажилтанд зөвхөн "Гарын
+               авлага" нь "Бизнес & бот" хэсэгт харагдаж, бусад нь нуугдана. #}
+            {% set is_admin = current_user.is_authenticated and current_user.role in ('admin', 'super_admin') %}
+
             <div class="nav-section">Бизнес & бот</div>
             <nav class="nav flex-column">
+                {% if is_admin %}
                 <a class="nav-link {% if request.endpoint in ('business_management', 'business_management_general', 'business_management_units', 'business_management_employees', 'business_unit_detail', 'business_lines', 'courses', 'services', 'products', 'team') %}active{% endif %}"
                    href="{{ url_for('business_management_general') }}">
                     <i class="bi bi-building"></i> Бизнесийн удирдлага
@@ -426,15 +432,22 @@
                    href="{{ url_for('bot_management_settings') }}">
                     <i class="bi bi-robot"></i> Ботын удирдлага
                 </a>
+                {% endif %}
+                <a class="nav-link {% if request.endpoint == 'train_ai_guide' %}active{% endif %}"
+                   href="{{ url_for('train_ai_guide') }}">
+                    <i class="bi bi-mortarboard"></i> Гарын авлага
+                </a>
             </nav>
 
+            {% if is_admin %}
             <div class="nav-section">Систем</div>
             <nav class="nav flex-column">
-                <a class="nav-link {% if request.endpoint in ('admins', 'audit_log', 'docs') %}active{% endif %}"
+                <a class="nav-link {% if request.endpoint in ('admins', 'audit_log', 'system_defaults', 'docs') %}active{% endif %}"
                    href="{{ url_for('admins') }}">
                     <i class="bi bi-gear-wide-connected"></i> Систем
                 </a>
             </nav>
+            {% endif %}
 
         </div>
 

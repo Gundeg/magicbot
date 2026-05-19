@@ -1,6 +1,7 @@
-{# Tab nav shared across System pages (Admin Users, Audit Log, Defaults,
-   Train-AI Guide, Docs). The sidebar's "Систем" entry lands here; tabs
-   handle the within-section navigation. #}
+{# Tab nav shared across System pages (Admin Users, Audit Log, Defaults, Docs).
+   The sidebar's "Систем" entry lands here; tabs handle the within-section
+   navigation. AI Сургалт гарын авлага нь sidebar дээр өөрийн цэгтэй
+   болсон тул энд давтан гарахгүй. #}
 <ul class="nav nav-tabs mb-3" role="tablist">
     <li class="nav-item">
         <a class="nav-link {% if request.endpoint == 'admins' %}active{% endif %}"
@@ -18,12 +19,6 @@
         <a class="nav-link {% if request.endpoint == 'system_defaults' %}active{% endif %}"
            href="{{ url_for('system_defaults') }}">
             <i class="bi bi-arrow-clockwise"></i> Анхдагч утгууд
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link {% if request.endpoint == 'train_ai_guide' %}active{% endif %}"
-           href="{{ url_for('train_ai_guide') }}">
-            <i class="bi bi-mortarboard"></i> AI Сургалт (заавар)
         </a>
     </li>
     <li class="nav-item">

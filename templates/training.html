@@ -40,35 +40,14 @@
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-header">
-                    <i class="bi bi-book-half"></i> Сургалтын суурь агуулга (Base intro)
-                </div>
-                <div class="card-body">
-                    <label class="form-label visually-hidden" for="trainingContent">Сургалтын суурь агуулга</label>
-                    <p class="text-muted small mb-2">
-                        Компанийн ерөнхий танилцуулга — нэг л удаа бичдэг "суурь" блок.
-                        Шинэ нэмэлт, тодруулга нэмэхдээ доорх "Нэмэлт тайлбарууд" хэсгийг ашигла —
-                        тэгвэл хуучин агуулгыг устгахгүй, олон удирдлагатай зэрэгцэн ажиллах боломжтой.
-                    </p>
-                    <textarea name="training_content" id="trainingContent" class="form-control font-monospace" rows="14"
-                              placeholder="Хоосон үлдээвэл анхдагч утга ашиглагдана."
-                              {% if current_user.role != 'super_admin' %}readonly{% endif %}>{{ training_value }}</textarea>
-                    {% if not training_value %}
-                    <details class="mt-2">
-                        <summary class="text-muted small cursor-pointer">
-                            Хэрэглэгдэх анхдагч утга харах ({{ training_fallback|length }} тэмдэгт)
-                        </summary>
-                        <pre class="small text-muted bg-light p-2 mt-2 rounded scroll-300">{{ training_fallback }}</pre>
-                    </details>
-                    {% endif %}
-                </div>
-            </div>
+            {# Компанийн ерөнхий мэдээллийг "Бизнесийн удирдлага → Ерөнхий мэдээлэл"
+               хэсэгт нэгтгэсэн тул энд "Сургалтын суурь агуулга" талбарыг устгасан.
+               Шинэ нэмэлт мэдээллийг доорх Snippet (Нэмэлт тайлбар) хэсгээр оруулна. #}
 
             <div class="mb-4">
                 {% if current_user.role == 'super_admin' %}
                 <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-check-circle"></i> Persona болон суурь агуулга хадгалах
+                    <i class="bi bi-check-circle"></i> Persona хадгалах
                 </button>
                 {% else %}
                 <button type="button" class="btn btn-primary" disabled title="Зөвхөн Super Admin хадгалах эрхтэй">

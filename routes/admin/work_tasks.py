@@ -12,10 +12,10 @@ from flask_login import current_user, login_required
 from sqlalchemy.orm import joinedload
 
 from app import app
-from auth import admin_required
+from auth import admin_required, staff_required
 from extensions import db
 from models import (AdminIssue, BusinessLine, ConversationTopic, FacebookUser,
-                    Message)
+                    GeneralSetting, Message)
 from services import (CLASSIFICATION_LOOKBACK_MAX_DAYS, FACEBOOK_ACCESS_TOKEN,
                       FACEBOOK_APP_SECRET, LEAD_STATUS_KEYS,
                       LEAD_STATUS_LABELS, LEAD_STATUSES,
@@ -36,7 +36,7 @@ LOGS_PAGE_SIZE = 100
 
 @app.route('/admin/dashboard')
 @login_required
-@admin_required
+@staff_required
 def dashboard():
     hot_stages_raw = get_setting('hot_prospect_stages', 'pricing,ready') or 'pricing,ready'
     hot_stages = [s.strip() for s in hot_stages_raw.split(',') if s.strip()]
@@ -143,14 +143,14 @@ def dashboard():
 
 @app.route('/admin/leads')
 @login_required
-@admin_required
+@staff_required
 def leads():
     return redirect(url_for('work_tasks', tab='leads'), code=301)
 
 
 @app.route('/admin/issues')
 @login_required
-@admin_required
+@staff_required
 def issues():
     return redirect(url_for('work_tasks', tab='open_issues'), code=301)
 
@@ -159,7 +159,7 @@ def issues():
 
 @app.route('/admin/logs')
 @login_required
-@admin_required
+@staff_required
 def logs():
     """Message history with cursor pagination."""
     try:
@@ -188,7 +188,7 @@ def logs():
 
 @app.route('/admin/users/<int:user_id>/conversation')
 @login_required
-@admin_required
+@staff_required
 def conversation(user_id):
     """Read-only per-user thread view."""
     user = FacebookUser.query.get_or_404(user_id)
@@ -221,14 +221,14 @@ VALID_WORK_TASKS_TABS = ('hot_prospects', 'leads', 'open_issues', 'aging', 'mute
 
 @app.route('/admin/inbox')
 @login_required
-@admin_required
+@staff_required
 def inbox():
     return redirect(url_for('work_tasks'), code=301)
 
 
 @app.route('/admin/work-tasks', methods=['GET', 'POST'])
 @login_required
-@admin_required
+@staff_required
 def work_tasks():
     """Unified daily-work queue. See module docstring."""
     if request.method == 'POST':
@@ -540,14 +540,35 @@ def backfill_names():
 
 @app.route('/admin/api/classify-conversations', methods=['POST'])
 @login_required
-@admin_required
+@staff_required
 def classify_conversations_backfill():
     """Re-classify up to 300 users who have sent at least one message
     within the admin-configured lookback window. Always returns JSON —
     a 500 here would surface as an "Unexpected token '<'" toast in the
     Leads tab JS because the fetch parses the response body as JSON.
+
+    Optional JSON body: {"lookback_days": <int>} — when sent, persists
+    the value as the new classification_lookback_days setting and uses
+    it for this run. Lets the inline input on the Work Tasks page
+    double as the setting controller without a separate Save step.
     """
     try:
+        data = request.get_json(silent=True) or {}
+        override = data.get('lookback_days')
+        if override is not None:
+            try:
+                override_int = int(override)
+            except (TypeError, ValueError):
+                override_int = None
+            if override_int is not None and 1 <= override_int <= CLASSIFICATION_LOOKBACK_MAX_DAYS:
+                row = GeneralSetting.query.filter_by(key='classification_lookback_days').first()
+                if row:
+                    row.value = str(override_int)
+                else:
+                    db.session.add(GeneralSetting(
+                        key='classification_lookback_days', value=str(override_int),
+                    ))
+                db.session.commit()
         lookback = get_classification_lookback_days()
         since = datetime.utcnow() - timedelta(days=lookback)
         users = (
@@ -588,7 +609,7 @@ def classify_conversations_backfill():
 
 @app.route('/admin/api/lead-status', methods=['POST'])
 @login_required
-@admin_required
+@staff_required
 def update_lead_status():
     """Update FacebookUser.lead_status to one of LEAD_STATUS_KEYS.
 
@@ -649,7 +670,7 @@ def update_lead_status():
 
 @app.route('/admin/api/handoff-poll')
 @login_required
-@admin_required
+@staff_required
 def handoff_poll():
     """Lightweight polling endpoint for the dashboard sound/badge."""
     return jsonify(get_handoff_poll_payload())

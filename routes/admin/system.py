@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app import app, MIN_ADMIN_PASSWORD_LENGTH
-from auth import admin_required, super_admin_required
+from auth import admin_required, staff_required, super_admin_required
 from extensions import db
 from models import AuditEntry, GeneralSetting, User
 from services import log_admin_action
@@ -208,7 +208,7 @@ def docs():
 
 @app.route('/admin/train-ai-guide')
 @login_required
-@admin_required
+@staff_required
 def train_ai_guide():
     return render_template('train_ai.html')
 
@@ -269,6 +269,14 @@ def admins():
     )
 
 
+ROLE_LABELS_MN = {
+    'super_admin': 'супер админ',
+    'admin': 'админ',
+    'registration_staff': 'бүртгэлийн ажилтан',
+}
+ASSIGNABLE_ROLES = ('registration_staff', 'admin', 'super_admin')
+
+
 @app.route('/admin/admins/create', methods=['POST'])
 @login_required
 @super_admin_required
@@ -276,7 +284,13 @@ def create_admin():
     username = (request.form.get('username') or '').strip()
     email = (request.form.get('email') or '').strip()
     password = request.form.get('password') or ''
-    make_super = request.form.get('make_super') == 'on'
+    # Legacy form posted make_super=on; the new form posts role=<key>. Accept
+    # both so an in-flight tab from the old UI doesn't 400 after the upgrade.
+    role = (request.form.get('role') or '').strip()
+    if not role and request.form.get('make_super') == 'on':
+        role = 'super_admin'
+    if role not in ASSIGNABLE_ROLES:
+        role = 'admin'
 
     if not username or not email or not password:
         flash('Бүх талбарыг бөглөнө үү.', 'error')
@@ -290,7 +304,7 @@ def create_admin():
         return redirect(url_for('admins'))
 
     if User.query.filter_by(username=username).first():
-        flash(f'"{username}" нэртэй админ аль хэдийн бүртгэлтэй байна.', 'error')
+        flash(f'"{username}" нэртэй хэрэглэгч аль хэдийн бүртгэлтэй байна.', 'error')
         return redirect(url_for('admins'))
 
     if User.query.filter_by(email=email).first():
@@ -301,22 +315,22 @@ def create_admin():
         username=username,
         email=email,
         password=generate_password_hash(password),
-        role='super_admin' if make_super else 'admin',
+        role=role,
     )
     db.session.add(new_admin)
     try:
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        flash('Админ нэмэхэд алдаа гарлаа. Дахин оролдоно уу.', 'error')
+        flash('Хэрэглэгч нэмэхэд алдаа гарлаа. Дахин оролдоно уу.', 'error')
         return redirect(url_for('admins'))
 
-    role_label = 'супер админ' if make_super else 'админ'
+    role_label = ROLE_LABELS_MN.get(role, role)
     log_admin_action(
         'admin.create', 'user', new_admin.id, new_admin.username,
         detail=f'Шинэ {role_label} нэмсэн'
     )
-    flash(f'"{username}" {role_label}-ыг амжилттай нэмлээ.', 'success')
+    flash(f'"{username}" ({role_label})-ыг амжилттай нэмлээ.', 'success')
     return redirect(url_for('admins'))
 
 
@@ -422,31 +436,47 @@ def reset_admin_password(admin_id):
 @login_required
 @super_admin_required
 def toggle_admin_role(admin_id):
+    """Change a user's role.
+
+    The dropdown on the Admins page posts the desired role as `target_role`.
+    The endpoint validates membership in ASSIGNABLE_ROLES, refuses to demote
+    the only remaining super_admin (otherwise the system locks itself out
+    of persona / admin management), and never lets a super_admin demote
+    themselves (same lockout reason, different angle).
+    """
     target = db.session.get(User, admin_id)
     if not target:
-        flash('Тухайн админ олдсонгүй.', 'error')
+        flash('Тухайн хэрэглэгч олдсонгүй.', 'error')
         return redirect(url_for('admins'))
 
     if target.id == current_user.id:
-        flash('Та өөрийнхөө эрхийг өөрчилж болохгүй. Өөр супер админаар өөрчлүүл.', 'error')
+        flash('Та өөрийн эрхийг өөрчлөх боломжгүй. Өөр супер админаар сольж өгөөрэй.', 'error')
         return redirect(url_for('admins'))
 
-    if target.role == 'super_admin':
-        if User.query.filter_by(role='super_admin').count() <= 1:
-            flash('Сүүлийн супер админыг буулгах боломжгүй.', 'error')
-            return redirect(url_for('admins'))
-        target.role = 'admin'
-        msg = f'"{target.username}"-ыг энгийн админ болголоо.'
-        new_role = 'admin'
-    else:
-        target.role = 'super_admin'
-        msg = f'"{target.username}"-ыг супер админ болголоо.'
-        new_role = 'super_admin'
+    new_role = (request.form.get('target_role') or '').strip()
+    if new_role not in ASSIGNABLE_ROLES:
+        flash('Зөвшөөрөлгүй эрх сонгогдсон байна.', 'error')
+        return redirect(url_for('admins'))
 
+    if new_role == target.role:
+        # No-op: dropdown was changed and then re-selected to the same value.
+        return redirect(url_for('admins'))
+
+    # Block demoting the last super_admin — otherwise the team loses access
+    # to persona editing and admin management permanently.
+    if target.role == 'super_admin' and new_role != 'super_admin':
+        if User.query.filter_by(role='super_admin').count() <= 1:
+            flash('Сүүлийн супер админы эрхийг буулгах боломжгүй.', 'error')
+            return redirect(url_for('admins'))
+
+    old_role = target.role
+    target.role = new_role
     db.session.commit()
     log_admin_action(
         'admin.toggle_role', 'user', target.id, target.username,
-        detail=f'Эрх → {new_role}'
+        detail=f'Эрх {old_role} → {new_role}'
     )
-    flash(msg, 'success')
+    old_label = ROLE_LABELS_MN.get(old_role, old_role)
+    new_label = ROLE_LABELS_MN.get(new_role, new_role)
+    flash(f'"{target.username}"-ын эрх: {old_label} → {new_label}.', 'success')
     return redirect(url_for('admins'))

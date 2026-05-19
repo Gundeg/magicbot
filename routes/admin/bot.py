@@ -14,7 +14,7 @@ from auth import admin_required, super_admin_required
 from extensions import db
 from models import (ChatQuestionCluster, FAQ, GeneralSetting, HandoffKeyword,
                     TrainingSnippet)
-from services import (BOT_PERSONA, TRAINING_CONTENT, build_system_prompt,
+from services import (BOT_PERSONA, build_system_prompt,
                       cluster_chat_questions, get_setting, lint_training_data,
                       log_admin_action)
 
@@ -27,7 +27,6 @@ BOT_SETTINGS_KEYS = (
     'celebration_comment',
     'default_comment',
     'handoff_sensitivity',
-    'mute_duration_hours',
     'office_hours_start',
     'office_hours_end',
     'telegram_chat_ids',
@@ -70,8 +69,6 @@ def bot_management_training():
     return render_template(
         'training.html',
         active_tab='training',
-        training_value=get_setting('training_content', ''),
-        training_fallback=TRAINING_CONTENT,
         persona_value=get_setting('bot_persona', ''),
         persona_fallback=BOT_PERSONA,
         snippets=snippets,
@@ -257,28 +254,31 @@ def faq():
 @login_required
 @admin_required
 def training():
-    """Edit the bot's training corpus and persona. Only super_admin can save persona/base content."""
+    """Edit the bot's persona and snippets. Only super_admin can save persona.
+
+    The legacy "training_content" base block was removed from the UI — company
+    intro now lives in Business Management → General Information. The stored
+    value is still read by the prompt builder for backward compatibility, so
+    existing deployments keep working without a data migration.
+    """
     if request.method == 'POST':
         if current_user.role != 'super_admin':
-            flash('Бот персонал болон үндсэн сургалтын мэдээллийг зөвхөн супер админ засах боломжтой.', 'error')
+            flash('Ботын дүрийг (persona) зөвхөн супер админ засах боломжтой.', 'error')
             return redirect(url_for('training'))
-        new_training = request.form.get('training_content', '').strip()
         new_persona = request.form.get('bot_persona', '').strip()
 
-        for key, value in [('training_content', new_training), ('bot_persona', new_persona)]:
-            row = GeneralSetting.query.filter_by(key=key).first()
-            if row:
-                row.value = value
-            else:
-                row = GeneralSetting(key=key, value=value)
-                db.session.add(row)
+        row = GeneralSetting.query.filter_by(key='bot_persona').first()
+        if row:
+            row.value = new_persona
+        else:
+            db.session.add(GeneralSetting(key='bot_persona', value=new_persona))
         db.session.commit()
         log_admin_action(
-            'training.save', 'setting', None, 'training_content + bot_persona',
-            detail=f'Шинэ training_content урт: {len(new_training)} тэмдэгт; persona урт: {len(new_persona)} тэмдэгт'
+            'training.save', 'setting', None, 'bot_persona',
+            detail=f'persona урт: {len(new_persona)} тэмдэгт'
         )
         flash(
-            'Хадгаллаа. Дараагийн мессежээс эхлэн бот шинэ агуулгаар хариулна.',
+            'Хадгаллаа. Дараагийн мессежээс эхлэн бот шинэ дүрээр хариулна.',
             'success',
         )
         return redirect(url_for('training'))
@@ -292,8 +292,6 @@ def training():
                 .all())
     return render_template(
         'training.html',
-        training_value=get_setting('training_content', ''),
-        training_fallback=TRAINING_CONTENT,
         persona_value=get_setting('bot_persona', ''),
         persona_fallback=BOT_PERSONA,
         snippets=snippets,
