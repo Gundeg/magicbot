@@ -436,9 +436,16 @@ def _format_current_time_block():
     )
 
 
-def build_system_prompt(session_state='new', funnel_stage='curious', user_first_name='', handoff_pending=False):
+def build_system_prompt(session_state='new', funnel_stage='curious',
+                        user_first_name='', handoff_pending=False,
+                        handoff_just_triggered=False):
     """Build system prompt with training, FAQ, session-state, funnel,
-    and (optionally) handoff-advisory context."""
+    and (optionally) handoff-advisory context.
+
+    `handoff_just_triggered=True` takes precedence over `handoff_pending`:
+    when both are set, the just-triggered rule is injected and the
+    advisory rule is skipped (they serve different turns of the handoff
+    flow and conflict on whether the bot may mention staff routing)."""
     training = _svc.get_training_content()
     persona = _svc.get_bot_persona()
     current_time_block = _format_current_time_block()
@@ -572,7 +579,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious', user_first_
 
 {registration_block}{name_block}{funnel_rule}
 
-{(_svc.HANDOFF_ADVISORY_RULE + chr(10) + chr(10)) if handoff_pending else ''}БОРЛУУЛАЛТЫН ЗАН ҮЙЛ (туршлагатай зөвлөгчийн загвар — найрсаг, тулгахгүй):
+{(_svc.HANDOFF_JUST_TRIGGERED_RULE + chr(10) + chr(10)) if handoff_just_triggered else (_svc.HANDOFF_ADVISORY_RULE + chr(10) + chr(10)) if handoff_pending else ''}БОРЛУУЛАЛТЫН ЗАН ҮЙЛ (туршлагатай зөвлөгчийн загвар — найрсаг, тулгахгүй):
 
 A. ИДЭВХТЭЙ СОНСОЛТ:
    Хэрэглэгчийн өгсөн гол үг/санааг хариултынхаа эхэнд 1 өгүүлбэрээр буцааж
