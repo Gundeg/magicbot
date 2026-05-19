@@ -277,7 +277,11 @@ def _format_business_lines():
 def _format_course_entry(c, today_date):
     """Single line for a course in the canonical catalog block. Self-paced
     courses (100% Online) skip start/end dates; courses with a known
-    duration_days quote it; admins' status_note is appended verbatim."""
+    duration_days quote it; admins' status_note is appended verbatim.
+
+    Active CourseLinks (registration form, syllabus, exam form, etc.) are
+    listed underneath the course so the bot can quote per-course URLs
+    rather than only the global registration link in GeneralSetting."""
     head = f"- [#{c.course_number}] " if c.course_number else "- "
     head += f"{c.name} ({c.course_type}): {int(c.price):,}₮"
 
@@ -296,6 +300,17 @@ def _format_course_entry(c, today_date):
         line += f"\n  Тайлбар: {c.description}"
     if c.status_note:
         line += f"\n  Тэмдэглэл: {c.status_note}"
+    active_links = []
+    try:
+        active_links = [l for l in (c.links or []) if l.is_active]
+    except Exception:
+        # Defensive: CourseLink table might not exist on a partially-migrated
+        # DB. Fall back to no links rather than crashing the prompt build.
+        active_links = []
+    if active_links:
+        line += "\n  Холбоосууд:"
+        for l in sorted(active_links, key=lambda x: (x.sort_order, x.id)):
+            line += f"\n    - {l.description}: {l.url}"
     return line
 
 
@@ -305,7 +320,15 @@ def _format_courses_canonical():
     bot should not be quoting them as upcoming. Sorts ascending so the
     nearest class is offered first."""
     today = datetime.utcnow().date()
-    active = Course.query.filter_by(is_active=True).all()
+    # Eager-load CourseLinks so _format_course_entry can render per-course
+    # form URLs without an N+1 query against the link table.
+    try:
+        active = (Course.query
+                  .options(joinedload(Course.links))
+                  .filter_by(is_active=True)
+                  .all())
+    except Exception:
+        active = Course.query.filter_by(is_active=True).all()
 
     def is_quotable(c):
         if c.course_type == _svc.SELF_PACED_COURSE_TYPE:
