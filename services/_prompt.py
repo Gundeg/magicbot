@@ -486,7 +486,16 @@ def build_system_prompt(session_state='new', funnel_stage='curious',
             "байгалийн ярианд тохируулж хэрэглэ.\n"
         )
     else:
-        name_block = ""
+        # Standard Access to the FB User Profile API no longer returns the
+        # customer's name from a PSID, so we ask the customer directly. The
+        # webhook layer captures the answer on the next turn and persists it.
+        name_block = (
+            "ХЭРЭГЛЭГЧИЙН НЭР: ҮЛ МЭДЭГДЭХ. Энэ хэрэглэгчийн нэрийг "
+            "мэдэхгүй байгаа тул эхлээд тэдний асуултанд бүрэн хариулсаны "
+            "ДАРАА хариултынхаа төгсгөлд богино, эелдэгээр "
+            '"Та өөрийгөө хэн гэдэг танилцуулна уу?" гэж нэгхэн удаа асуу. '
+            "Хэрэв өмнөх ярианд аль хэдийн асуусан байвал дахин БҮҮ асуу.\n"
+        )
 
     session_rule = SESSION_RULES.get(session_state, SESSION_RULES['new'])
     funnel_rule = FUNNEL_RULES.get(funnel_stage, FUNNEL_RULES['curious'])

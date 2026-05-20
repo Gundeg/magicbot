@@ -18,7 +18,8 @@ from extensions import db
 from models import FacebookUser, Message
 from services import (PHONE_RE, bot_response_implies_handoff,
                       check_rate_limit, classify_session, classify_user_topics,
-                      detect_funnel_stage, enqueue_background, first_name_of,
+                      detect_funnel_stage, enqueue_background,
+                      extract_name_from_reply, first_name_of,
                       generate_bot_response, get_facebook_user_info,
                       is_in_handoff, refresh_facebook_user_name,
                       send_facebook_message, should_handoff,
@@ -105,6 +106,22 @@ def webhook():
                     )
                     db.session.add(user_msg)
                     db.session.commit()
+
+                    # Name capture fallback. The FB User Profile API no longer
+                    # returns names at Standard Access, so the bot's prompt
+                    # asks customers directly. If the previous bot turn was
+                    # that ask, treat THIS message as the name reply. Silent
+                    # on ambiguous input — better blank than wrong.
+                    if (fb_user.name or '').strip().lower() in ('', 'unknown'):
+                        prior_bot = (Message.query
+                                     .filter_by(facebook_user_id=fb_user.id, sender='bot')
+                                     .order_by(Message.created_at.desc())
+                                     .first())
+                        if prior_bot and 'нэр' in (prior_bot.content or '').lower():
+                            candidate = extract_name_from_reply(message_text)
+                            if candidate:
+                                fb_user.name = candidate
+                                db.session.commit()
 
                     # Phone capture runs BEFORE the bot reply so we don't
                     # double up: previously a single inbound could trigger

@@ -672,6 +672,61 @@ def first_name_of(full_name):
     return full_name.strip().split()[0]
 
 
+# Words a customer might type instead of their name when ignoring the
+# bot's "what's your name?" question. Treating any of these as a name
+# would be embarrassing — keep this list in lower-case, all-language.
+_NON_NAME_REPLIES = frozenset({
+    'тийм', 'үгүй', 'за', 'тэгье', 'ок', 'мэдсэн', 'баярлалаа',
+    'сайн', 'сайн уу', 'сайн байна уу', 'байна', 'ok', 'yes', 'no',
+    'thanks', 'ty', 'hi', 'hello', 'hey',
+})
+
+
+def extract_name_from_reply(text):
+    """Best-effort name extraction from a user message.
+
+    Used by the webhook when the bot just asked "Танай нэрийг хэн гэдэг вэ?"
+    and the user replied. Returns '' rather than guessing on ambiguous input —
+    we'd rather store nothing than the wrong name.
+    """
+    if not text:
+        return ''
+    s = text.strip()
+    if not s or len(s) > 60:
+        return ''
+    if s.lower() in _NON_NAME_REPLIES:
+        return ''
+    import re
+    # Explicit pattern: "намайг X гэдэг" / "миний нэр X" / "нэр нь X"
+    m = re.search(
+        r'(?:намайг|миний\s+нэр(?:\s+нь)?|нэр\s+нь|нэр\s+минь|my\s+name\s+is|i\s*am)\s+'
+        r'([А-Яа-яӨөҮүЁёA-Za-z]{2,})'           # first name token (required)
+        r'(?:\s+([А-Яа-яӨөҮүЁёA-Za-z]{2,}))?',  # surname token (optional)
+        s, re.IGNORECASE,
+    )
+    if m:
+        first = m.group(1).strip()
+        second = (m.group(2) or '').strip()
+        # Skip Mongolian sentence particles that follow names ("намайг Болормаа
+        # ГЭДЭГ") — they aren't surnames.
+        _particles = {
+            'гэдэг', 'байна', 'байх', 'юм', 'болно', 'ажилладаг', 'байгаа',
+        }
+        if second and second.lower() not in _particles:
+            return f'{first.title()} {second.title()}'
+        return first.title()
+    # Fallback: very short message, 1–2 alphabetic tokens, no punctuation/digits.
+    # Single-token Mongolian first names are the dominant pattern.
+    if '?' in s or re.search(r'\d', s):
+        return ''
+    tokens = re.findall(r'[А-Яа-яӨөҮүЁёA-Za-z]{2,}', s)
+    if len(tokens) == 0 or len(tokens) > 2:
+        return ''
+    if sum(len(t) for t in tokens) > 25:
+        return ''
+    return ' '.join(t.title() for t in tokens)
+
+
 
 
 # ===================== SETTINGS GETTERS =====================
