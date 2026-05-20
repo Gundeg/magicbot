@@ -120,6 +120,19 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 - `services/__init__.py:trigger_handoff` used to auto-mute the bot via `mute_duration_hours`. That's been removed — DO NOT add it back; the bot must keep advisory-replying after handover until staff `take_over_chat`.
 - `seed_default_magic_links` historically missed a `GeneralSetting` import — it's fixed, but any new helper that touches `GeneralSetting.query` must import it from `models`.
 - `classification_lookback_days` controller lives at the top of `work_tasks.html` (outside any tab) so it's visible from the default Hot Prospects landing. Don't move it back into a single tab.
+- **SQLite WAL + busy_timeout in `app.py:88`** is load-bearing — without it, 2 gunicorn workers + admin polling deadlock on SQLite locks. Do not remove the `@event.listens_for(Engine, "connect")` block.
+- **`get_facebook_user_info` returns HTTP 400 at Standard Access** — Meta restricted PSID profile lookups. The bot now asks customers for their name on first contact (`services/_prompt.py:481+` injects the rule; `routes/webhook.py:107+` captures the reply via `extract_name_from_reply`). When App Review for "Business Asset User Profile Access" lands, the existing API call will start succeeding and the ask-for-name path silently becomes redundant. Don't remove either path until BAUPA is approved AND re-tested in prod.
+
+## Telemetry shortcuts — first place to look when user says "bot is broken"
+
+Check these in order BEFORE reading code:
+
+1. **Render logs** (`r=1h`, query `Send API`) → `OAuthException code:190 / subcode:463` = expired FB token. Regen via Graph API Explorer.
+2. **Render logs** (`r=1h`, query `database is locked`) → SQLite contention. Confirm `app.py:88` WAL/busy_timeout block is intact.
+3. **Render logs** (`r=1h`, query `FB user profile`) → `status=400 GraphMethodException` = the BAUPA restriction, not a bug.
+4. **Render Events page** — a bad deploy is the easiest explanation when nothing else fits.
+
+The production service is `magicbot` at <https://dashboard.render.com/web/srv-d81j1p9j2pic73fbsnv0>, under `My project / Production`. There's a sibling `gmcbot` under the `GMC` env — **abandoned, zero traffic since 2026-05-19, do not diagnose that one.**
 
 ## When seeding or migrating data
 
