@@ -85,6 +85,29 @@ def _ensure_sqlite_path_writable(uri):
 app.config['SQLALCHEMY_DATABASE_URI'] = _ensure_sqlite_path_writable(_db_uri)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+
+# SQLite hardening for production: WAL journal mode (concurrent readers don't
+# block writers), 30s busy_timeout (writers wait their turn instead of erroring
+# immediately on contention), NORMAL synchronous (safe + fast enough for our
+# write volume). Without this, gunicorn's 2 workers + admin polling + webhook
+# writes triggered "database is locked" the moment any two requests overlapped.
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+
+
+@event.listens_for(Engine, "connect")
+def _set_sqlite_pragmas(dbapi_connection, _connection_record):
+    import sqlite3
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+    finally:
+        cursor.close()
+
 # Cookie hardening. SESSION_COOKIE_SECURE=True is opt-out via env so local
 # HTTP dev doesn't silently lose the session cookie; production should leave
 # the default on. HttpOnly + SameSite=Lax protect against XSS-stolen sessions
