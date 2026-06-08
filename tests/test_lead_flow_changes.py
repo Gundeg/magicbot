@@ -137,6 +137,17 @@ def test_ensure_page_subscriptions_adds_echoes_without_dropping(monkeypatch):
     assert detail['added'] == ['message_echoes']
 
 
+def test_professional_accuracy_rule_in_prompt(app):
+    """The anti-fabrication / anti-sycophancy rule must be present in every
+    built system prompt so the bot stops inventing tax/law specifics."""
+    from services._prompt import build_system_prompt
+    with app.app_context():
+        prompt = build_system_prompt(session_state='new', funnel_stage='curious')
+    assert 'МЭРГЭЖЛИЙН ҮНЭН ЗӨВ БАЙДАЛ' in prompt
+    assert 'СИКОФАНТ БҮҮ БОЛ' in prompt
+    assert 'ТТ-13' in prompt   # the concrete example survives into the prompt
+
+
 def _inbound(psid, text):
     return {
         'object': 'page',

@@ -588,6 +588,8 @@ def build_system_prompt(session_state='new', funnel_stage='curious',
 
 {registration_block}{name_block}{funnel_rule}
 
+{_svc.PROFESSIONAL_ACCURACY_RULE}
+
 {(_svc.HANDOFF_JUST_TRIGGERED_RULE + chr(10) + chr(10)) if handoff_just_triggered else (_svc.HANDOFF_ADVISORY_RULE + chr(10) + chr(10)) if handoff_pending else (_svc.KNOWLEDGE_GAP_HANDOFF_RULE + chr(10) + chr(10))}БОРЛУУЛАЛТЫН ЗАН ҮЙЛ (туршлагатай зөвлөгчийн загвар — найрсаг, тулгахгүй):
 
 A. ИДЭВХТЭЙ СОНСОЛТ:

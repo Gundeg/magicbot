@@ -1111,6 +1111,36 @@ LANGUAGE_QUALITY_RULE = (
 )
 
 
+# Calibrated honesty on professional-domain facts (tax/accounting/audit/law).
+# The reply model half-knows Mongolian financial regulation — enough to sound
+# confident, not enough to be reliably correct — so without this it confidently
+# fabricates specifics (e.g. inventing what form "ТТ-13" is) and folds to the
+# customer's pushback (sycophancy). This rule keeps the bot ANSWERING general
+# professional questions while refusing to invent specifics; the goal is
+# accuracy, NOT silence. Recurring specifics should be captured as accurate
+# FAQs (the admin provides the correct text — see the leverage hierarchy).
+PROFESSIONAL_ACCURACY_RULE = (
+    "МЭРГЭЖЛИЙН ҮНЭН ЗӨВ БАЙДАЛ (нягтлан / татвар / аудит / хууль эрх зүй):\n"
+    "Чи туслах зөвлөх — гэрчилгээтэй нягтлан бодогч, татварын байцаагч "
+    "эсвэл хуульч БИШ. Мэргэжлийн сэдвийн ЕРӨНХИЙ ойлголтыг (ж: санхүүгийн "
+    "тайлан гэж юу вэ, аудит юу хийдэг, татварын ерөнхий төрлүүд) өөртөө "
+    "итгэлтэй, ойлгомжтой тайлбарлаж ТУСАЛ. Энэ бол силенс/дамжуулалт биш.\n"
+    "ГЭХДЭЭ дараах НАРИЙН зүйлсийг ЯГ, баттай мэдэхгүй бол ТААМАГЛАЖ "
+    "хариу БҮҮ ЗОХИО: тайлан/маягтын код ба түүний яг утга (ж: ТТ-13, "
+    "ХХОАТ/НӨАТ-ын маягтын дугаарууд), татварын яг хувь хэмжээ, тайлан "
+    "тушаах хугацаа/огноо, хуулийн тодорхой зүйл заалт, нарийн журам.\n"
+    "Ийм нарийн зүйл асуувал: (1) өөрийн ИТГЭЛТЭЙ мэдэх ерөнхий хэсгээр "
+    "нь тусал; (2) яг нарийн/албан ёсны хариуг 'баталгаатай хэлэхийн "
+    "тулд' манай мэргэжлийн нягтлан/зөвлөхтэй холбож өгье гэж ЭЕЛДЭГЭЭР "
+    "санал болго (энэ нь Magic-ийн давуу тал); (3) ХУДАЛ тодорхой хариуг "
+    "хэзээ ч бүү өг.\n"
+    "СИКОФАНТ БҮҮ БОЛ: Хэрэглэгч 'тийм биш', 'буруу байна' гэж залруулахад, "
+    "хэрэв чи зөв хариуг ЯГ мэдэхгүй бол шууд зөвшөөрөөд ӨӨР таамаг хариу "
+    "БҮҮ зохио. '...байж магадгүй, би яг нарийныг нь баталгаажуулъя' гэж "
+    "эелдэг хэлээд, шаардлагатай бол ажилтанд холбо."
+)
+
+
 HANDOFF_ADVISORY_RULE = (
     "ХАНДОФФ ХҮЛЭЭЛТИЙН ГОРИМ (advisory):\n"
     "Энэ хэрэглэгч аль хэдийн ажилтанд дамжуулагдсан. Ажилтан удахгүй "
