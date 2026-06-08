@@ -109,7 +109,10 @@ def test_duplicate_mid_is_processed_once(client, db_session, monkeypatch):
     gen_calls = {'n': 0}
     monkeypatch.setattr(wh, 'check_rate_limit', lambda sid: True)
     monkeypatch.setattr(wh, 'send_facebook_message', lambda *a, **k: sent.append(a))
-    monkeypatch.setattr(wh, 'enqueue_background', lambda *a, **k: None)
+    # The reply now runs through process_inbound_reply (enqueue_background runs
+    # inline under TESTING). Stub the OpenAI / network calls it makes.
+    monkeypatch.setattr(wh, 'send_sender_action', lambda *a, **k: None)
+    monkeypatch.setattr(wh, 'classify_user_topics', lambda *a, **k: None)
 
     def _gen(*a, **k):
         gen_calls['n'] += 1

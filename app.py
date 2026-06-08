@@ -49,6 +49,12 @@ app.config['SECRET_KEY'] = _secret_key
 # sqlite:////var/data/magic_bot.db) or a Postgres connection string.
 _default_db_uri = 'sqlite:///magic_bot.db'
 _db_uri = os.environ.get('SQLALCHEMY_DATABASE_URI', '') or _default_db_uri
+# Render (and Heroku) hand out Postgres URLs with the legacy `postgres://`
+# scheme, which SQLAlchemy 2.0 no longer recognises — it wants `postgresql://`.
+# Normalise so dropping a Render Postgres "Internal Database URL" into
+# SQLALCHEMY_DATABASE_URI just works without editing the string by hand.
+if _db_uri.startswith('postgres://'):
+    _db_uri = 'postgresql://' + _db_uri[len('postgres://'):]
 
 
 def _ensure_sqlite_path_writable(uri):

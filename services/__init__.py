@@ -60,6 +60,17 @@ def enqueue_background(func, *args, **kwargs):
     except RuntimeError:
         app_obj = None
 
+    # In tests, run inline on the current thread + app context. It keeps
+    # assertions deterministic, and — critically — an in-memory SQLite test DB
+    # is per-connection, so a real background thread would open a fresh, empty
+    # database and see none of the test's data.
+    if app_obj is not None and app_obj.config.get('TESTING'):
+        try:
+            func(*args, **kwargs)
+        except Exception:
+            logger.exception('background task %s failed', getattr(func, '__name__', func))
+        return None
+
     def _runner():
         try:
             if app_obj is not None:
@@ -92,6 +103,14 @@ client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 # on gpt-4o / gpt-4.1, so the reply call below is compatible if REPLY_MODEL is
 # ever changed back to a 4-series model.
 REPLY_MODEL = "gpt-5.3-chat-latest"
+
+# Hard cap on reply length. Shorter replies = lower latency (the customer
+# waits less, and a slow reply is what makes Facebook retry the webhook) and
+# lower cost. Env-tunable so it can be tightened without a redeploy.
+try:
+    REPLY_MAX_TOKENS = int(os.environ.get('REPLY_MAX_TOKENS', '500') or '500')
+except ValueError:
+    REPLY_MAX_TOKENS = 500
 
 # Facebook credentials (read once at import).
 FACEBOOK_PAGE_ID = os.environ.get('FACEBOOK_PAGE_ID', '')
@@ -332,6 +351,25 @@ def send_facebook_message(recipient_id, message_text):
     except Exception as e:
         logger.exception("Error sending message to recipient=%s: %s", recipient_id, e)
         return False
+
+
+def send_sender_action(recipient_id, action):
+    """Send a Messenger sender_action ('mark_seen', 'typing_on', 'typing_off').
+
+    Best-effort UX nicety: shows the customer a read receipt + typing bubble
+    while the bot composes its reply, so the wait feels responsive. Failures
+    are swallowed — a missing typing bubble must never block the actual reply."""
+    url = "https://graph.facebook.com/v18.0/me/messages"
+    data = {"recipient": {"id": recipient_id}, "sender_action": action}
+    try:
+        requests.post(
+            url,
+            json=data,
+            headers=_fb_auth_headers({"Content-Type": "application/json"}),
+            timeout=5,
+        )
+    except Exception as e:
+        logger.info("sender_action %s failed for recipient=%s: %s", action, recipient_id, e)
 
 
 def get_facebook_user_info(facebook_id):
@@ -959,7 +997,7 @@ def generate_bot_response(user_message, conversation_history,
         create_kwargs = dict(
             model=REPLY_MODEL,
             messages=messages,
-            max_completion_tokens=500,
+            max_completion_tokens=REPLY_MAX_TOKENS,
         )
         # Offer the staff-handoff tool only in NORMAL mode — i.e. exactly when
         # KNOWLEDGE_GAP_HANDOFF_RULE is in the prompt. In advisory / just-

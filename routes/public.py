@@ -1,8 +1,8 @@
-"""Public (no-auth) routes: index and privacy policy."""
+"""Public (no-auth) routes: index, health check, and privacy policy."""
 import os
 from datetime import datetime
 
-from flask import redirect, render_template, url_for
+from flask import jsonify, redirect, render_template, url_for
 from flask_login import current_user
 
 from app import app
@@ -13,6 +13,16 @@ def index():
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
     return redirect(url_for('login'))
+
+
+@app.route('/health')
+def health():
+    """Cheap liveness probe — no DB, no auth. Point a keep-warm pinger
+    (Render Cron / UptimeRobot, every ~10 min) here so the service never
+    spins down. A warm dyno means no cold-start delay and, crucially, no
+    Facebook webhook retries piling up during a boot (see the webhook
+    idempotency note in CLAUDE.md)."""
+    return jsonify({'status': 'ok'}), 200
 
 
 @app.route('/privacy')

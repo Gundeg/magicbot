@@ -23,7 +23,7 @@ from services import (PHONE_RE, bot_response_implies_handoff,
                       first_name_of,
                       generate_bot_response, get_facebook_user_info,
                       is_in_handoff, refresh_facebook_user_name,
-                      send_facebook_message, should_handoff,
+                      send_facebook_message, send_sender_action, should_handoff,
                       trigger_handoff,
                       verify_facebook_signature, FACEBOOK_APP_SECRET,
                       BOT_ECHO_TAG, HUMAN_TAKEOVER_MUTE_MINUTES)
@@ -50,6 +50,104 @@ def human_takeover_pause(customer_psid):
     except Exception as e:
         db.session.rollback()
         logger.exception("human_takeover_pause failed psid=%s: %s", customer_psid, e)
+
+
+def process_inbound_reply(fb_user_id, message_text, session_state):
+    """Slow half of inbound handling, run in a background thread so the webhook
+    can ACK Facebook in <1s (a fast 200 is what stops FB retrying the delivery
+    on cold starts / slow model hops). Builds the prompt, calls OpenAI, sends
+    the reply, and fires any handoff. Runs with its own app context + DB
+    session via enqueue_background; errors are logged there, so a failure here
+    just means no reply — never a crash or a Facebook retry.
+
+    The fast half (dedupe, persist inbound, rate limit, funnel/name/phone
+    capture, mute gate) already ran synchronously in webhook() before enqueue.
+    """
+    fb_user = db.session.get(FacebookUser, fb_user_id)
+    if fb_user is None:
+        return
+    sender_id = fb_user.facebook_id
+
+    # A human may have taken over between enqueue and now — stay silent.
+    if fb_user.bot_muted_until and fb_user.bot_muted_until > datetime.utcnow():
+        return
+
+    # Read receipt + typing bubble so the wait feels responsive while OpenAI
+    # composes the reply. Best-effort — failures never block the reply.
+    send_sender_action(sender_id, 'mark_seen')
+    send_sender_action(sender_id, 'typing_on')
+
+    handoff_pending = is_in_handoff(fb_user)
+    handoff_just_triggered = False
+    # Skip the keyword-handoff check if already in advisory mode.
+    if not handoff_pending:
+        handoff, reason = should_handoff(message_text, fb_user)
+        if handoff:
+            # Fire the AdminIssue + Telegram ping but DON'T send the static
+            # user message — let the LLM craft a warm, mood-aware ack. The
+            # HANDOFF_JUST_TRIGGERED prompt rule overrides advisory mode for
+            # this one turn so the bot can still mention staff routing.
+            trigger_handoff(fb_user, reason, message_text, send_user_message=False)
+            handoff_pending = True
+            handoff_just_triggered = True
+
+    # Last 10 messages only — the tail is all the model needs for context.
+    recent_desc = (Message.query
+                   .filter_by(facebook_user_id=fb_user.id)
+                   .order_by(Message.created_at.desc())
+                   .limit(10)
+                   .all())
+    conversation = [
+        {"role": "user" if m.sender == 'user' else "assistant", "content": m.content}
+        for m in reversed(recent_desc)
+    ]
+
+    bot_response = generate_bot_response(
+        message_text,
+        conversation,
+        session_state=session_state,
+        funnel_stage=fb_user.funnel_stage or 'curious',
+        user_first_name=first_name_of(fb_user.name),
+        handoff_pending=handoff_pending,
+        handoff_just_triggered=handoff_just_triggered,
+    )
+
+    # Knowledge-gap handoff: strip the hidden [HANDOFF] marker before the
+    # customer sees anything; the handoff is fired below.
+    bot_response, knowledge_gap_handoff = extract_handoff_marker(bot_response)
+
+    # A human may have jumped in while the LLM was generating — bail before
+    # sending so the bot never talks over them, and don't persist the reply.
+    db.session.expire(fb_user, ['bot_muted_until'])
+    if fb_user.bot_muted_until and fb_user.bot_muted_until > datetime.utcnow():
+        logger.info(
+            "Human took over mid-generation — suppressing bot reply for psid=%s",
+            sender_id,
+        )
+        return
+
+    bot_msg = Message(facebook_user_id=fb_user.id, sender='bot', content=bot_response)
+    db.session.add(bot_msg)
+    db.session.commit()
+
+    send_facebook_message(sender_id, bot_response)
+
+    # Implicit handoff: if the bot's own reply deferred to staff, fire the
+    # AdminIssue + Telegram ping (the reply already carries the user message).
+    if not handoff_pending:
+        if knowledge_gap_handoff:
+            trigger_handoff(fb_user, 'bot_knowledge_gap', message_text, send_user_message=False)
+        else:
+            deferral_phrase = bot_response_implies_handoff(bot_response)
+            if deferral_phrase:
+                trigger_handoff(
+                    fb_user, f'bot_deferral:{deferral_phrase}', message_text,
+                    send_user_message=False,
+                )
+
+    # Topic classifier — another OpenAI call; we're already off the webhook's
+    # critical path, so just run it inline here.
+    classify_user_topics(fb_user.id)
 
 
 @csrf.exempt
@@ -230,120 +328,17 @@ def webhook():
                         # Mute window expired; reset and continue normally.
                         fb_user.bot_muted_until = None
                         db.session.commit()
-                    handoff_pending = is_in_handoff(fb_user)
-                    handoff_just_triggered = False
 
-                    # Skip the keyword-handoff check if the user is already
-                    # in advisory mode — they've been routed to staff
-                    # already, no need to trigger again.
-                    if not handoff_pending:
-                        handoff, reason = should_handoff(message_text, fb_user)
-                        if handoff:
-                            # Fire the AdminIssue + Telegram ping but DON'T
-                            # send the static user message — fall through
-                            # to the LLM so the acknowledgement is warm,
-                            # mood-aware, and quotes the right office-hours
-                            # ETA. The HANDOFF_JUST_TRIGGERED rule the
-                            # prompt builder will inject overrides advisory
-                            # mode for this one turn so the bot can still
-                            # mention staff routing.
-                            trigger_handoff(
-                                fb_user, reason, message_text,
-                                send_user_message=False,
-                            )
-                            handoff_pending = True
-                            handoff_just_triggered = True
-
-                    # Pull only the last 10 messages instead of the entire
-                    # conversation. For a chatty user `.all()` was loading
-                    # the full history just to slice the tail.
-                    recent_desc = (Message.query
-                                   .filter_by(facebook_user_id=fb_user.id)
-                                   .order_by(Message.created_at.desc())
-                                   .limit(10)
-                                   .all())
-                    conversation = [
-                        {"role": "user" if m.sender == 'user' else "assistant", "content": m.content}
-                        for m in reversed(recent_desc)
-                    ]
-
-                    bot_response = generate_bot_response(
-                        message_text,
-                        conversation,
-                        session_state=session_state,
-                        funnel_stage=fb_user.funnel_stage or 'curious',
-                        user_first_name=first_name_of(fb_user.name),
-                        handoff_pending=handoff_pending,
-                        handoff_just_triggered=handoff_just_triggered,
+                    # Hand the slow work (OpenAI reply + send + handoff pings +
+                    # topic classify) to a background worker and ACK Facebook
+                    # immediately. A fast 200 is what stops FB retrying the
+                    # delivery on a cold start or slow model hop — the root cause
+                    # behind the phantom first-message rate-limit. See
+                    # process_inbound_reply above.
+                    enqueue_background(
+                        process_inbound_reply,
+                        fb_user.id, message_text, session_state,
                     )
-
-                    # Knowledge-gap handoff: the bot prefixes its reply with a
-                    # hidden [HANDOFF] marker when it lacks the info to answer
-                    # and is deferring to staff (KNOWLEDGE_GAP_HANDOFF_RULE).
-                    # Strip it before the customer sees anything; the handoff is
-                    # fired below. Stripping is unconditional; firing is gated on
-                    # not-already-in-handoff, like the deferral-phrase path.
-                    bot_response, knowledge_gap_handoff = extract_handoff_marker(bot_response)
-
-                    # A human may have jumped into the Page inbox while the LLM
-                    # was generating (their echo set bot_muted_until in another
-                    # request). Re-read the flag and bail BEFORE sending so the
-                    # bot never talks over a human who just replied. We don't
-                    # persist the unsent reply either.
-                    db.session.expire(fb_user, ['bot_muted_until'])
-                    if fb_user.bot_muted_until and fb_user.bot_muted_until > datetime.utcnow():
-                        logger.info(
-                            "Human took over mid-generation — suppressing bot reply for psid=%s",
-                            sender_id,
-                        )
-                        continue
-
-                    bot_msg = Message(
-                        facebook_user_id=fb_user.id,
-                        sender='bot',
-                        content=bot_response
-                    )
-                    db.session.add(bot_msg)
-                    db.session.commit()
-
-                    send_facebook_message(sender_id, bot_response)
-
-                    # Implicit handoff: if the bot's own reply was a
-                    # "defer to staff" message, mute the bot, create an
-                    # AdminIssue, and ping Telegram — but skip the
-                    # standard handoff user-message since the bot already
-                    # sent one. Catches every staff-deferral path,
-                    # whether or not a user keyword matched earlier.
-                    # Skipped in advisory mode: the user is already in
-                    # handoff and the advisory rule should keep the bot
-                    # from emitting deferral phrases anyway.
-                    if not handoff_pending:
-                        if knowledge_gap_handoff:
-                            # Bot explicitly signalled it lacked the info and
-                            # deferred to staff. Its own reply already carries
-                            # the warm ETA + "anything else?" message, so we
-                            # don't send the static handoff message.
-                            trigger_handoff(
-                                fb_user,
-                                'bot_knowledge_gap',
-                                message_text,
-                                send_user_message=False,
-                            )
-                        else:
-                            deferral_phrase = bot_response_implies_handoff(bot_response)
-                            if deferral_phrase:
-                                trigger_handoff(
-                                    fb_user,
-                                    f'bot_deferral:{deferral_phrase}',
-                                    message_text,
-                                    send_user_message=False,
-                                )
-
-                    # Fire-and-forget the topic classifier — it's an
-                    # OpenAI call and shouldn't keep Facebook waiting on
-                    # the webhook response. Errors are logged inside the
-                    # function so failures here don't affect the user.
-                    enqueue_background(classify_user_topics, fb_user.id)
 
     return jsonify({'status': 'ok'}), 200
 
