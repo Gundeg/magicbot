@@ -568,9 +568,11 @@
         });
     });
 
-    // Hot Prospects: two-outcome buttons (promote to lead / drop). Both fade
-    // the row out — promote moves it to the Leads tab, drop closes it.
-    function hotAction(btn, action, okMsg) {
+    // Hot Prospects: two-outcome buttons. Promote sends the user to the Leads
+    // tab — we reload onto that tab so they can SEE the new lead (the tabs are
+    // rendered server-side, so a fade-only would make it look like it vanished).
+    // Drop is terminal, so fading it out of the queue in place is enough.
+    function hotAction(btn, action, okMsg, redirectTo) {
         const row = btn.closest('.wt-row');
         const userId = btn.dataset.userId;
         const siblings = row ? row.querySelectorAll('button') : [btn];
@@ -579,15 +581,20 @@
             .then(d => {
                 if (!d || !d.success) throw new Error((d && (d.error || d.message)) || 'unknown error');
                 toast(okMsg, true);
-                if (row) fadeAndRemove(row);
+                if (redirectTo) {
+                    setTimeout(() => { window.location = redirectTo; }, 600);
+                } else if (row) {
+                    fadeAndRemove(row);
+                }
             })
             .catch(err => {
                 toast('Алдаа: ' + (err.message || err), false);
                 siblings.forEach(b => { b.disabled = false; });
             });
     }
+    const leadsTabUrl = workTasksUrl + '?tab=leads';
     document.querySelectorAll('.hot-promote').forEach(btn => {
-        btn.addEventListener('click', () => hotAction(btn, 'promote_to_lead', 'Лид болголоо.'));
+        btn.addEventListener('click', () => hotAction(btn, 'promote_to_lead', 'Лид болголоо.', leadsTabUrl));
     });
     document.querySelectorAll('.hot-drop').forEach(btn => {
         btn.addEventListener('click', () => hotAction(btn, 'drop_prospect', 'Орхисон гэж тэмдэглэлээ.'));
