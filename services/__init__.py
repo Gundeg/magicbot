@@ -81,6 +81,18 @@ PHONE_RE = re.compile(r'(?:\+?976[\s-]?)?[89]\d{7}')
 # is loaded before this module is first imported by app.py.
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
+# Model for the customer-facing reply. Upgraded from gpt-4o-mini after a
+# Mongolian bake-off (2026-06): bigger models read paraphrase / Latin-script /
+# indirect intent far better in Mongolian, which mini routinely missed. The
+# background jobs (topic classifier, page auto-comments, FAQ clustering) stay
+# on gpt-4o-mini on purpose — they're cheap, high-volume, and don't need it.
+#
+# PARAM GOTCHA: gpt-5.x chat models REJECT `temperature` (must be default) and
+# `max_tokens` (use `max_completion_tokens`). `max_completion_tokens` also works
+# on gpt-4o / gpt-4.1, so the reply call below is compatible if REPLY_MODEL is
+# ever changed back to a 4-series model.
+REPLY_MODEL = "gpt-5.3-chat-latest"
+
 # Facebook credentials (read once at import).
 FACEBOOK_PAGE_ID = os.environ.get('FACEBOOK_PAGE_ID', '')
 FACEBOOK_ACCESS_TOKEN = os.environ.get('FACEBOOK_ACCESS_TOKEN', '')
@@ -929,13 +941,34 @@ def generate_bot_response(user_message, conversation_history,
         messages.extend(conversation_history)
         messages.append({"role": "user", "content": user_message})
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        create_kwargs = dict(
+            model=REPLY_MODEL,
             messages=messages,
-            temperature=0.7,
-            max_tokens=500
+            max_completion_tokens=500,
         )
-        return response.choices[0].message.content
+        # Offer the staff-handoff tool only in NORMAL mode — i.e. exactly when
+        # KNOWLEDGE_GAP_HANDOFF_RULE is in the prompt. In advisory / just-
+        # triggered modes the customer is already being routed to staff.
+        if not handoff_pending and not handoff_just_triggered:
+            create_kwargs['tools'] = DEFER_TO_STAFF_TOOL
+
+        response = client.chat.completions.create(**create_kwargs)
+        msg = response.choices[0].message
+
+        # If the model chose to defer (it lacks the info), translate that
+        # structured tool call into the internal HANDOFF_MARKER the webhook
+        # detects. This is reliable, unlike asking the model to emit a literal
+        # marker in its text (which chat models strip).
+        for tc in (msg.tool_calls or []):
+            if tc.function.name == 'defer_to_staff':
+                try:
+                    args = json.loads(tc.function.arguments or '{}')
+                except (ValueError, TypeError):
+                    args = {}
+                reply = (args.get('reply_to_customer') or '').strip() or _static_handoff_reply()
+                return f"{HANDOFF_MARKER} {reply}"
+
+        return msg.content
     except Exception as e:
         logger.error("Error generating response: %s", e)
         # If OpenAI fails right after a handoff fires, the dynamic
@@ -1076,6 +1109,78 @@ HANDOFF_JUST_TRIGGERED_RULE = (
     "  6) Энэ ӨВӨРМӨЦ турш HANDOFF ADVISORY-ын 'дахин үл-чиглүүл' "
     "дүрмийг ҮЛ ХАМААРНА — ажилтны тухай дурдах НЬ зөв."
 )
+
+
+# Injected into the system prompt in NORMAL mode (no active handoff) so the bot
+# ESCALATES honestly when it lacks the information to answer, instead of
+# inventing a login link / password / price it was never given. The model
+# signals this by CALLING the defer_to_staff tool (reliable, structured) — NOT
+# by emitting a text marker, which chat models drop unreliably. generate_bot_
+# response translates that tool call into the internal HANDOFF_MARKER the webhook
+# already understands. ETA + door-open phrasing relies on the ОДООГИЙН ЦАГ +
+# КОМПАНИЙН ХОЛБОО БАРИХ blocks already in the prompt.
+KNOWLEDGE_GAP_HANDOFF_RULE = (
+    "МЭДЭХГҮЙ ЗҮЙЛД ХАРИУЛТ БҮҮ ЗОХИО — АЖИЛТАНД ШИЛЖҮҮЛНЭ:\n"
+    "Хэрэглэгчийн асуултын ТОДОРХОЙ хариулт чиний мэдлэгт байхгүй бол "
+    "(жишээ нь: онлайн сургалтын платформд хэрхэн нэвтрэх, нэвтрэх "
+    "нэр/нууц үг/линк, төлбөр төлсний дараах хандалт, техникийн асуудал, "
+    "бүртгэлийн дараах тодорхой журам г.м.) — таамаг, зохиомол хариулт "
+    "ОГТ БҮҮ ӨГ. Үүний оронд defer_to_staff функцийг дууд.\n"
+    "  • reply_to_customer-т дулаахан, эелдэг мессеж бич: асуултыг товч "
+    "хүлээн зөвшөөр; манай ажилтан тодорхой шийдэж/хэлж өгнө гэж хэл; "
+    "ХУГАЦААГ мэдэгд (дээрх 'ОДООГИЙН ЦАГ'-ийг ажлын цагтай харьцуул — "
+    "ажлын цагийн ДОТОР бол 'удахгүй, ~10–30 минутын дотор', ГАДУУР бол "
+    "'ажилтан маргааш ажлын цагт хариулна'); мөн 'энэ хооронд өөр "
+    "тодруулах зүйл байвал би энд байна' гэж нэм.\n"
+    "  • ЛИНК/URL, нэвтрэх нэр, нууц үг, үнийг ХЭЗЭЭ Ч БҮҮ ЗОХИО. Хэрэв "
+    "өгөх ёстой линк/мэдээлэл дээрх мэдлэгт ТОДОРХОЙ байхгүй бол "
+    "defer_to_staff дууд.\n"
+    "  • Зөвхөн ҮНЭХЭЭР мэдээлэлгүй үед л defer_to_staff дууд. Анги, үнэ, "
+    "хуваарь, FAQ, жагсаалтад буй үйлчилгээг ердийнхөөрөө ӨӨРӨӨ хариул. Нэг "
+    "мессэжид хариулж чадах ба чадахгүй хэсэг хоёул байвал — чадахаа "
+    "хариулаад, чадахгүйн талаар defer_to_staff дууд."
+)
+
+# Tool the reply model can call (normal mode only) to hand off to a human when
+# it lacks the information to answer. generate_bot_response detects the call and
+# re-emits HANDOFF_MARKER so the existing webhook handoff path fires.
+DEFER_TO_STAFF_TOOL = [{
+    "type": "function",
+    "function": {
+        "name": "defer_to_staff",
+        "description": (
+            "Hand the conversation to a human staff member because you do NOT "
+            "have the information to answer correctly and must not guess — e.g. "
+            "how to log in to the online class platform, a login name / "
+            "password / link, payment-access problems, technical issues, or "
+            "any specific fact, policy, or URL not present in your knowledge. "
+            "Do NOT call this for questions you CAN answer from your knowledge: "
+            "courses, prices, schedule, FAQs, or listed services."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reply_to_customer": {
+                    "type": "string",
+                    "description": (
+                        "Warm Mongolian message to send the customer now: "
+                        "briefly acknowledge the question, say a staff member "
+                        "will help, give the ETA (within office hours -> "
+                        "~10-30 min; outside office hours -> tomorrow during "
+                        "office hours, using the time + office-hours info in "
+                        "the system prompt), and offer to keep helping with "
+                        "anything else in the meantime."
+                    ),
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Short note for staff: what info is missing.",
+                },
+            },
+            "required": ["reply_to_customer"],
+        },
+    },
+}]
 
 
 def _is_off_hours():
@@ -1294,6 +1399,40 @@ def bot_response_implies_handoff(bot_response):
         if phrase in text:
             return phrase
     return None
+
+
+# Hidden control marker the bot prefixes to a reply when it is deferring to
+# staff because it lacks the information (see KNOWLEDGE_GAP_HANDOFF_RULE). It is
+# a system-only signal and MUST be stripped before the reply reaches the user.
+HANDOFF_MARKER = '[HANDOFF]'
+
+
+def _static_handoff_reply():
+    """Warm, ETA-aware fallback used only if the model emits the marker with no
+    message of its own — so the customer never receives an empty reply."""
+    if _is_off_hours():
+        try:
+            start = int(get_setting('office_hours_start', '8') or '8')
+            end = int(get_setting('office_hours_end', '22') or '22')
+        except ValueError:
+            start, end = 8, 22
+        return HANDOFF_USER_REPLY_OFF_HOURS.format(start=start, end=end)
+    return HANDOFF_USER_REPLY
+
+
+def extract_handoff_marker(bot_response):
+    """Strip the knowledge-gap handoff marker from the bot's reply.
+
+    Returns (cleaned_text, had_marker). The marker must never be shown to the
+    customer; strips every occurrence in case the model emitted it more than
+    once. If the model emitted ONLY the marker, substitute a warm static
+    deferral so we don't send an empty message."""
+    if not bot_response or HANDOFF_MARKER not in bot_response:
+        return bot_response, False
+    cleaned = bot_response.replace(HANDOFF_MARKER, '').strip()
+    if not cleaned:
+        cleaned = _static_handoff_reply()
+    return cleaned, True
 
 
 # ===================== AUDIT LOG =====================

@@ -19,7 +19,8 @@ from models import FacebookUser, Message
 from services import (PHONE_RE, bot_response_implies_handoff,
                       check_rate_limit, classify_session, classify_user_topics,
                       detect_funnel_stage, enqueue_background,
-                      extract_name_from_reply, first_name_of,
+                      extract_handoff_marker, extract_name_from_reply,
+                      first_name_of,
                       generate_bot_response, get_facebook_user_info,
                       is_in_handoff, refresh_facebook_user_name,
                       send_facebook_message, should_handoff,
@@ -204,6 +205,14 @@ def webhook():
                         handoff_just_triggered=handoff_just_triggered,
                     )
 
+                    # Knowledge-gap handoff: the bot prefixes its reply with a
+                    # hidden [HANDOFF] marker when it lacks the info to answer
+                    # and is deferring to staff (KNOWLEDGE_GAP_HANDOFF_RULE).
+                    # Strip it before the customer sees anything; the handoff is
+                    # fired below. Stripping is unconditional; firing is gated on
+                    # not-already-in-handoff, like the deferral-phrase path.
+                    bot_response, knowledge_gap_handoff = extract_handoff_marker(bot_response)
+
                     bot_msg = Message(
                         facebook_user_id=fb_user.id,
                         sender='bot',
@@ -224,14 +233,26 @@ def webhook():
                     # handoff and the advisory rule should keep the bot
                     # from emitting deferral phrases anyway.
                     if not handoff_pending:
-                        deferral_phrase = bot_response_implies_handoff(bot_response)
-                        if deferral_phrase:
+                        if knowledge_gap_handoff:
+                            # Bot explicitly signalled it lacked the info and
+                            # deferred to staff. Its own reply already carries
+                            # the warm ETA + "anything else?" message, so we
+                            # don't send the static handoff message.
                             trigger_handoff(
                                 fb_user,
-                                f'bot_deferral:{deferral_phrase}',
+                                'bot_knowledge_gap',
                                 message_text,
                                 send_user_message=False,
                             )
+                        else:
+                            deferral_phrase = bot_response_implies_handoff(bot_response)
+                            if deferral_phrase:
+                                trigger_handoff(
+                                    fb_user,
+                                    f'bot_deferral:{deferral_phrase}',
+                                    message_text,
+                                    send_user_message=False,
+                                )
 
                     # Fire-and-forget the topic classifier — it's an
                     # OpenAI call and shouldn't keep Facebook waiting on

@@ -59,6 +59,27 @@ persona → current time block → canonical course list → training_content (l
 3. **Catalog edit** — when the data is wrong, not the wording.
 4. **Persona** — only when the bot's *voice* is off, not its *facts*.
 
+## Reply model + knowledge-gap handoff (the "honest AI" path)
+
+- **Customer replies use `REPLY_MODEL` = `gpt-5.3-chat-latest`** (`services/__init__.py`),
+  upgraded from `gpt-4o-mini` after a Mongolian bake-off — far better at paraphrase /
+  Latin-script / intent. Background jobs (topic classifier, page comments, FAQ
+  clustering) stay on `gpt-4o-mini` on purpose (cheap, high-volume).
+  - **PARAM GOTCHA:** gpt-5.x chat models reject `temperature` and `max_tokens`. Use
+    default temperature + `max_completion_tokens` (also valid on 4o/4.1, so it's safe if
+    REPLY_MODEL is rolled back).
+- **When the bot lacks the info, it hands off instead of inventing.** In normal mode the
+  prompt injects `KNOWLEDGE_GAP_HANDOFF_RULE` and `generate_bot_response` offers the
+  **`defer_to_staff` tool** (OpenAI function calling — reliable, unlike a literal text
+  marker, which chat models strip). On a tool call, `generate_bot_response` re-emits the
+  internal `HANDOFF_MARKER` prefix; the webhook's `extract_handoff_marker` strips it (never
+  shown to the user) and fires the existing `trigger_handoff` (Work Tasks + Telegram). The
+  tool's `reply_to_customer` carries the ETA + "anything else?" message.
+  - It still answers what it CAN (courses/prices/schedule/FAQ); only genuinely missing
+    info → defer. It also defers rather than invent a link/password it lacks.
+  - Fix a recurring handoff by adding a **Snippet** with the answer (per the leverage
+    hierarchy above) — then the bot answers it itself next time.
+
 ## Latent / legacy fields — DO NOT trust without checking
 
 These look real but were retired. Don't read or write them in new code; don't add UI back for them.
