@@ -108,6 +108,35 @@ def test_check_facebook_token(monkeypatch):
     assert ok is False and 'status=401' in detail
 
 
+def test_ensure_page_subscriptions_adds_echoes_without_dropping(monkeypatch):
+    import services
+
+    class _Get:
+        status_code = 200
+        def json(self):
+            return {'data': [{'subscribed_fields': ['messages', 'messaging_postbacks']}]}
+
+    class _Post:
+        status_code = 200
+        text = 'ok'
+
+    captured = {}
+    monkeypatch.setattr(services.requests, 'get', lambda *a, **k: _Get())
+
+    def fake_post(url, params=None, **k):
+        captured['fields'] = params['subscribed_fields']
+        return _Post()
+    monkeypatch.setattr(services.requests, 'post', fake_post)
+
+    ok, detail = services.ensure_page_subscriptions()
+    assert ok is True
+    # message_echoes added, and the existing fields are NOT dropped.
+    assert 'message_echoes' in captured['fields']
+    assert 'messages' in captured['fields']
+    assert 'messaging_postbacks' in captured['fields']
+    assert detail['added'] == ['message_echoes']
+
+
 def _inbound(psid, text):
     return {
         'object': 'page',

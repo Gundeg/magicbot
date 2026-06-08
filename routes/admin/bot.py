@@ -208,6 +208,28 @@ def bot_management_settings():
     )
 
 
+@app.route('/admin/api/ensure-webhook-subscriptions', methods=['POST'])
+@login_required
+@admin_required
+def ensure_webhook_subscriptions():
+    """Diagnose + fix the Page's webhook field subscription so Facebook
+    delivers `message_echoes` (required for the automatic human-takeover
+    mute). Reads the current fields and adds the missing ones without
+    dropping anything. Always returns JSON."""
+    from services import ensure_page_subscriptions
+    ok, detail = ensure_page_subscriptions()
+    log_admin_action(
+        'system.webhook_subscriptions', 'setting', None, 'subscribed_apps',
+        detail=str(detail)[:255],
+    )
+    payload = {'success': ok}
+    if isinstance(detail, dict):
+        payload.update(detail)
+    else:
+        payload['detail'] = detail
+    return jsonify(payload)
+
+
 # ===================== FAQ =====================
 
 @app.route('/admin/faq', methods=['GET', 'POST'])

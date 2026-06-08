@@ -1670,6 +1670,56 @@ def check_facebook_token():
         return False, f"exception={e}"
 
 
+def get_page_subscribed_fields():
+    """Return (ok, sorted list of webhook fields this Page is subscribed to),
+    or (False, error_string). This is the PAGE-level subscription (distinct
+    from the App-level webhook field toggles) — Facebook only delivers an
+    event type if it's listed here."""
+    url = "https://graph.facebook.com/v18.0/me/subscribed_apps"
+    try:
+        resp = requests.get(url, headers=_fb_auth_headers(), timeout=8)
+        if resp.status_code != 200:
+            return False, f"status={resp.status_code} body={(resp.text or '')[:300]}"
+        apps = (resp.json() or {}).get('data', [])
+        fields = []
+        for a in apps:
+            fields.extend(a.get('subscribed_fields', []))
+        return True, sorted(set(fields))
+    except Exception as e:
+        return False, str(e)
+
+
+def ensure_page_subscriptions():
+    """Make sure the Page is subscribed to `message_echoes` (required for the
+    automatic human-takeover mute) WITHOUT dropping any field it already has —
+    we read the current set and POST the UNION, so we never accidentally
+    unsubscribe `messages` and break the bot. Returns (ok, detail_dict)."""
+    ok, current = get_page_subscribed_fields()
+    if not ok:
+        return False, {'error': current}
+    current_set = set(current)
+    desired = current_set | {'messages', 'message_echoes'}
+    if desired == current_set:
+        return True, {'before': sorted(current_set), 'after': sorted(current_set), 'added': []}
+    url = "https://graph.facebook.com/v18.0/me/subscribed_apps"
+    try:
+        resp = requests.post(
+            url, params={'subscribed_fields': ','.join(sorted(desired))},
+            headers=_fb_auth_headers(), timeout=8,
+        )
+        if resp.status_code != 200:
+            return False, {'error': f"status={resp.status_code} body={(resp.text or '')[:300]}",
+                           'before': sorted(current_set)}
+    except Exception as e:
+        return False, {'error': str(e), 'before': sorted(current_set)}
+    ok2, after = get_page_subscribed_fields()
+    return True, {
+        'before': sorted(current_set),
+        'after': sorted(after) if ok2 else 'unknown',
+        'added': sorted(desired - current_set),
+    }
+
+
 def token_health_task(app):
     """Background loop: every TOKEN_CHECK_INTERVAL_HOURS, verify the Facebook
     Page token and Telegram-alert staff if it's invalid/expired — catching the
