@@ -26,8 +26,7 @@ from services import (PHONE_RE, bot_response_implies_handoff,
                       send_facebook_message, should_handoff,
                       trigger_handoff,
                       verify_facebook_signature, FACEBOOK_APP_SECRET,
-                      RATE_LIMIT_REPLY, BOT_ECHO_TAG,
-                      HUMAN_TAKEOVER_MUTE_MINUTES)
+                      BOT_ECHO_TAG, HUMAN_TAKEOVER_MUTE_MINUTES)
 
 
 def human_takeover_pause(customer_psid):
@@ -102,14 +101,25 @@ def webhook():
                     # fall through to the inbound-message pipeline (sender here
                     # is the Page, recipient is the customer).
                     if msg.get('is_echo'):
-                        if msg.get('metadata') != BOT_ECHO_TAG:
+                        is_bot_echo = msg.get('metadata') == BOT_ECHO_TAG
+                        logger.info(
+                            "Echo: recipient=%s is_bot=%s text=%r",
+                            recipient_id, is_bot_echo, (msg.get('text') or '')[:40],
+                        )
+                        if not is_bot_echo:
+                            # Human agent replied in the Page inbox → pause bot.
                             human_takeover_pause(recipient_id)
                         continue
 
                     message_text = msg.get('text')
 
+                    # Over the per-sender rate limit: silently drop. We used to
+                    # reply "Та маш олон мессеж бичиж байна…", but that spammed
+                    # chatty customers AND fired even during a human takeover,
+                    # because this runs before the mute check below. The limiter
+                    # still protects against floods / cost — it just no longer
+                    # talks back.
                     if sender_id and not check_rate_limit(sender_id):
-                        send_facebook_message(sender_id, RATE_LIMIT_REPLY)
                         continue
 
                     fb_user = FacebookUser.query.filter_by(facebook_id=sender_id).first()
@@ -254,6 +264,19 @@ def webhook():
                     # fired below. Stripping is unconditional; firing is gated on
                     # not-already-in-handoff, like the deferral-phrase path.
                     bot_response, knowledge_gap_handoff = extract_handoff_marker(bot_response)
+
+                    # A human may have jumped into the Page inbox while the LLM
+                    # was generating (their echo set bot_muted_until in another
+                    # request). Re-read the flag and bail BEFORE sending so the
+                    # bot never talks over a human who just replied. We don't
+                    # persist the unsent reply either.
+                    db.session.expire(fb_user, ['bot_muted_until'])
+                    if fb_user.bot_muted_until and fb_user.bot_muted_until > datetime.utcnow():
+                        logger.info(
+                            "Human took over mid-generation — suppressing bot reply for psid=%s",
+                            sender_id,
+                        )
+                        continue
 
                     bot_msg = Message(
                         facebook_user_id=fb_user.id,

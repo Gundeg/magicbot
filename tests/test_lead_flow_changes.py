@@ -65,6 +65,70 @@ def _post_webhook(client, payload):
     )
 
 
+def _inbound(psid, text):
+    return {
+        'object': 'page',
+        'entry': [{
+            'messaging': [{
+                'sender': {'id': psid},
+                'recipient': {'id': 'PAGE_ID'},
+                'message': {'text': text},
+            }],
+        }],
+    }
+
+
+# --------------------------------------------------------------------------
+# Webhook: rate-limit silent drop + takeover silence
+# --------------------------------------------------------------------------
+
+def test_rate_limited_message_is_silently_dropped(client, db_session, monkeypatch):
+    """Over the rate limit -> no outbound message at all (was the spammy
+    'Та маш олон мессеж бичиж байна' reply)."""
+    import routes.webhook as wh
+
+    sent = []
+    monkeypatch.setattr(wh, 'check_rate_limit', lambda sid: False)
+    monkeypatch.setattr(wh, 'send_facebook_message', lambda *a, **k: sent.append(a))
+
+    resp = _post_webhook(client, _inbound('psid-rl', 'hello'))
+    assert resp.status_code == 200
+    assert sent == []   # silent — nothing sent back to the customer
+
+
+def test_muted_user_gets_no_bot_reply(client, db_session, monkeypatch):
+    """A human takeover (bot_muted_until in the future) silences the bot:
+    no LLM call, no outbound message."""
+    import routes.webhook as wh
+    from extensions import db
+    from models import FacebookUser
+
+    u = FacebookUser(
+        facebook_id='psid-muted', name='Muted',
+        bot_muted_until=datetime.utcnow() + timedelta(minutes=20),
+    )
+    db.session.add(u)
+    db.session.commit()
+
+    sent = []
+    called = {'gen': False}
+    monkeypatch.setattr(wh, 'check_rate_limit', lambda sid: True)
+    monkeypatch.setattr(wh, 'send_facebook_message', lambda *a, **k: sent.append(a))
+
+    def _boom(*a, **k):
+        called['gen'] = True
+        return 'should not be sent'
+    monkeypatch.setattr(wh, 'generate_bot_response', _boom)
+
+    resp = _post_webhook(client, _inbound('psid-muted', 'юу байна'))
+    assert resp.status_code == 200
+    assert sent == []            # bot stayed silent
+    assert called['gen'] is False  # didn't even call the LLM
+
+    FacebookUser.query.filter_by(id=u.id).delete()
+    db.session.commit()
+
+
 # --------------------------------------------------------------------------
 # #4 Hot Prospects: promote_to_lead / drop_prospect
 # --------------------------------------------------------------------------
