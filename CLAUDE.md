@@ -88,7 +88,7 @@ These look real but were retired. Don't read or write them in new code; don't ad
 |---|---|
 | `GeneralSetting.center_phone` | Removed in v2 cleanup. Use `main_office_phone`. |
 | `GeneralSetting.center_address` | Removed in v2 cleanup. Use `main_office_address`. |
-| `GeneralSetting.mute_duration_hours` | UI removed; `trigger_handoff` no longer reads it. Bot mutes only on `take_over_chat`. |
+| `GeneralSetting.mute_duration_hours` | UI removed; `trigger_handoff` no longer reads it. Bot mutes on `take_over_chat` OR an untagged Messenger echo (human-agent reply — see "Human-takeover auto-mute"). |
 | `GeneralSetting.training_content` | UI removed; prompt builder still reads for backward compat. Won't be set going forward. |
 
 When removing a UI for a setting: drop the form input, but leave the underlying setter/getter as a one-release no-op in case rollback is needed.
@@ -138,7 +138,8 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 
 ## Bug surfaces seen recently — be careful here
 
-- `services/__init__.py:trigger_handoff` used to auto-mute the bot via `mute_duration_hours`. That's been removed — DO NOT add it back; the bot must keep advisory-replying after handover until staff `take_over_chat`.
+- `services/__init__.py:trigger_handoff` used to auto-mute the bot via `mute_duration_hours`. That's been removed — DO NOT add it back; the bot keeps advisory-replying after a *handoff* until either staff `take_over_chat` OR the human-takeover auto-mute fires (see below).
+- **Human-takeover auto-mute:** every bot-sent Messenger message carries `metadata=BOT_ECHO_TAG` (`services/__init__.py:send_facebook_message`). The webhook handles `message_echoes`: an echo WITHOUT that tag = a human agent replied in the FB Page inbox → `routes/webhook.py:human_takeover_pause` sets `bot_muted_until = now + HUMAN_TAKEOVER_MUTE_MINUTES` (30, env-tunable). Echoes must `continue` before the inbound pipeline (sender is the Page, recipient the customer). Requires the `message_echoes` webhook field enabled in the Meta dashboard — without it FB never sends echoes and this path is inert. NEVER drop the metadata tag: an untagged bot echo would make the bot mute *itself* on every reply.
 - `seed_default_magic_links` historically missed a `GeneralSetting` import — it's fixed, but any new helper that touches `GeneralSetting.query` must import it from `models`.
 - `classification_lookback_days` controller lives at the top of `work_tasks.html` (outside any tab) so it's visible from the default Hot Prospects landing. Don't move it back into a single tab.
 - **SQLite WAL + busy_timeout in `app.py:88`** is load-bearing — without it, 2 gunicorn workers + admin polling deadlock on SQLite locks. Do not remove the `@event.listens_for(Engine, "connect")` block.
@@ -160,6 +161,7 @@ The production service is `magicbot` at <https://dashboard.render.com/web/srv-d8
 - Use **UPSERT by stable key** (URL for `*Link` rows, title for `TrainingSnippet`). Re-running should refresh content, not duplicate rows.
 - One-shot description updates (e.g. rewording Magic Finance product description): check the current value matches a `KNOWN_DEFAULTS` set before overwriting, so admin edits survive a re-seed.
 - Removing a thing → set `is_active=False` and set a `status_note`, don't `.query.delete()`. Audit history matters.
+  - **Exception:** the operator-triggered `cleanup_old_records` (`routes/admin/work_tasks.py`, admin-only button on the Leads tab) DOES hard-delete by design — chat messages older than `CLEANUP_RETENTION_DAYS` (60) and terminally-closed leads (converted/dropped) untouched that long, plus their dependents. `FacebookUser` has no DB cascade, so it deletes `Message`/`AdminIssue`/`ConversationTopic` rows explicitly. This is the one sanctioned hard-delete path.
 
 ## Mongolian voice for new content
 

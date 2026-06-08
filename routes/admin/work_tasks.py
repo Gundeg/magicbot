@@ -4,6 +4,7 @@ viewer, and ops APIs (telegram test, backfill, classify, handoff poll).
 Phase 3 will rename Inbox to Work Tasks and absorb leads/issues into it as tabs.
 """
 import os
+import time
 from datetime import datetime, timedelta
 
 import requests
@@ -28,6 +29,18 @@ from services import (CLASSIFICATION_LOOKBACK_MAX_DAYS, FACEBOOK_ACCESS_TOKEN,
 
 # How old an open issue must be before it surfaces on the Inbox as "aging".
 INBOX_AGING_HOURS = int(os.environ.get('INBOX_AGING_HOURS', '12'))
+
+# Name-backfill bounds — keep one run comfortably under gunicorn's 60s worker
+# timeout so a large 'Unknown' backlog can't kill the worker (see backfill_names).
+BACKFILL_MAX_PER_RUN = int(os.environ.get('BACKFILL_MAX_PER_RUN', '60'))
+BACKFILL_BUDGET_SECONDS = int(os.environ.get('BACKFILL_BUDGET_SECONDS', '40'))
+
+# Retention window for the manual "clean up old records" action: chat messages
+# older than this are purged, and leads that are terminally closed
+# (converted / dropped) and untouched for this long are hard-deleted.
+CLEANUP_RETENTION_DAYS = int(os.environ.get('CLEANUP_RETENTION_DAYS', '60'))
+# Lead statuses eligible for hard deletion once they pass the retention window.
+CLEANUP_LEAD_STATUSES = ('converted', 'dropped')
 
 LOGS_PAGE_SIZE = 100
 
@@ -245,6 +258,36 @@ def work_tasks():
                 'lead.mark_contacted', 'facebook_user', user.id,
                 user.name or user.facebook_id,
                 detail='Work Tasks-аас холбогдсон гэж тэмдэглэв'
+            )
+            return jsonify({'success': True})
+
+        # Hot Prospects has exactly two outcomes: promote to a real lead or
+        # drop. Both remove the row from the Hot Prospects queue (promote sets
+        # is_lead=True; drop sets the terminal 'dropped' status).
+        if action == 'promote_to_lead':
+            user = db.session.get(FacebookUser, data.get('user_id'))
+            if not user:
+                return jsonify({'success': False}), 404
+            user.is_lead = True
+            user.lead_status = 'new'
+            db.session.commit()
+            log_admin_action(
+                'lead.promote', 'facebook_user', user.id,
+                user.name or user.facebook_id,
+                detail='Hot Prospect-оос лид болгов (Шинэ)'
+            )
+            return jsonify({'success': True})
+
+        if action == 'drop_prospect':
+            user = db.session.get(FacebookUser, data.get('user_id'))
+            if not user:
+                return jsonify({'success': False}), 404
+            user.lead_status = 'dropped'
+            db.session.commit()
+            log_admin_action(
+                'lead.drop', 'facebook_user', user.id,
+                user.name or user.facebook_id,
+                detail='Hot Prospect-оос орхисон гэж тэмдэглэв'
             )
             return jsonify({'success': True})
 
@@ -513,29 +556,112 @@ def test_telegram():
 @login_required
 @admin_required
 def backfill_names():
-    """Retry the Facebook profile lookup for every user currently named 'Unknown'."""
-    targets = (FacebookUser.query
-               .filter(db.or_(
-                   FacebookUser.name == None,  # noqa: E711
-                   FacebookUser.name == '',
-                   FacebookUser.name == 'Unknown',
-               ))
-               .order_by(FacebookUser.id.asc())
-               .limit(200)
-               .all())
-    updated = 0
-    for u in targets:
-        if refresh_facebook_user_name(u):
-            updated += 1
-    return jsonify({
-        'attempted': len(targets),
-        'updated': updated,
-        'remaining_unknown_after': FacebookUser.query.filter(db.or_(
+    """Retry the Facebook profile lookup for users currently named 'Unknown'.
+
+    Each lookup is a synchronous Facebook round-trip (up to a 5s timeout), so
+    looping the whole backlog can exceed gunicorn's 60s worker timeout — the
+    worker gets killed and Render serves an HTML 502, which the caller's JSON
+    parse chokes on ("Unexpected token '<'"). We bound the work two ways:
+    a per-run BACKFILL_BUDGET_SECONDS wall-clock budget that stops early and
+    reports what's left, and a wrapping try/except so this endpoint ALWAYS
+    returns JSON. The page can be clicked again to continue the backlog.
+    """
+    try:
+        unknown_filter = db.or_(
             FacebookUser.name == None,  # noqa: E711
             FacebookUser.name == '',
             FacebookUser.name == 'Unknown',
-        )).count(),
-    })
+        )
+        targets = (FacebookUser.query
+                   .filter(unknown_filter)
+                   .order_by(FacebookUser.id.asc())
+                   .limit(BACKFILL_MAX_PER_RUN)
+                   .all())
+        deadline = time.monotonic() + BACKFILL_BUDGET_SECONDS
+        attempted = 0
+        updated = 0
+        timed_out = False
+        for u in targets:
+            if time.monotonic() >= deadline:
+                timed_out = True
+                break
+            attempted += 1
+            if refresh_facebook_user_name(u):
+                updated += 1
+        return jsonify({
+            'attempted': attempted,
+            'updated': updated,
+            'remaining_unknown_after': FacebookUser.query.filter(unknown_filter).count(),
+            'more_remaining': timed_out,
+        })
+    except Exception as e:  # never surface an HTML 500 to the JSON caller
+        import logging
+        logging.getLogger(__name__).exception("backfill_names failed: %s", e)
+        return jsonify({'error': 'backfill_failed', 'message': str(e)}), 500
+
+
+@app.route('/admin/api/cleanup-old-records', methods=['POST'])
+@login_required
+@admin_required
+def cleanup_old_records():
+    """Manual housekeeping: hard-delete stale data past the retention window.
+
+    Two passes, both older than CLEANUP_RETENTION_DAYS:
+      1. Chat messages (by created_at) — across ALL users.
+      2. Terminally-closed leads (status converted/dropped, by updated_at) —
+         the FacebookUser row plus its messages, issues, and topics.
+
+    This is a destructive, admin-only action (the operator explicitly chose
+    hard delete over archiving). FacebookUser has no DB-level cascade, so we
+    delete dependents explicitly to avoid orphaned rows. Always returns JSON.
+    """
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=CLEANUP_RETENTION_DAYS)
+
+        # Pass 1: old chat messages for everyone.
+        messages_deleted = (Message.query
+                            .filter(Message.created_at < cutoff)
+                            .delete(synchronize_session=False))
+
+        # Pass 2: terminally-closed, untouched leads + their dependents.
+        stale_lead_ids = [row.id for row in (
+            FacebookUser.query
+            .filter(FacebookUser.lead_status.in_(CLEANUP_LEAD_STATUSES))
+            .filter(FacebookUser.updated_at < cutoff)
+            .with_entities(FacebookUser.id)
+            .all())]
+        leads_deleted = 0
+        if stale_lead_ids:
+            Message.query.filter(
+                Message.facebook_user_id.in_(stale_lead_ids)
+            ).delete(synchronize_session=False)
+            AdminIssue.query.filter(
+                AdminIssue.facebook_user_id.in_(stale_lead_ids)
+            ).delete(synchronize_session=False)
+            ConversationTopic.query.filter(
+                ConversationTopic.facebook_user_id.in_(stale_lead_ids)
+            ).delete(synchronize_session=False)
+            leads_deleted = FacebookUser.query.filter(
+                FacebookUser.id.in_(stale_lead_ids)
+            ).delete(synchronize_session=False)
+
+        db.session.commit()
+        log_admin_action(
+            'system.cleanup_old_records', 'system', 0, 'cleanup',
+            detail=(f'{CLEANUP_RETENTION_DAYS}+ хоног: {messages_deleted} мессеж, '
+                    f'{leads_deleted} хаагдсан лид устгав')
+        )
+        return jsonify({
+            'success': True,
+            'retention_days': CLEANUP_RETENTION_DAYS,
+            'messages_deleted': messages_deleted,
+            'leads_deleted': leads_deleted,
+        })
+    except Exception as e:  # never surface an HTML 500 to the JSON caller
+        db.session.rollback()
+        import logging
+        logging.getLogger(__name__).exception("cleanup_old_records failed: %s", e)
+        return jsonify({'error': 'cleanup_failed', 'message': str(e)}), 500
 
 
 @app.route('/admin/api/classify-conversations', methods=['POST'])

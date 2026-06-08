@@ -197,7 +197,12 @@
                     Сүүлд: {{ u.updated_at.strftime('%m/%d %H:%M') }}
                 </div>
                 <div class="actions">
-                    {{ lead_status_dropdown(u, lead_statuses) }}
+                    <button type="button" class="btn btn-sm btn-success hot-promote" data-user-id="{{ u.id }}" title="Лид болгох">
+                        <i class="bi bi-person-check"></i> Лид болгох
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-dark hot-drop" data-user-id="{{ u.id }}" title="Орхих">
+                        <i class="bi bi-x-lg"></i> Орхих
+                    </button>
                     <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=u.id) }}" title="Яриаг бүхэлд нь үзэх">
                         <i class="bi bi-eye"></i>
                     </a>
@@ -227,6 +232,12 @@
                     <button type="button" class="btn btn-sm btn-light" id="exportBtn">
                         <i class="bi bi-download"></i> CSV
                     </button>
+                    {% if current_user.role in ('admin', 'super_admin') %}
+                    <button type="button" class="btn btn-sm btn-outline-danger" id="cleanupBtn"
+                            title="60+ хоногийн хуучин чат болон хаагдсан (Бүртгүүлсэн/Орхисон) лидийг бүрмөсөн устгана">
+                        <i class="bi bi-trash"></i> Хуучныг цэвэрлэх
+                    </button>
+                    {% endif %}
                 </div>
             </div>
             <div class="card-body">
@@ -456,6 +467,7 @@
     const workTasksUrl = '{{ url_for("work_tasks") }}';
     const classifyUrl = '{{ url_for("classify_conversations_backfill") }}';
     const backfillUrl = '{{ url_for("backfill_names") }}';
+    const cleanupUrl = '{{ url_for("cleanup_old_records") }}';
 
     function toast(msg, ok) {
         const c = document.getElementById('wtToastContainer');
@@ -554,6 +566,31 @@
                 }
             }
         });
+    });
+
+    // Hot Prospects: two-outcome buttons (promote to lead / drop). Both fade
+    // the row out — promote moves it to the Leads tab, drop closes it.
+    function hotAction(btn, action, okMsg) {
+        const row = btn.closest('.wt-row');
+        const userId = btn.dataset.userId;
+        const siblings = row ? row.querySelectorAll('button') : [btn];
+        siblings.forEach(b => { b.disabled = true; });
+        post({action: action, user_id: userId})
+            .then(d => {
+                if (!d || !d.success) throw new Error((d && (d.error || d.message)) || 'unknown error');
+                toast(okMsg, true);
+                if (row) fadeAndRemove(row);
+            })
+            .catch(err => {
+                toast('Алдаа: ' + (err.message || err), false);
+                siblings.forEach(b => { b.disabled = false; });
+            });
+    }
+    document.querySelectorAll('.hot-promote').forEach(btn => {
+        btn.addEventListener('click', () => hotAction(btn, 'promote_to_lead', 'Лид болголоо.'));
+    });
+    document.querySelectorAll('.hot-drop').forEach(btn => {
+        btn.addEventListener('click', () => hotAction(btn, 'drop_prospect', 'Орхисон гэж тэмдэглэлээ.'));
     });
 
     document.querySelectorAll('.takeover-btn').forEach(btn => {
@@ -675,18 +712,70 @@
                 credentials: 'same-origin',
                 headers: {'Content-Type': 'application/json'},
             })
-                .then(r => r.json())
+                .then(async r => {
+                    // Always parse as JSON, but tolerate the error path (HTML
+                    // body from a 502/redirect, network failure) so it never
+                    // surfaces as the cryptic "Unexpected token '<'".
+                    const text = await r.text();
+                    try { return JSON.parse(text); }
+                    catch (_) { throw new Error(`Сервер JSON буцаасангүй (HTTP ${r.status}). ${text.slice(0, 120)}`); }
+                })
                 .then(d => {
+                    if (d.error) {
+                        alert(`Нэр шинэчлэхэд алдаа гарлаа: ${d.message || d.error}`);
+                        return;
+                    }
                     alert(
                         `Оролдсон: ${d.attempted}\n` +
                         `Шинэчилсэн: ${d.updated}\n` +
                         `Үлдсэн Unknown: ${d.remaining_unknown_after}\n\n` +
                         (d.updated > 0 ? 'Хуудсыг шинэчилж байна...' :
-                         'Нэр шинэчилсэнгүй. Render-ийн log-оос Facebook-ийн алдааг шалгана уу.')
+                         'Нэр шинэчилсэнгүй. Render-ийн log-оос Facebook-ийн алдааг шалгана уу.') +
+                        (d.more_remaining ? '\n\n(Үлдсэн Unknown олон тул дахин товшиж үргэлжлүүлнэ үү.)' : '')
                     );
                     if (d.updated > 0) location.reload();
                 })
-                .catch(e => alert('Алдаа: ' + e))
+                .catch(e => alert('Алдаа: ' + e.message))
+                .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+        });
+    }
+
+    const cleanupBtn = document.getElementById('cleanupBtn');
+    if (cleanupBtn) {
+        cleanupBtn.addEventListener('click', function () {
+            if (!confirm('60-аас дээш хоногийн хуучин чатын мессеж болон хаагдсан ' +
+                         '(Бүртгүүлсэн/Орхисон) лидүүдийг БҮРМӨСӨН устгах уу? ' +
+                         'Энэ үйлдлийг буцаах боломжгүй.')) {
+                return;
+            }
+            const btn = this;
+            btn.disabled = true;
+            const original = btn.innerHTML;
+            btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Цэвэрлэж байна...';
+            fetch(cleanupUrl, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {'Content-Type': 'application/json'},
+            })
+                .then(async r => {
+                    const text = await r.text();
+                    try { return JSON.parse(text); }
+                    catch (_) { throw new Error(`Сервер JSON буцаасангүй (HTTP ${r.status}). ${text.slice(0, 120)}`); }
+                })
+                .then(d => {
+                    if (!d.success) {
+                        alert(`Цэвэрлэхэд алдаа гарлаа: ${d.message || d.error}`);
+                        return;
+                    }
+                    alert(
+                        `Цэвэрлэлээ (${d.retention_days}+ хоног):\n` +
+                        `Устгасан мессеж: ${d.messages_deleted}\n` +
+                        `Устгасан хаагдсан лид: ${d.leads_deleted}\n\n` +
+                        `Хуудсыг шинэчилж байна...`
+                    );
+                    location.reload();
+                })
+                .catch(e => alert('Алдаа: ' + e.message))
                 .finally(() => { btn.disabled = false; btn.innerHTML = original; });
         });
     }

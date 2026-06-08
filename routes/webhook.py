@@ -6,7 +6,7 @@ FACEBOOK_APP_SECRET (see services.verify_facebook_signature).
 """
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import jsonify, request
 from sqlalchemy.exc import IntegrityError
@@ -26,7 +26,31 @@ from services import (PHONE_RE, bot_response_implies_handoff,
                       send_facebook_message, should_handoff,
                       trigger_handoff,
                       verify_facebook_signature, FACEBOOK_APP_SECRET,
-                      RATE_LIMIT_REPLY)
+                      RATE_LIMIT_REPLY, BOT_ECHO_TAG,
+                      HUMAN_TAKEOVER_MUTE_MINUTES)
+
+
+def human_takeover_pause(customer_psid):
+    """Pause the bot for a customer after a human agent replies to them in the
+    Page inbox. Idempotent and best-effort: a missing user or DB hiccup must
+    not break webhook processing (we still return 200 to Facebook)."""
+    if not customer_psid:
+        return
+    try:
+        fb_user = FacebookUser.query.filter_by(facebook_id=customer_psid).first()
+        if not fb_user:
+            return
+        fb_user.bot_muted_until = (
+            datetime.utcnow() + timedelta(minutes=HUMAN_TAKEOVER_MUTE_MINUTES)
+        )
+        db.session.commit()
+        logger.info(
+            "Human takeover: bot paused %s min for psid=%s",
+            HUMAN_TAKEOVER_MUTE_MINUTES, customer_psid,
+        )
+    except Exception as e:
+        db.session.rollback()
+        logger.exception("human_takeover_pause failed psid=%s: %s", customer_psid, e)
 
 
 @csrf.exempt
@@ -67,7 +91,22 @@ def webhook():
                 )
 
                 if messaging_event.get('message'):
-                    message_text = messaging_event['message'].get('text')
+                    msg = messaging_event['message']
+
+                    # Echo events: Facebook sends these for EVERY message the
+                    # Page emits — both the bot's own Send API calls and replies
+                    # a human agent types in the Page inbox. Our outgoing
+                    # messages carry BOT_ECHO_TAG in `metadata`; an untagged
+                    # echo means a human just took over, so pause the bot for
+                    # HUMAN_TAKEOVER_MUTE_MINUTES. Either way an echo must never
+                    # fall through to the inbound-message pipeline (sender here
+                    # is the Page, recipient is the customer).
+                    if msg.get('is_echo'):
+                        if msg.get('metadata') != BOT_ECHO_TAG:
+                            human_takeover_pause(recipient_id)
+                        continue
+
+                    message_text = msg.get('text')
 
                     if sender_id and not check_rate_limit(sender_id):
                         send_facebook_message(sender_id, RATE_LIMIT_REPLY)
@@ -135,7 +174,10 @@ def webhook():
                     if phone_match and not fb_user.is_lead:
                         fb_user.phone = phone_match.group(0)
                         fb_user.is_lead = True
-                        fb_user.lead_status = 'contacted'
+                        # A freshly-captured lead starts at 'new' (Шинэ). Staff
+                        # move it to 'contacted' (Холбогдсон) only once they've
+                        # actually reached out — see the mark_contacted action.
+                        fb_user.lead_status = 'new'
                         db.session.commit()
 
                     now = datetime.utcnow()

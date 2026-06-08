@@ -116,6 +116,17 @@ if not FACEBOOK_APP_SECRET and not FACEBOOK_ALLOW_UNVERIFIED:
 # the admin panel (Business Management -> General Information).
 GOOGLE_FORM_URL = os.environ.get('GOOGLE_FORM_URL', '')
 
+# Stamped onto every bot-sent Messenger message and echoed back in
+# message_echoes webhook events. Lets the webhook tell its OWN outgoing
+# messages apart from a human agent's reply typed in the Page inbox — the
+# latter carries no tag and triggers the auto-mute below.
+BOT_ECHO_TAG = 'magicbot_auto'
+# When a human agent replies to a customer (detected via an untagged echo),
+# pause the bot for this many minutes so it doesn't talk over the human.
+HUMAN_TAKEOVER_MUTE_MINUTES = int(
+    os.environ.get('HUMAN_TAKEOVER_MUTE_MINUTES', '30')
+)
+
 
 def get_google_form_url():
     """Self-service registration link the bot can quote. Priority order:
@@ -293,11 +304,15 @@ def _fb_auth_headers(extra=None):
 
 
 def send_facebook_message(recipient_id, message_text):
-    """Send a message via Facebook Messenger API"""
+    """Send a message via Facebook Messenger API.
+
+    The message carries a `metadata` tag (BOT_ECHO_TAG) that Facebook echoes
+    back in message_echoes events, so the webhook can recognise its own
+    outgoing messages and NOT mistake them for a human-agent takeover."""
     url = "https://graph.facebook.com/v18.0/me/messages"
     data = {
         "recipient": {"id": recipient_id},
-        "message": {"text": message_text}
+        "message": {"text": message_text, "metadata": BOT_ECHO_TAG},
     }
     try:
         response = requests.post(
