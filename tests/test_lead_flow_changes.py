@@ -65,6 +65,49 @@ def _post_webhook(client, payload):
     )
 
 
+def test_pause_bot_mutes_then_resumes(client, admin_user, db_session):
+    from extensions import db
+    from models import FacebookUser
+
+    u = FacebookUser(facebook_id='psid-pause', name='Pause Me')
+    db.session.add(u)
+    db.session.commit()
+    _login(client, admin_user)
+
+    # Pause 30 min → muted into the future.
+    resp = client.post('/admin/api/pause-bot', json={'user_id': u.id, 'minutes': 30})
+    assert resp.status_code == 200 and resp.get_json()['success'] is True
+    refreshed = db.session.get(FacebookUser, u.id)
+    assert refreshed.bot_muted_until is not None
+    assert refreshed.bot_muted_until > datetime.utcnow()
+
+    # Resume (minutes=0) → cleared.
+    resp = client.post('/admin/api/pause-bot', json={'user_id': u.id, 'minutes': 0})
+    assert resp.status_code == 200
+    db.session.expire(refreshed)
+    assert db.session.get(FacebookUser, u.id).bot_muted_until is None
+
+    FacebookUser.query.filter_by(id=u.id).delete()
+    db.session.commit()
+
+
+def test_check_facebook_token(monkeypatch):
+    import services
+
+    class _Resp:
+        def __init__(self, code):
+            self.status_code = code
+            self.text = 'body'
+
+    monkeypatch.setattr(services.requests, 'get', lambda *a, **k: _Resp(200))
+    ok, _ = services.check_facebook_token()
+    assert ok is True
+
+    monkeypatch.setattr(services.requests, 'get', lambda *a, **k: _Resp(401))
+    ok, detail = services.check_facebook_token()
+    assert ok is False and 'status=401' in detail
+
+
 def _inbound(psid, text):
     return {
         'object': 'page',

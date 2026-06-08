@@ -223,6 +223,39 @@ def conversation(user_id):
     )
 
 
+@app.route('/admin/api/pause-bot', methods=['POST'])
+@login_required
+@staff_required
+def pause_bot():
+    """Manually mute the bot for a user for N minutes (default 30) — a
+    takeover fallback for when the automatic echo-detection (a human replying
+    in the FB Page inbox) doesn't fire. minutes<=0 resumes the bot now."""
+    data = request.get_json(silent=True) or {}
+    user = db.session.get(FacebookUser, data.get('user_id'))
+    if not user:
+        return jsonify({'success': False}), 404
+    try:
+        minutes = int(data.get('minutes', 30))
+    except (TypeError, ValueError):
+        minutes = 30
+    if minutes <= 0:
+        user.bot_muted_until = None
+        detail = 'Ботыг дахин асаав'
+    else:
+        minutes = min(minutes, 24 * 60)
+        user.bot_muted_until = datetime.utcnow() + timedelta(minutes=minutes)
+        detail = f'Ботыг {minutes} мин зогсоов'
+    db.session.commit()
+    log_admin_action(
+        'bot.pause', 'facebook_user', user.id,
+        user.name or user.facebook_id, detail=detail,
+    )
+    return jsonify({
+        'success': True,
+        'muted_until': user.bot_muted_until.isoformat() if user.bot_muted_until else None,
+    })
+
+
 # ===================== WORK TASKS =====================
 # The unified daily-work queue. Five tabs: Hot Prospects (people who showed
 # buying signals but haven't dropped a phone), Leads (people who did),

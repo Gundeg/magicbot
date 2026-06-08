@@ -1651,6 +1651,50 @@ def nudge_task(app):
         time.sleep(30 * 60)
 
 
+def check_facebook_token():
+    """Ping the Graph API to verify the Page access token still works.
+    Returns (ok: bool, detail: str). The recurring OAuthException 190/463
+    (expired long-lived token) is the #1 cause of a silently-dead bot, so we
+    surface it proactively rather than waiting for customers to notice."""
+    target = FACEBOOK_PAGE_ID or 'me'
+    url = f"https://graph.facebook.com/v18.0/{target}"
+    try:
+        resp = requests.get(
+            url, params={'fields': 'id,name'},
+            headers=_fb_auth_headers(), timeout=8,
+        )
+        if resp.status_code == 200:
+            return True, 'ok'
+        return False, f"status={resp.status_code} body={(resp.text or '')[:300]}"
+    except Exception as e:
+        return False, f"exception={e}"
+
+
+def token_health_task(app):
+    """Background loop: every TOKEN_CHECK_INTERVAL_HOURS, verify the Facebook
+    Page token and Telegram-alert staff if it's invalid/expired — catching the
+    OAuthException 190/463 BEFORE customers meet a silent bot."""
+    interval = max(1, _safe_int_env('TOKEN_CHECK_INTERVAL_HOURS', 6)) * 3600
+    time.sleep(60)  # small initial delay so boot logs stay clean
+    while True:
+        try:
+            with app.app_context():
+                ok, detail = check_facebook_token()
+                if ok:
+                    logger.info("FB token health: OK")
+                else:
+                    logger.warning("FB token health: FAILED %s", detail)
+                    send_telegram_notification(
+                        "⚠️ Facebook Page token алдаатай байна. Бот хариу "
+                        "илгээж чадахгүй байж магадгүй. Graph API Explorer-оос "
+                        "токеноо шинэчилнэ үү.\n\n"
+                        f"Дэлгэрэнгүй: {detail[:300]}"
+                    )
+        except Exception as e:
+            logger.error("token_health_task error: %s", e)
+        time.sleep(interval)
+
+
 # ===================== CHAT QUESTION CLUSTERING =====================
 # Phase 5b: groups recent user messages into themes via LLM so admins can
 # see "what users are actually asking" and one-click promote popular

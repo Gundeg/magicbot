@@ -364,6 +364,14 @@ if _run_background_loops and os.environ.get('ENABLE_CHAT_CLUSTERING', 'false').l
     from services import cluster_task
     Thread(target=cluster_task, args=(app,), daemon=True).start()
 
+# Facebook token health check. Defaults ON (unlike the loops above) because
+# it's cheap — one Graph call every TOKEN_CHECK_INTERVAL_HOURS (6) — and the
+# expired-token failure it catches silently kills the whole bot. No-op unless
+# Telegram is configured. Set ENABLE_TOKEN_CHECK=false to disable.
+if _run_background_loops and os.environ.get('ENABLE_TOKEN_CHECK', 'true').lower() == 'true':
+    from services import token_health_task
+    Thread(target=token_health_task, args=(app,), daemon=True).start()
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

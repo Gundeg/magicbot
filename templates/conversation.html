@@ -195,6 +195,22 @@
                         <span class="badge bg-success">Үгүй</span>
                     {% endif %}
                 </div>
+
+                <div class="side-value mt-2 d-flex flex-wrap gap-2">
+                    {% if fb_user.bot_muted_until and fb_user.bot_muted_until > now %}
+                    <button type="button" class="btn btn-sm btn-outline-success bot-pause-btn"
+                            data-user-id="{{ fb_user.id }}" data-minutes="0"
+                            title="Ботыг дахин асаах">
+                        <i class="bi bi-play-circle"></i> Ботыг асаах
+                    </button>
+                    {% else %}
+                    <button type="button" class="btn btn-sm btn-outline-warning bot-pause-btn"
+                            data-user-id="{{ fb_user.id }}" data-minutes="30"
+                            title="Та өөрөө хариулах бол ботыг 30 минут зогсооно">
+                        <i class="bi bi-pause-circle"></i> Ботыг 30 мин зогсоох
+                    </button>
+                    {% endif %}
+                </div>
             </div>
         </div>
 
@@ -232,4 +248,30 @@
     </div>
 
 </div>
+
+<script>
+// Manual takeover fallback: pause / resume the bot for this customer.
+// (The bot also auto-pauses 30 min when you reply in the FB Page inbox.)
+(function () {
+    document.querySelectorAll('.bot-pause-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            btn.disabled = true;
+            fetch('/admin/api/pause-bot', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    user_id: btn.dataset.userId,
+                    minutes: parseInt(btn.dataset.minutes, 10),
+                }),
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d.success) { location.reload(); }
+                    else { alert('Алдаа гарлаа.'); btn.disabled = false; }
+                })
+                .catch(function () { alert('Алдаа гарлаа.'); btn.disabled = false; });
+        });
+    });
+})();
+</script>
 {% endblock %}
