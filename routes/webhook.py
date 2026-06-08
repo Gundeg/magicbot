@@ -116,9 +116,17 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
     # customer sees anything; the handoff is fired below.
     bot_response, knowledge_gap_handoff = extract_handoff_marker(bot_response)
 
-    # A human may have jumped in while the LLM was generating — bail before
-    # sending so the bot never talks over them, and don't persist the reply.
-    db.session.expire(fb_user, ['bot_muted_until'])
+    # A human may have jumped in while the LLM was generating. We MUST end this
+    # session's read transaction first (rollback) before re-reading the mute:
+    # SQLite/WAL pins a snapshot at the transaction's first query, so a
+    # bot_muted_until that the human's echo committed in a PARALLEL request
+    # mid-generation is invisible to a plain re-read — and the bot would talk
+    # right over the human. Rollback drops the stale snapshot; the re-get opens
+    # a fresh one that sees the latest committed mute.
+    db.session.rollback()
+    fb_user = db.session.get(FacebookUser, fb_user_id)
+    if fb_user is None:
+        return
     if fb_user.bot_muted_until and fb_user.bot_muted_until > datetime.utcnow():
         logger.info(
             "Human took over mid-generation — suppressing bot reply for psid=%s",
