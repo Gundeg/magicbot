@@ -112,16 +112,10 @@ def webhook():
                         continue
 
                     message_text = msg.get('text')
+                    mid = msg.get('mid')
 
-                    # Over the per-sender rate limit: silently drop. We used to
-                    # reply "Та маш олон мессеж бичиж байна…", but that spammed
-                    # chatty customers AND fired even during a human takeover,
-                    # because this runs before the mute check below. The limiter
-                    # still protects against floods / cost — it just no longer
-                    # talks back.
-                    if sender_id and not check_rate_limit(sender_id):
-                        continue
-
+                    # Resolve (or create) the sender up front so we can dedupe
+                    # this delivery and gate on mute before doing any real work.
                     fb_user = FacebookUser.query.filter_by(facebook_id=sender_id).first()
                     if not fb_user:
                         user_info = get_facebook_user_info(sender_id)
@@ -138,24 +132,50 @@ def webhook():
                     elif (fb_user.name or '').strip().lower() in ('', 'unknown'):
                         refresh_facebook_user_name(fb_user)
 
+                    # Session classification looks at the PREVIOUS message, so
+                    # compute it before this one is persisted.
                     last_msg = (Message.query
                                 .filter_by(facebook_user_id=fb_user.id)
                                 .order_by(Message.created_at.desc())
                                 .first())
                     session_state = classify_session(last_msg.created_at if last_msg else None)
 
+                    # Idempotency claim — the real fix for "rate-limited on the
+                    # very first message". Facebook delivers at-least-once and
+                    # RETRIES the same event (same mid) when our webhook is slow
+                    # (a cold start after weeks idle, or a slow OpenAI hop). We
+                    # persist the inbound message under a UNIQUE mid: the first
+                    # delivery wins; a retry raises IntegrityError and is dropped
+                    # here — BEFORE the rate limiter (so retries can't look like
+                    # a flood) and before we generate/send (so no duplicate
+                    # reply). When mid is absent we can't dedupe; we process
+                    # normally (multiple NULL mids are allowed by the index).
+                    user_msg = Message(
+                        facebook_user_id=fb_user.id,
+                        sender='user',
+                        content=message_text,
+                        mid=mid,
+                    )
+                    db.session.add(user_msg)
+                    try:
+                        db.session.commit()
+                    except IntegrityError:
+                        db.session.rollback()
+                        logger.info(
+                            "Duplicate Facebook delivery dropped: mid=%s sender=%s",
+                            mid, sender_id,
+                        )
+                        continue
+
+                    # Per-sender flood / cost guard. Retries are already deduped
+                    # above, so this only ever sees DISTINCT messages now.
+                    if sender_id and not check_rate_limit(sender_id):
+                        continue
+
                     new_stage = detect_funnel_stage(message_text, fb_user.funnel_stage or 'curious')
                     if new_stage != fb_user.funnel_stage:
                         fb_user.funnel_stage = new_stage
                         db.session.commit()
-
-                    user_msg = Message(
-                        facebook_user_id=fb_user.id,
-                        sender='user',
-                        content=message_text
-                    )
-                    db.session.add(user_msg)
-                    db.session.commit()
 
                     # Name capture fallback. The FB User Profile API no longer
                     # returns names at Standard Access, so the bot's prompt

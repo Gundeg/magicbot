@@ -96,6 +96,50 @@ def test_rate_limited_message_is_silently_dropped(client, db_session, monkeypatc
     assert sent == []   # silent — nothing sent back to the customer
 
 
+def test_duplicate_mid_is_processed_once(client, db_session, monkeypatch):
+    """Facebook retries the same delivery (same mid) when we're slow. The
+    retry must be dropped: one inbound row, one LLM call, one outbound send —
+    and crucially it must NOT count against the rate limiter (the root cause
+    of 'rate-limited on the very first message')."""
+    import routes.webhook as wh
+    from extensions import db
+    from models import FacebookUser, Message
+
+    sent = []
+    gen_calls = {'n': 0}
+    monkeypatch.setattr(wh, 'check_rate_limit', lambda sid: True)
+    monkeypatch.setattr(wh, 'send_facebook_message', lambda *a, **k: sent.append(a))
+    monkeypatch.setattr(wh, 'enqueue_background', lambda *a, **k: None)
+
+    def _gen(*a, **k):
+        gen_calls['n'] += 1
+        return 'reply'
+    monkeypatch.setattr(wh, 'generate_bot_response', _gen)
+
+    payload = {
+        'object': 'page',
+        'entry': [{'messaging': [{
+            'sender': {'id': 'psid-dup'},
+            'recipient': {'id': 'PAGE_ID'},
+            'message': {'mid': 'm.unique-123', 'text': 'сайн уу'},
+        }]}],
+    }
+    r1 = _post_webhook(client, payload)
+    r2 = _post_webhook(client, payload)   # FB retry — identical mid
+    assert r1.status_code == 200 and r2.status_code == 200
+
+    u = FacebookUser.query.filter_by(facebook_id='psid-dup').first()
+    assert u is not None
+    inbound = Message.query.filter_by(facebook_user_id=u.id, sender='user').count()
+    assert inbound == 1          # retry did not create a second row
+    assert gen_calls['n'] == 1   # bot generated a reply only once
+    assert len(sent) == 1        # customer received exactly one reply
+
+    Message.query.filter_by(facebook_user_id=u.id).delete()
+    FacebookUser.query.filter_by(id=u.id).delete()
+    db.session.commit()
+
+
 def test_muted_user_gets_no_bot_reply(client, db_session, monkeypatch):
     """A human takeover (bot_muted_until in the future) silences the bot:
     no LLM call, no outbound message."""

@@ -54,6 +54,12 @@ class Message(db.Model):
     sender = db.Column(db.String(20), nullable=False)  # 'user' or 'bot'
     content = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    # Facebook's per-message id. Set on inbound 'user' rows and used as an
+    # idempotency key: Facebook delivers "at least once" and retries the same
+    # event (same mid) when our webhook is slow, so a UNIQUE index lets a retry
+    # be detected and dropped instead of re-processed. NULL on bot rows and on
+    # legacy rows; multiple NULLs are allowed under a SQL unique index.
+    mid = db.Column(db.String(255), unique=True, index=True)
     facebook_user = db.relationship('FacebookUser', backref=db.backref('messages', lazy=True))
 
 

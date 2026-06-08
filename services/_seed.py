@@ -85,6 +85,19 @@ def ensure_schema():
         'established_year': 'established_year INTEGER',
     })
 
+    # Idempotency key for inbound Facebook messages (dedupe retried deliveries).
+    # SQLite can't ADD COLUMN ... UNIQUE, so the column and its unique index are
+    # created separately. All existing rows get NULL, and multiple NULLs are
+    # allowed under a unique index, so this is safe on a populated table.
+    add_columns('message', {'mid': 'mid VARCHAR(255)'})
+    with db.engine.begin() as conn:
+        try:
+            conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_message_mid ON message(mid)"
+            )
+        except Exception as e:
+            logger.info("Schema migration skipped (message.mid unique index): %s", e)
+
     # Product + ProductLink were added after the initial schema; create them
     # on existing DBs that never ran create_all() against the new tables.
     if 'product' not in inspector.get_table_names():
