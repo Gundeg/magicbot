@@ -117,11 +117,11 @@
     Өмнөх Inbox / Лидүүд / Асуудлууд гэсэн гурван хуудас энэ нэг хуудаст таб болж нэгдсэн. Таб бүр:
 </p>
 <ul>
-    <li><strong>Халуун сонирхогч</strong> — үнэ/ready үе шатанд орсон ч утсаа өгөөгүй хэрэглэгчид. "Холбогдсон" товчоор гараар тэмдэглэнэ.</li>
-    <li><strong>Лидүүд</strong> — утсаа үлдээсэн бүх лид (хайлт, ангилал, CSV экспорт).</li>
+    <li><strong>Халуун сонирхогч</strong> — үнэ/ready үе шатанд орсон ч утсаа өгөөгүй хэрэглэгчид. Мөр бүрт зөвхөн <strong>2 товч</strong>: <em>"Лид болгох"</em> (Лидүүд таб руу шилжүүлж, статусыг "Шинэ" болгоно) эсвэл <em>"Орхих"</em> ("Орхисон" төлөв).</li>
+    <li><strong>Лидүүд</strong> — утсаа үлдээсэн бүх лид (хайлт, ангилал, CSV экспорт). Шинэ лид <strong>"Шинэ"</strong> статусаас эхэлдэг. Админд <em>"Хуучныг цэвэрлэх"</em> товч — 60+ хоногийн хуучин чат болон хаагдсан лидийг бүрмөсөн устгана.</li>
     <li><strong>Нээлттэй асуудлууд</strong> — бүх нээлттэй issue. Тус бүрт <em>Хариуцах</em> ба <em>Шийдэх</em> товчтой.</li>
     <li><strong>Удаан асуудлууд</strong> — <code>INBOX_AGING_HOURS</code> (анхдагч 12)-аас удсан нээлттэй issue-ууд.</li>
-    <li><strong>Бот зогссон</strong> — staff "Хариуцах" товчоор ботыг чимээгүй болгосон хэрэглэгчид. "Bot асаах" товчоор шууд сэргээнэ.</li>
+    <li><strong>Бот зогссон</strong> — ботыг чимээгүй болгосон хэрэглэгчид. Энд <em>автоматаар</em> (ажилтан FB inbox-оос хариулсан) эсвэл <em>гар аргаар</em> (Хариуцах / "Ботыг 30 мин зогсоох") зогссон хүмүүс орно. "Bot асаах" товчоор шууд сэргээнэ.</li>
 </ul>
 <p class="mb-0">
     Хуучин <code>/admin/inbox</code>, <code>/admin/leads</code>, <code>/admin/issues</code> URL-ууд энэ хуудас руу 301 redirect-ээр шилжүүлэгдсэн.
@@ -223,16 +223,24 @@
     <li><strong>Зөвлөмжийн горим (advisory)</strong> — handoff issue нээлттэй боловч staff хариуцаагүй
         байна. Бот хэрэглэгчтэй <em>үргэлжлүүлэн</em> ярилцана (каталогийн дэлгэрэнгүй, FAQ хариулна)
         гэхдээ хэрэглэгчийг "manai mergejilten" руу ДАХИН чиглүүлэхгүй. Telegram-аар админ мэдэгдсэн.</li>
-    <li><strong>Staff хариуцсан</strong> — staff "<strong>Хариуцах</strong>" товчоор ботыг тогтоосон
-        цаг (анхдагч 4)-аар чимээгүй болгосон. Энэ үед бот огт хариулахгүй; staff Facebook Page Inbox-оос
-        шууд харилцана.</li>
+    <li><strong>Staff хариуцсан</strong> — бот тогтоосон хугацаагаар чимээгүй болсон. Энэ үед бот огт
+        хариулахгүй; staff Facebook Page Inbox-оос шууд харилцана.</li>
 </ol>
-<p><strong>Бүх ажиллагаа:</strong></p>
+<p><strong>Бот зогсох (mute) 3 арга:</strong></p>
+<ul>
+    <li><strong>Автомат (хүн дамжуулалт)</strong> — ажилтан <strong>FB Page inbox</strong>-оос хэрэглэгч рүү
+        бичихэд Facebook <code>message_echoes</code> үйл явдал илгээж, бот тухайн хэрэглэгчид
+        <code>HUMAN_TAKEOVER_MUTE_MINUTES</code> (30) минут чимээгүй болно. Идэвхжүүлэхийн тулд
+        <strong>Ботын тохиргоо → "Webhook тохиргоог шалгаж засах"</strong> (нэг удаа). Анхны мессежид
+        бот хэвийн хариулна; зогсолт нь ажилтан орсны дараах хариултуудыг л чимээгүй болгоно.</li>
+    <li><strong>Гар аргаар</strong> — яриаг харах хуудаснаа <em>"Ботыг 30 мин зогсоох" / "Ботыг асаах"</em>
+        товч (нөөц арга).</li>
+    <li><strong>Staff "Хариуцах"</strong> — handoff issue-г "In Progress" болгож бот N цагаар чимээгүй болно.</li>
+</ul>
+<p><strong>Бусад ажиллагаа:</strong></p>
 <ul>
     <li>Handoff гарвал → AdminIssue үүснэ, Telegram мэдэгдэнэ, хэрэглэгчид "ажилтан удахгүй холбогдоно"
         гэж хариу явна. Бот <em>advisory mode</em>-д ороод үргэлжлүүлэн тусална.</li>
-    <li>Staff "Хариуцах" → бот N цагаар чимээгүй болж, issue нь "In Progress" болно. Staff Facebook
-        Inbox-оос шууд ярина.</li>
     <li>Staff "Шийдэх" → issue resolved болж, бот шууд асна (mute timer хүлээхгүй).</li>
     <li>Mute timer дуусвал ч бот сэргэнэ.</li>
 </ul>
@@ -337,7 +345,7 @@
     <tbody>
         <tr><td><code>user</code></td><td>Admin login users; <code>role</code> ∈ {admin, super_admin}</td></tr>
         <tr><td><code>facebook_user</code></td><td>One row per Page-scoped ID. Tracks funnel stage, is_lead, phone, last nudge, bot_muted_until, last_mute_ack_at</td></tr>
-        <tr><td><code>message</code></td><td>Inbound + outbound chat messages</td></tr>
+        <tr><td><code>message</code></td><td>Inbound + outbound chat messages. <code>mid</code> = Facebook's message id with a UNIQUE index — the idempotency key that dedupes retried webhook deliveries (NULL on bot/legacy rows)</td></tr>
         <tr><td><code>course</code></td><td>Active class catalog included in the system prompt</td></tr>
         <tr><td><code>course_link</code></td><td>Multi-link rows attached to a course (description / url / note / is_active / sort_order). Unified shape across types.</td></tr>
         <tr><td><code>service</code></td><td>Service offerings (audit, tax consulting, etc.)</td></tr>
@@ -378,23 +386,46 @@
     <code>url_for('login')</code> etc. don't need updating.
 </p>
 
-<h4 id="t-webhook" class="doc-section">6. Webhook lifecycle</h4>
-<p><code>POST /webhook</code> handler steps:</p>
+<h4 id="t-webhook" class="doc-section">6. Webhook lifecycle (async)</h4>
+<p>
+    <strong>The webhook ACKs Facebook in &lt;1s and generates the reply in a background worker.</strong>
+    A fast 200 stops Facebook retrying the delivery on slow hops / cold starts — those retries used to
+    inflate the rate limiter and double-send replies. The reply model is <code>gpt-5.3-chat-latest</code>
+    (<code>REPLY_MODEL</code>); background jobs stay on <code>gpt-4o-mini</code>.
+</p>
+<p><strong>Synchronous half</strong> — <code>POST /webhook</code> (<code>routes/webhook.py:webhook()</code>):</p>
 <ol>
-    <li>Verify <code>X-Hub-Signature-256</code> against HMAC-SHA256(body, <code>FACEBOOK_APP_SECRET</code>). Skipped with warning if secret unset.</li>
-    <li>Per-sender sliding-window rate limit (default 5 msg / 60s). Over-limit users get one polite throttle reply.</li>
-    <li>Get-or-create <code>FacebookUser</code> by PSID; resolve name via FB Graph.</li>
-    <li>Classify session state (new / active / gap / returning) and advance funnel stage (no regression).</li>
-    <li>Persist inbound message.</li>
-    <li><strong>Mute check</strong>: if <code>bot_muted_until &gt; now</code> (staff takeover), silent-drop. Auto-clear expired mutes.</li>
-    <li><strong>Advisory check</strong>: compute <code>handoff_pending = is_in_handoff(fb_user)</code> based on open handoff AdminIssue.</li>
-    <li><strong>Keyword handoff</strong>: <code>should_handoff()</code> on the message. Skipped if <code>handoff_pending</code>. On match: <code>trigger_handoff()</code> + send waiting reply + Telegram + stop.</li>
-    <li>Build system prompt via <code>build_system_prompt(session_state, funnel_stage, user_first_name, handoff_pending)</code>. The <code>handoff_pending=True</code> case injects <code>HANDOFF_ADVISORY_RULE</code> telling the bot to keep helping without re-routing.</li>
-    <li>Call <code>gpt-4o-mini</code> with last 10 messages.</li>
-    <li>Persist outbound message, send via FB Send API.</li>
-    <li><strong>Response-based handoff</strong>: <code>bot_response_implies_handoff()</code> scans the reply for staff-deferral phrases ('мэргэжлийн ажилтан', etc.). On match (and not already in handoff): fires a silent handoff (mute + AdminIssue + Telegram, no extra user message).</li>
-    <li>Phone regex on inbound message; if matched and not yet a lead, mark <code>is_lead</code>, save phone, send a "thank you for the number" reply.</li>
+    <li>Verify <code>X-Hub-Signature-256</code> = HMAC-SHA256(raw body, <code>FACEBOOK_APP_SECRET</code>). Reject 403 on mismatch.</li>
+    <li><strong>Echo handling</strong> (<code>message_echoes</code>): every Page-sent message echoes back.
+        Bot sends carry <code>metadata=BOT_ECHO_TAG</code> → ignored. An <em>untagged</em> echo = a human
+        agent replied in the Page inbox → <code>human_takeover_pause()</code> sets
+        <code>bot_muted_until = now + HUMAN_TAKEOVER_MUTE_MINUTES</code> (30). Echoes always
+        <code>continue</code> (never enter the reply pipeline).</li>
+    <li>Get-or-create <code>FacebookUser</code> by PSID; resolve name via FB Graph (or ask-for-name path).</li>
+    <li>Classify session state; <strong>idempotency claim</strong>: persist the inbound row keyed by the
+        unique <code>Message.mid</code>. A retried delivery (same mid) raises <code>IntegrityError</code> and
+        is dropped <em>here</em> — before the rate limiter and before any reply.</li>
+    <li>Per-sender sliding-window rate limit (default 5 msg / 60s). Over-limit = <strong>silent drop</strong>
+        (no throttle text). Retries can't trip it because they're already deduped above.</li>
+    <li>Advance funnel stage (no regression); name-capture + phone-capture (a captured lead starts at
+        <code>lead_status='new'</code>).</li>
+    <li><strong>Mute gate</strong>: if <code>bot_muted_until &gt; now</code> (staff/human takeover), silent-drop. Auto-clear expired mutes.</li>
+    <li><code>enqueue_background(process_inbound_reply, fb_user.id, message_text, session_state)</code> → return <code>200</code>.</li>
 </ol>
+<p><strong>Asynchronous half</strong> — <code>process_inbound_reply()</code> (background thread, own app context + DB session):</p>
+<ol>
+    <li>Re-check mute; send <code>mark_seen</code> + <code>typing_on</code> sender actions (responsive feel).</li>
+    <li><code>is_in_handoff()</code> → <code>handoff_pending</code>; keyword <code>should_handoff()</code> → <code>trigger_handoff(send_user_message=False)</code> on match.</li>
+    <li>Build prompt, call <code>REPLY_MODEL</code> with last 10 messages, <code>max_completion_tokens=REPLY_MAX_TOKENS</code> (500). gpt-5.x rejects <code>temperature</code>/<code>max_tokens</code>.</li>
+    <li>Strip the internal <code>[HANDOFF]</code> marker (knowledge-gap deferral via the <code>defer_to_staff</code> tool).</li>
+    <li><strong>Pre-send mute re-check</strong>: <code>db.session.rollback()</code> (drop the stale WAL snapshot) then re-read <code>bot_muted_until</code> — if a human took over mid-generation, suppress the reply.</li>
+    <li>Persist outbound, send via FB Send API (tagged with <code>BOT_ECHO_TAG</code>).</li>
+    <li>Response-based handoff (<code>bot_response_implies_handoff</code> / knowledge-gap); then <code>classify_user_topics()</code>.</li>
+</ol>
+<p class="text-muted small">
+    <code>enqueue_background</code> runs inline under <code>TESTING</code> (deterministic; in-memory SQLite is
+    per-connection). A background failure = no reply, logged, no crash, no FB retry.
+</p>
 
 <h4 id="t-handoff" class="doc-section">7. Handoff lifecycle</h4>
 <p>Three explicit states keyed off open AdminIssue (handoff_pending) and bot_muted_until:</p>
@@ -492,7 +523,13 @@
         <tr><td><code>ENABLE_POLLING</code></td><td><code>true</code> to enable Page-post auto-commenting (off by default to avoid duplicate work across gunicorn workers)</td></tr>
         <tr><td><code>ENABLE_NUDGE</code></td><td><code>true</code> to enable silent-lead follow-up nudges</td></tr>
         <tr><td><code>ENABLE_CHAT_CLUSTERING</code></td><td><code>true</code> to start the weekly background job that runs <code>services.cluster_chat_questions()</code>. Off by default. Admins can still trigger a one-shot run via the "Шинэчлэх" button on the FAQ tab regardless of this flag. ~$0.01/run at Magic's volume.</td></tr>
-        <tr><td><code>RATE_LIMIT_MAX</code> / <code>RATE_LIMIT_WINDOW_SECONDS</code></td><td>Per-sender rate limit (default 5 per 60s)</td></tr>
+        <tr><td><code>ENABLE_TOKEN_CHECK</code></td><td><strong>Defaults ON.</strong> Worker pings the Graph API every <code>TOKEN_CHECK_INTERVAL_HOURS</code> (6) and Telegram-alerts on an expired/invalid Page token (OAuthException 190/463). No-op without Telegram.</td></tr>
+        <tr><td><code>TOKEN_CHECK_INTERVAL_HOURS</code></td><td>How often the token health check runs (default 6).</td></tr>
+        <tr><td><code>REPLY_MAX_TOKENS</code></td><td>Max reply length / <code>max_completion_tokens</code> (default 500). Lower = faster + cheaper.</td></tr>
+        <tr><td><code>HUMAN_TAKEOVER_MUTE_MINUTES</code></td><td>Auto-mute window when a human replies in the Page inbox (default 30).</td></tr>
+        <tr><td><code>BACKGROUND_WORKERS</code></td><td>Thread-pool size for async reply generation per process (default 4).</td></tr>
+        <tr><td><code>CLEANUP_RETENTION_DAYS</code></td><td>Age threshold for the manual "Хуучныг цэвэрлэх" hard-delete (default 60).</td></tr>
+        <tr><td><code>RATE_LIMIT_MAX</code> / <code>RATE_LIMIT_WINDOW_SECONDS</code></td><td>Per-sender rate limit (default 5 per 60s). Over-limit is now a silent drop, not a reply.</td></tr>
         <tr><td><code>RESET_ADMIN_USERNAME</code> + <code>RESET_ADMIN_PASSWORD</code></td><td>One-time forgot-password recovery; remove both after use to prevent repeated resets on every restart</td></tr>
     </tbody>
 </table>
