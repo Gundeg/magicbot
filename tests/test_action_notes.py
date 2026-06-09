@@ -111,7 +111,7 @@ def test_lead_drop_without_note_rejected(client, admin_user, fb_user):
 
 def test_lead_drop_with_note_persists(client, admin_user, fb_user):
     from extensions import db
-    from models import FacebookUser
+    from models import FacebookUser, AuditEntry
     _login(client, admin_user)
     resp = client.post('/admin/api/lead-status',
                        json={'user_id': fb_user.id, 'status': 'dropped',
@@ -120,6 +120,10 @@ def test_lead_drop_with_note_persists(client, admin_user, fb_user):
     refreshed = db.session.get(FacebookUser, fb_user.id)
     assert refreshed.lead_status == 'dropped'
     assert refreshed.notes == 'Сонирхолгүй болсон'
+    entry = (AuditEntry.query.filter_by(action='lead.status_change')
+             .order_by(AuditEntry.id.desc()).first())
+    assert entry is not None
+    assert 'Сонирхолгүй болсон' in (entry.detail or '')
 
 
 def test_non_dropped_status_needs_no_note(client, admin_user, fb_user):

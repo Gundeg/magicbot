@@ -816,6 +816,8 @@ def update_lead_status():
 
         previous = user.lead_status or 'new'
         user.lead_status = status
+        # Note is recorded only on a drop; other status changes (incl. a later
+        # restore to 'new') intentionally leave any existing note in place.
         if status == 'dropped':
             user.notes = note
         db.session.commit()
