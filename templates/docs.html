@@ -117,11 +117,12 @@
     Өмнөх Inbox / Лидүүд / Асуудлууд гэсэн гурван хуудас энэ нэг хуудаст таб болж нэгдсэн. Таб бүр:
 </p>
 <ul>
-    <li><strong>Халуун сонирхогч</strong> — үнэ/ready үе шатанд орсон ч утсаа өгөөгүй хэрэглэгчид. Мөр бүрт зөвхөн <strong>2 товч</strong>: <em>"Лид болгох"</em> (Лидүүд таб руу шилжүүлж, статусыг "Шинэ" болгоно) эсвэл <em>"Орхих"</em> ("Орхисон" төлөв).</li>
-    <li><strong>Лидүүд</strong> — утсаа үлдээсэн бүх лид (хайлт, ангилал, CSV экспорт). Шинэ лид <strong>"Шинэ"</strong> статусаас эхэлдэг. Админд <em>"Хуучныг цэвэрлэх"</em> товч — 60+ хоногийн хуучин чат болон хаагдсан лидийг бүрмөсөн устгана.</li>
-    <li><strong>Нээлттэй асуудлууд</strong> — бүх нээлттэй issue. Тус бүрт <em>Хариуцах</em> ба <em>Шийдэх</em> товчтой.</li>
+    <li><strong>Халуун сонирхогч</strong> — үнэ/ready үе шатанд орсон ч утсаа өгөөгүй хэрэглэгчид. Мөр бүрт зөвхөн <strong>2 товч</strong>: <em>"Лид болгох"</em> (Лидүүд таб руу шилжүүлж, статусыг "Шинэ" болгоно) эсвэл <em>"Орхих"</em>. <strong>"Орхих" дарахад орхих <em>шалтгаанаа заавал</em></strong> бичих цонх гарна.</li>
+    <li><strong>Лидүүд</strong> — утсаа үлдээсэн бүх лид (хайлт, ангилал, CSV экспорт). Шинэ лид <strong>"Шинэ"</strong> статусаас эхэлдэг. Статусыг <strong>"Орхих"</strong> болгоход мөн <strong>шалтгаан заавал</strong> асууна (бусад статус өөрчлөлтөд асуухгүй). Админд <em>"Хуучныг цэвэрлэх"</em> товч — 60+ хоногийн хуучин чат болон хаагдсан лидийг бүрмөсөн устгана.</li>
+    <li><strong>Нээлттэй асуудлууд</strong> — бүх нээлттэй issue. Тус бүрт <em>Хариуцах</em> ба <em>Шийдэх</em> товчтой. <strong>"Шийдэх" дарахад тэмдэглэл нэмэх боломжтой (заавал биш)</strong> — хэрхэн шийдсэнээ бичиж болно.</li>
     <li><strong>Удаан асуудлууд</strong> — <code>INBOX_AGING_HOURS</code> (анхдагч 12)-аас удсан нээлттэй issue-ууд.</li>
     <li><strong>Бот зогссон</strong> — ботыг чимээгүй болгосон хэрэглэгчид. Энд <em>автоматаар</em> (ажилтан FB inbox-оос хариулсан) эсвэл <em>гар аргаар</em> (Хариуцах / "Ботыг 30 мин зогсоох") зогссон хүмүүс орно. "Bot асаах" товчоор шууд сэргээнэ.</li>
+    <li><strong>Орхисон</strong> — орхисон бүх сонирхогч ба лидийг <strong>орхих шалтгаантай нь</strong> жагсаасан архив. Мөр бүрт <strong>"Сэргээх"</strong> товч андуурч орхисон хүнийг буцааж идэвхжүүлнэ (статус "Шинэ" болно). Зөвхөн сүүлийн ~60 хоног харагдана (цэвэрлэгээгээр устдаг); бүрэн түүх <code>audit log</code>-д үлдэнэ. Шалтгаан нь тухайн хүний ярианы (👁) хуудсанд бас харагдана.</li>
 </ul>
 <p class="mb-0">
     Хуучин <code>/admin/inbox</code>, <code>/admin/leads</code>, <code>/admin/issues</code> URL-ууд энэ хуудас руу 301 redirect-ээр шилжүүлэгдсэн.
@@ -344,7 +345,7 @@
     <thead><tr><th>Table</th><th>Purpose</th></tr></thead>
     <tbody>
         <tr><td><code>user</code></td><td>Admin login users; <code>role</code> ∈ {admin, super_admin}</td></tr>
-        <tr><td><code>facebook_user</code></td><td>One row per Page-scoped ID. Tracks funnel stage, is_lead, phone, last nudge, bot_muted_until, last_mute_ack_at</td></tr>
+        <tr><td><code>facebook_user</code></td><td>One row per Page-scoped ID. Tracks funnel stage, is_lead, phone, last nudge, bot_muted_until, last_mute_ack_at, <code>notes</code> (free-text drop reason / staff note, shown in the conversation viewer; the full text also goes to <code>audit_entry</code> which outlives the 60-day cleanup)</td></tr>
         <tr><td><code>message</code></td><td>Inbound + outbound chat messages. <code>mid</code> = Facebook's message id with a UNIQUE index — the idempotency key that dedupes retried webhook deliveries (NULL on bot/legacy rows)</td></tr>
         <tr><td><code>course</code></td><td>Active class catalog included in the system prompt</td></tr>
         <tr><td><code>course_link</code></td><td>Multi-link rows attached to a course (description / url / note / is_active / sort_order). Unified shape across types.</td></tr>
