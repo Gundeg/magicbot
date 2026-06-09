@@ -51,6 +51,7 @@ def _login(client, admin_user):
 
 
 def test_valid_status_update_persists(client, admin_user, fb_user):
+    from extensions import db
     from models import FacebookUser
     _login(client, admin_user)
 
@@ -64,7 +65,7 @@ def test_valid_status_update_persists(client, admin_user, fb_user):
     assert data['status'] == 'converted'
     assert data['label'] == 'Бүртгүүлсэн'
     # Re-read from DB
-    refreshed = FacebookUser.query.get(fb_user.id)
+    refreshed = db.session.get(FacebookUser, fb_user.id)
     assert refreshed.lead_status == 'converted'
 
 
