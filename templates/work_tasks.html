@@ -586,13 +586,22 @@
     // Shared note modal. Calls onSave(noteText) on confirm. When `required`,
     // Хадгалах is disabled until the textarea holds non-whitespace text.
     const noteModalEl = document.getElementById('noteModal');
-    const noteModal = noteModalEl ? new bootstrap.Modal(noteModalEl) : null;
     const noteTextEl = document.getElementById('noteModalText');
     const noteSaveEl = document.getElementById('noteModalSave');
     const noteTitleEl = document.getElementById('noteModalTitle');
     const noteHintEl = document.getElementById('noteModalHint');
     let noteOnSave = null;
     let noteRequired = false;
+
+    // Resolve the Bootstrap modal lazily. base.html loads bootstrap.bundle
+    // AFTER this inline content script, so `bootstrap` is undefined while this
+    // IIFE first runs — touching it here (e.g. new bootstrap.Modal()) would
+    // throw and abort every handler below. Defer it to click time (post-load),
+    // matching logs.html / faq.html / training.html.
+    function getNoteModal() {
+        if (!noteModalEl || typeof bootstrap === 'undefined' || !bootstrap.Modal) return null;
+        return bootstrap.Modal.getOrCreateInstance(noteModalEl);
+    }
 
     function syncNoteSave() {
         if (noteSaveEl && noteTextEl) noteSaveEl.disabled = noteRequired && noteTextEl.value.trim() === '';
@@ -602,13 +611,15 @@
         const val = noteTextEl.value.trim();
         if (noteRequired && val === '') return;
         const cb = noteOnSave;
-        if (noteModal) noteModal.hide();
+        const m = getNoteModal();
+        if (m) m.hide();
         if (cb) cb(val);
     });
 
     function openNoteModal({ title, placeholder, required, onSave }) {
+        const m = getNoteModal();
         // Fallback to a prompt() if Bootstrap's modal isn't available.
-        if (!noteModal) {
+        if (!m) {
             const val = (prompt(title || 'Тэмдэглэл') || '').trim();
             if (required && val === '') { toast('Шалтгаан заавал бичнэ үү.', false); return; }
             onSave(val);
@@ -621,7 +632,7 @@
         noteTextEl.placeholder = placeholder || 'Шалтгаан / тэмдэглэл...';
         noteHintEl.textContent = required ? 'Заавал бичнэ үү.' : 'Сонголтоор.';
         syncNoteSave();
-        noteModal.show();
+        m.show();
         noteModalEl.addEventListener('shown.bs.modal',
             () => noteTextEl.focus(), { once: true });
     }
