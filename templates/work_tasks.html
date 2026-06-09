@@ -527,6 +527,26 @@
 
 </div>
 
+<div class="modal fade" id="noteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="noteModalTitle">Тэмдэглэл</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Хаах"></button>
+      </div>
+      <div class="modal-body">
+        <textarea id="noteModalText" class="form-control" rows="3"
+                  placeholder="Шалтгаан / тэмдэглэл..."></textarea>
+        <div class="form-text" id="noteModalHint"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Болих</button>
+        <button type="button" class="btn btn-brand" id="noteModalSave">Хадгалах</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
     const workTasksUrl = '{{ url_for("work_tasks") }}';
@@ -563,6 +583,49 @@
         setTimeout(() => node.remove(), 300);
     }
 
+    // Shared note modal. Calls onSave(noteText) on confirm. When `required`,
+    // Хадгалах is disabled until the textarea holds non-whitespace text.
+    const noteModalEl = document.getElementById('noteModal');
+    const noteModal = noteModalEl ? new bootstrap.Modal(noteModalEl) : null;
+    const noteTextEl = document.getElementById('noteModalText');
+    const noteSaveEl = document.getElementById('noteModalSave');
+    const noteTitleEl = document.getElementById('noteModalTitle');
+    const noteHintEl = document.getElementById('noteModalHint');
+    let noteOnSave = null;
+    let noteRequired = false;
+
+    function syncNoteSave() {
+        if (noteSaveEl) noteSaveEl.disabled = noteRequired && noteTextEl.value.trim() === '';
+    }
+    if (noteTextEl) noteTextEl.addEventListener('input', syncNoteSave);
+    if (noteSaveEl) noteSaveEl.addEventListener('click', () => {
+        const val = noteTextEl.value.trim();
+        if (noteRequired && val === '') return;
+        const cb = noteOnSave;
+        if (noteModal) noteModal.hide();
+        if (cb) cb(val);
+    });
+
+    function openNoteModal({ title, placeholder, required, onSave }) {
+        // Fallback to a prompt() if Bootstrap's modal isn't available.
+        if (!noteModal) {
+            const val = (prompt(title || 'Тэмдэглэл') || '').trim();
+            if (required && val === '') { toast('Шалтгаан заавал бичнэ үү.', false); return; }
+            onSave(val);
+            return;
+        }
+        noteOnSave = onSave;
+        noteRequired = !!required;
+        noteTitleEl.textContent = title || 'Тэмдэглэл';
+        noteTextEl.value = '';
+        noteTextEl.placeholder = placeholder || 'Шалтгаан / тэмдэглэл...';
+        noteHintEl.textContent = required ? 'Заавал бичнэ үү.' : 'Сонголтоор.';
+        syncNoteSave();
+        noteModal.show();
+        noteModalEl.addEventListener('shown.bs.modal',
+            () => noteTextEl.focus(), { once: true });
+    }
+
     // Status dropdown — works on both Hot Prospects rows (.wt-row) and
     // Leads rows (<tr data-lead-id>). Picks the closest row, fires the
     // POST, updates the badge in-place, and removes the row when the
@@ -570,66 +633,97 @@
     const LEAD_STATUS_URL = '/admin/api/lead-status';
     const TERMINAL_STATUSES = new Set(['dropped']);
 
+    async function applyLeadStatus(dropdown, newStatus, note) {
+        const userId = dropdown.dataset.userId;
+        const badge = dropdown.querySelector('.lead-status-badge .badge');
+        const previousHtml = badge ? badge.outerHTML : null;
+        if (badge) badge.style.opacity = '0.5';
+
+        try {
+            const payload = {user_id: userId, status: newStatus};
+            if (note != null) payload.note = note;
+            const resp = await fetch(LEAD_STATUS_URL, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            });
+            const text = await resp.text();
+            let data;
+            try { data = JSON.parse(text); }
+            catch (_) { throw new Error(`Сервер JSON буцаасангүй (HTTP ${resp.status}).`); }
+            if (!data.success) throw new Error(data.error || data.message || 'unknown error');
+            toast(`Статус "${data.label}" болголоо.`, true);
+
+            if (TERMINAL_STATUSES.has(newStatus)) {
+                const row = dropdown.closest('.wt-row, tr');
+                if (row) fadeAndRemove(row);
+                return;
+            }
+
+            const selectedOpt = dropdown.querySelector(
+                `.lead-status-option[data-status="${newStatus}"]`
+            );
+            const colorBadge = selectedOpt ? selectedOpt.querySelector('.badge') : null;
+            const colorClass = colorBadge
+                ? Array.from(colorBadge.classList).find(c => c.startsWith('bg-'))
+                : 'bg-secondary';
+            if (badge) {
+                badge.className = `badge ${colorClass} fs-75`;
+                badge.textContent = data.label;
+                badge.style.opacity = '1';
+            }
+            dropdown.querySelectorAll('.lead-status-option')
+                .forEach(o => o.classList.toggle('active', o.dataset.status === newStatus));
+        } catch (err) {
+            toast('Алдаа: ' + (err.message || err), false);
+            if (badge) {
+                badge.style.opacity = '1';
+                if (previousHtml) badge.outerHTML = previousHtml;
+            }
+        }
+    }
+
     document.querySelectorAll('.lead-status-option').forEach(opt => {
-        opt.addEventListener('click', async (e) => {
+        opt.addEventListener('click', (e) => {
             e.preventDefault();
             const dropdown = opt.closest('.lead-status-dropdown');
             if (!dropdown) return;
-            const userId = dropdown.dataset.userId;
             const newStatus = opt.dataset.status;
-            const badge = dropdown.querySelector('.lead-status-badge .badge');
-            const previousHtml = badge ? badge.outerHTML : null;
-            if (badge) badge.style.opacity = '0.5';
-
-            try {
-                const resp = await fetch(LEAD_STATUS_URL, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({user_id: userId, status: newStatus}),
+            if (newStatus === 'dropped') {
+                openNoteModal({
+                    title: 'Лидийг орхих',
+                    placeholder: 'Яагаад орхиж байна вэ? (заавал)',
+                    required: true,
+                    onSave: (note) => applyLeadStatus(dropdown, newStatus, note),
                 });
-                const text = await resp.text();
-                let data;
-                try { data = JSON.parse(text); }
-                catch (_) {
-                    throw new Error(`Сервер JSON буцаасангүй (HTTP ${resp.status}).`);
-                }
-                if (!data.success) {
-                    throw new Error(data.error || data.message || 'unknown error');
-                }
-                toast(`Статус "${data.label}" болголоо.`, true);
-
-                if (TERMINAL_STATUSES.has(newStatus)) {
-                    // Row leaves the active queue. Fade it out and remove.
-                    const row = dropdown.closest('.wt-row, tr');
-                    if (row) fadeAndRemove(row);
-                    return;
-                }
-
-                // Update the badge text + color without reloading.
-                const selectedOpt = dropdown.querySelector(
-                    `.lead-status-option[data-status="${newStatus}"]`
-                );
-                const colorBadge = selectedOpt
-                    ? selectedOpt.querySelector('.badge')
-                    : null;
-                const colorClass = colorBadge
-                    ? Array.from(colorBadge.classList).find(c => c.startsWith('bg-'))
-                    : 'bg-secondary';
-                if (badge) {
-                    badge.className = `badge ${colorClass} fs-75`;
-                    badge.textContent = data.label;
-                    badge.style.opacity = '1';
-                }
-                // Update active marker in the menu.
-                dropdown.querySelectorAll('.lead-status-option')
-                    .forEach(o => o.classList.toggle('active', o.dataset.status === newStatus));
-            } catch (err) {
-                toast('Алдаа: ' + (err.message || err), false);
-                if (badge) {
-                    badge.style.opacity = '1';
-                    if (previousHtml) badge.outerHTML = previousHtml;
-                }
+                return;
             }
+            applyLeadStatus(dropdown, newStatus, null);
+        });
+    });
+
+    // Dropped archive: restore a dropped prospect/lead back to active.
+    // Reuses the lead-status endpoint with the non-terminal 'new' status,
+    // which needs no note.
+    document.querySelectorAll('.restore-lead').forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.disabled = true;
+            fetch(LEAD_STATUS_URL, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({user_id: btn.dataset.userId, status: 'new'}),
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    toast('Сэргээлээ.', true);
+                    fadeAndRemove(btn.closest('tr'));
+                } else {
+                    toast(d.error || 'Алдаа гарлаа.', false);
+                    btn.disabled = false;
+                }
+            })
+            .catch(err => { toast('Алдаа: ' + (err.message || err), false); btn.disabled = false; });
         });
     });
 
@@ -637,12 +731,12 @@
     // tab — we reload onto that tab so they can SEE the new lead (the tabs are
     // rendered server-side, so a fade-only would make it look like it vanished).
     // Drop is terminal, so fading it out of the queue in place is enough.
-    function hotAction(btn, action, okMsg, redirectTo) {
+    function hotAction(btn, action, okMsg, redirectTo, extra) {
         const row = btn.closest('.wt-row');
         const userId = btn.dataset.userId;
         const siblings = row ? row.querySelectorAll('button') : [btn];
         siblings.forEach(b => { b.disabled = true; });
-        post({action: action, user_id: userId})
+        post(Object.assign({action: action, user_id: userId}, extra || {}))
             .then(d => {
                 if (!d || !d.success) throw new Error((d && (d.error || d.message)) || 'unknown error');
                 toast(okMsg, true);
@@ -662,7 +756,14 @@
         btn.addEventListener('click', () => hotAction(btn, 'promote_to_lead', 'Лид болголоо.', leadsTabUrl));
     });
     document.querySelectorAll('.hot-drop').forEach(btn => {
-        btn.addEventListener('click', () => hotAction(btn, 'drop_prospect', 'Орхисон гэж тэмдэглэлээ.'));
+        btn.addEventListener('click', () => {
+            openNoteModal({
+                title: 'Сонирхогчийг орхих',
+                placeholder: 'Яагаад орхиж байна вэ? (заавал)',
+                required: true,
+                onSave: (note) => hotAction(btn, 'drop_prospect', 'Орхисон гэж тэмдэглэлээ.', null, {note}),
+            });
+        });
     });
 
     document.querySelectorAll('.takeover-btn').forEach(btn => {
@@ -689,15 +790,22 @@
 
     document.querySelectorAll('.resolve-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            btn.disabled = true;
-            post({action: 'resolve_issue', id: btn.dataset.id}).then(r => {
-                if (r.success) {
-                    toast('Асуудлыг шийдсэн гэж тэмдэглэлээ.', true);
-                    fadeAndRemove(btn.closest('.wt-row'));
-                } else {
-                    toast('Алдаа гарлаа.', false);
-                    btn.disabled = false;
-                }
+            openNoteModal({
+                title: 'Асуудлыг шийдэх',
+                placeholder: 'Хэрхэн шийдсэн тухай тэмдэглэл (сонголтоор)',
+                required: false,
+                onSave: (note) => {
+                    btn.disabled = true;
+                    post({action: 'resolve_issue', id: btn.dataset.id, note: note}).then(r => {
+                        if (r.success) {
+                            toast('Асуудлыг шийдсэн гэж тэмдэглэлээ.', true);
+                            fadeAndRemove(btn.closest('.wt-row'));
+                        } else {
+                            toast('Алдаа гарлаа.', false);
+                            btn.disabled = false;
+                        }
+                    });
+                },
             });
         });
     });
