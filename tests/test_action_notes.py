@@ -217,3 +217,23 @@ def test_update_status_note_in_audit(client, admin_user, open_issue):
              .order_by(AuditEntry.id.desc()).first())
     assert entry is not None
     assert 'Шалгаж байна' in (entry.detail or '')
+
+
+# ---- logs.html 'View full' inline handler must be single-quoted ----
+# Pre-existing bug found while debugging: a double-quoted onclick wrapping a
+# |tojson value renders raw " quotes that terminate the attribute early, so
+# the inline showFullMessage(...) handler becomes a syntax error and clicking
+# 'View full' on the Message-history page did nothing.
+
+def test_logs_view_full_onclick_is_single_quoted(client, admin_user, fb_user):
+    from extensions import db
+    from models import Message
+    _login(client, admin_user)
+    db.session.add(Message(facebook_user_id=fb_user.id, sender='user',
+                           content='Сайн байна уу'))
+    db.session.commit()
+    resp = client.get('/admin/logs')
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "onclick='showFullMessage(" in body
+    assert 'onclick="showFullMessage(' not in body
