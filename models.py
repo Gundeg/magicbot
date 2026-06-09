@@ -41,6 +41,10 @@ class FacebookUser(db.Model):
     bot_muted_until = db.Column(db.DateTime, index=True)
     # AI-classified topic of the conversation (updated after every bot reply)
     conversation_topic = db.Column(db.String(100))
+    # Free-text staff note captured on a terminal action (drop reason, etc.).
+    # Convenient short-term copy; the durable record is the audit log, which
+    # outlives cleanup_old_records' 60-day purge of dropped leads.
+    notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
