@@ -54,6 +54,7 @@ def ensure_schema():
         'conversation_topic': 'conversation_topic VARCHAR(100)',
         'last_mute_ack_at': 'last_mute_ack_at DATETIME',
         'notes': 'notes TEXT',
+        'last_classified_at': 'last_classified_at DATETIME',
     })
 
     add_columns('admin_issue', {
