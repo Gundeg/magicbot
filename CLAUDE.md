@@ -151,6 +151,15 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 - **SQLite WAL + busy_timeout in `app.py:88`** is load-bearing — without it, 2 gunicorn workers + admin polling deadlock on SQLite locks. Do not remove the `@event.listens_for(Engine, "connect")` block.
 - **`get_facebook_user_info` returns HTTP 400 at Standard Access** — Meta restricted PSID profile lookups. The bot now asks customers for their name on first contact (`services/_prompt.py:481+` injects the rule; `routes/webhook.py:107+` captures the reply via `extract_name_from_reply`). When App Review for "Business Asset User Profile Access" lands, the existing API call will start succeeding and the ask-for-name path silently becomes redundant. Don't remove either path until BAUPA is approved AND re-tested in prod.
 
+- **Staff-action notes:** dropping a hot prospect or a lead **requires** a reason
+  (the note modal in `work_tasks.html`); resolving an issue takes an **optional**
+  note. The reason is stored on `FacebookUser.notes` (or `AdminIssue.notes` for
+  issues) AND the full text goes into the audit-log `detail` — the durable copy
+  that survives `cleanup_old_records`' 60-day purge. The **Орхисон** tab lists
+  dropped users with their reason and a **Сэргээх** (restore → `status='new'`)
+  button. `update_lead_status` enforces the required note only when
+  `status == 'dropped'`.
+
 ## Telemetry shortcuts — first place to look when user says "bot is broken"
 
 Check these in order BEFORE reading code:
