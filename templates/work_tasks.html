@@ -595,7 +595,7 @@
     let noteRequired = false;
 
     function syncNoteSave() {
-        if (noteSaveEl) noteSaveEl.disabled = noteRequired && noteTextEl.value.trim() === '';
+        if (noteSaveEl && noteTextEl) noteSaveEl.disabled = noteRequired && noteTextEl.value.trim() === '';
     }
     if (noteTextEl) noteTextEl.addEventListener('input', syncNoteSave);
     if (noteSaveEl) noteSaveEl.addEventListener('click', () => {
@@ -717,7 +717,8 @@
             .then(d => {
                 if (d.success) {
                     toast('Сэргээлээ.', true);
-                    fadeAndRemove(btn.closest('tr'));
+                    const row = btn.closest('tr');
+                    if (row) fadeAndRemove(row);
                 } else {
                     toast(d.error || 'Алдаа гарлаа.', false);
                     btn.disabled = false;
@@ -804,6 +805,9 @@
                             toast('Алдаа гарлаа.', false);
                             btn.disabled = false;
                         }
+                    }).catch(err => {
+                        toast('Алдаа: ' + (err.message || err), false);
+                        btn.disabled = false;
                     });
                 },
             });
