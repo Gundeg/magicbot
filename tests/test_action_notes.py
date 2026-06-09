@@ -184,3 +184,17 @@ def test_dropped_tab_lists_dropped_user_with_note(client, admin_user, fb_user):
     assert 'Notes Test' in body
     assert 'Тест шалтгаан' in body
     assert 'restore-lead' in body  # the Restore button is present
+
+
+# ---- conversation viewer note row ----
+
+def test_conversation_shows_note(client, admin_user, fb_user):
+    from extensions import db
+    from models import FacebookUser
+    _login(client, admin_user)
+    u = db.session.get(FacebookUser, fb_user.id)
+    u.notes = 'Ярианы тэмдэглэл'
+    db.session.commit()
+    resp = client.get(f'/admin/users/{fb_user.id}/conversation')
+    assert resp.status_code == 200
+    assert 'Ярианы тэмдэглэл' in resp.get_data(as_text=True)
