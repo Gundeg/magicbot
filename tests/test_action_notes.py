@@ -198,3 +198,22 @@ def test_conversation_shows_note(client, admin_user, fb_user):
     resp = client.get(f'/admin/users/{fb_user.id}/conversation')
     assert resp.status_code == 200
     assert 'Ярианы тэмдэглэл' in resp.get_data(as_text=True)
+
+
+# ---- update_status (rich issue editor) carries the note into the audit log ----
+
+def test_update_status_note_in_audit(client, admin_user, open_issue):
+    from extensions import db
+    from models import AdminIssue, AuditEntry
+    _login(client, admin_user)
+    resp = client.post('/admin/work-tasks',
+                       json={'action': 'update_status', 'id': open_issue.id,
+                             'status': 'in_progress', 'notes': 'Шалгаж байна'})
+    assert resp.status_code == 200
+    refreshed = db.session.get(AdminIssue, open_issue.id)
+    assert refreshed.status == 'in_progress'
+    assert refreshed.notes == 'Шалгаж байна'
+    entry = (AuditEntry.query.filter_by(action='issue.status_change')
+             .order_by(AuditEntry.id.desc()).first())
+    assert entry is not None
+    assert 'Шалгаж байна' in (entry.detail or '')

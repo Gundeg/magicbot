@@ -381,10 +381,13 @@ def work_tasks():
                 issue.notes = notes
             db.session.commit()
             if new_status and new_status != old_status:
+                detail = f'{old_status} → {new_status}'
+                if notes:
+                    detail += '. Тэмдэглэл: ' + notes
                 log_admin_action(
                     'issue.status_change', 'issue', issue.id,
                     (issue.facebook_user.name if issue.facebook_user else None) or f'#{issue.id}',
-                    detail=f'{old_status} → {new_status}'
+                    detail=detail
                 )
             return jsonify({'success': True})
 
