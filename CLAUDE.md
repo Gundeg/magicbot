@@ -115,7 +115,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 62 tests. They must all pass before any commit.
+Current count: 100 tests. They must all pass before any commit.
 
 Gotchas the test suite learned the hard way:
 - `db.session` is shared across tests. Mutating User/GeneralSetting between tests requires `db.session.remove()` and/or `expire_all()`.
