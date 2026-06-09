@@ -335,10 +335,14 @@ def work_tasks():
             issue = db.session.get(AdminIssue, data.get('id'))
             if not issue:
                 return jsonify({'success': False}), 404
+            note = (data.get('note') or '').strip()
             issue.status = 'resolved'
             issue.resolved_at = datetime.utcnow()
             issue.updated_by_id = current_user.id
             issue.updated_at = datetime.utcnow()
+            # Optional note: only set it, never blank out an existing one.
+            if note:
+                issue.notes = note
             # If the bot was muted via "Take Over" for this user, resolving
             # the issue is the staff's "I'm done" signal — restore the bot
             # so future messages from this customer are handled normally.
@@ -350,10 +354,13 @@ def work_tasks():
                 issue.facebook_user.bot_muted_until = None
                 unmuted = True
             db.session.commit()
+            detail = 'Work Tasks-аас шийдсэн' + (' + ботыг асаасан' if unmuted else '')
+            if note:
+                detail += '. Тэмдэглэл: ' + note
             log_admin_action(
                 'issue.status_change', 'issue', issue.id,
                 (issue.facebook_user.name if issue.facebook_user else None) or f'#{issue.id}',
-                detail='Work Tasks-аас шийдсэн' + (' + ботыг асаасан' if unmuted else '')
+                detail=detail
             )
             return jsonify({'success': True, 'bot_unmuted': unmuted})
 

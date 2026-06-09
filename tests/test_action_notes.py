@@ -135,3 +135,34 @@ def test_non_dropped_status_needs_no_note(client, admin_user, fb_user):
     assert resp.status_code == 200
     refreshed = db.session.get(FacebookUser, fb_user.id)
     assert refreshed.lead_status == 'contacted'
+
+
+# ---- resolve_issue (note optional) ----
+
+def test_resolve_issue_without_note_still_resolves(client, admin_user, open_issue):
+    from extensions import db
+    from models import AdminIssue
+    _login(client, admin_user)
+    resp = client.post('/admin/work-tasks',
+                       json={'action': 'resolve_issue', 'id': open_issue.id})
+    assert resp.status_code == 200
+    refreshed = db.session.get(AdminIssue, open_issue.id)
+    assert refreshed.status == 'resolved'
+    assert refreshed.notes is None
+
+
+def test_resolve_issue_with_note_saves(client, admin_user, open_issue):
+    from extensions import db
+    from models import AdminIssue, AuditEntry
+    _login(client, admin_user)
+    resp = client.post('/admin/work-tasks',
+                       json={'action': 'resolve_issue', 'id': open_issue.id,
+                             'note': 'Утсаар холбогдож шийдсэн'})
+    assert resp.status_code == 200
+    refreshed = db.session.get(AdminIssue, open_issue.id)
+    assert refreshed.status == 'resolved'
+    assert refreshed.notes == 'Утсаар холбогдож шийдсэн'
+    entry = (AuditEntry.query.filter_by(action='issue.status_change')
+             .order_by(AuditEntry.id.desc()).first())
+    assert entry is not None
+    assert 'Утсаар холбогдож шийдсэн' in (entry.detail or '')
