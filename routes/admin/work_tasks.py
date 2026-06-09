@@ -315,12 +315,19 @@ def work_tasks():
             user = db.session.get(FacebookUser, data.get('user_id'))
             if not user:
                 return jsonify({'success': False}), 404
+            note = (data.get('note') or '').strip()
+            if not note:
+                return jsonify({
+                    'success': False,
+                    'error': 'Шалтгаан заавал бичнэ үү.',
+                }), 400
             user.lead_status = 'dropped'
+            user.notes = note
             db.session.commit()
             log_admin_action(
                 'lead.drop', 'facebook_user', user.id,
                 user.name or user.facebook_id,
-                detail='Hot Prospect-оос орхисон гэж тэмдэглэв'
+                detail='Hot Prospect-оос орхив. Шалтгаан: ' + note
             )
             return jsonify({'success': True})
 

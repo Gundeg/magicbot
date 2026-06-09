@@ -295,7 +295,8 @@ def test_drop_prospect_sets_dropped(client, admin_user, db_session):
     _login(client, admin_user)
 
     resp = client.post('/admin/work-tasks',
-                       json={'action': 'drop_prospect', 'user_id': u.id})
+                       json={'action': 'drop_prospect', 'user_id': u.id,
+                             'note': 'Test drop reason'})
     assert resp.status_code == 200
     assert resp.get_json()['success'] is True
 
