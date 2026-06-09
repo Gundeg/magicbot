@@ -262,7 +262,7 @@ def pause_bot():
 # Open Issues (every unresolved AdminIssue), Aging Issues (open > N hours),
 # and Muted Users (bot paused for them).
 
-VALID_WORK_TASKS_TABS = ('hot_prospects', 'leads', 'open_issues', 'aging', 'muted')
+VALID_WORK_TASKS_TABS = ('hot_prospects', 'leads', 'open_issues', 'aging', 'muted', 'dropped')
 
 
 @app.route('/admin/inbox')
@@ -315,12 +315,19 @@ def work_tasks():
             user = db.session.get(FacebookUser, data.get('user_id'))
             if not user:
                 return jsonify({'success': False}), 404
+            note = (data.get('note') or '').strip()
+            if not note:
+                return jsonify({
+                    'success': False,
+                    'error': 'Шалтгаан заавал бичнэ үү.',
+                }), 400
             user.lead_status = 'dropped'
+            user.notes = note
             db.session.commit()
             log_admin_action(
                 'lead.drop', 'facebook_user', user.id,
                 user.name or user.facebook_id,
-                detail='Hot Prospect-оос орхисон гэж тэмдэглэв'
+                detail='Hot Prospect-оос орхив. Шалтгаан: ' + note
             )
             return jsonify({'success': True})
 
@@ -328,10 +335,14 @@ def work_tasks():
             issue = db.session.get(AdminIssue, data.get('id'))
             if not issue:
                 return jsonify({'success': False}), 404
+            note = (data.get('note') or '').strip()
             issue.status = 'resolved'
             issue.resolved_at = datetime.utcnow()
             issue.updated_by_id = current_user.id
             issue.updated_at = datetime.utcnow()
+            # Optional note: only set it, never blank out an existing one.
+            if note:
+                issue.notes = note
             # If the bot was muted via "Take Over" for this user, resolving
             # the issue is the staff's "I'm done" signal — restore the bot
             # so future messages from this customer are handled normally.
@@ -343,10 +354,13 @@ def work_tasks():
                 issue.facebook_user.bot_muted_until = None
                 unmuted = True
             db.session.commit()
+            detail = 'Work Tasks-аас шийдсэн' + (' + ботыг асаасан' if unmuted else '')
+            if note:
+                detail += '. Тэмдэглэл: ' + note
             log_admin_action(
                 'issue.status_change', 'issue', issue.id,
                 (issue.facebook_user.name if issue.facebook_user else None) or f'#{issue.id}',
-                detail='Work Tasks-аас шийдсэн' + (' + ботыг асаасан' if unmuted else '')
+                detail=detail
             )
             return jsonify({'success': True, 'bot_unmuted': unmuted})
 
@@ -507,6 +521,16 @@ def work_tasks():
                    .limit(50)
                    .all())
 
+    # --- Tab 6: dropped archive (prospects + leads we dropped, with the
+    # reason staff recorded). Shows only the un-purged tail — cleanup_old_records
+    # hard-deletes dropped rows after CLEANUP_RETENTION_DAYS; the audit log keeps
+    # the permanent record. 'converted' is a win, not a drop, so it's excluded.
+    dropped_leads = (FacebookUser.query
+                     .filter_by(lead_status='dropped')
+                     .order_by(FacebookUser.updated_at.desc())
+                     .limit(100)
+                     .all())
+
     return render_template(
         'work_tasks.html',
         tab=tab,
@@ -523,6 +547,7 @@ def work_tasks():
         open_issues=open_issues,
         aging_issues=aging_issues,
         muted_users=muted_users,
+        dropped_leads=dropped_leads,
         aging_hours=INBOX_AGING_HOURS,
         now=now,
     )
@@ -798,14 +823,30 @@ def update_lead_status():
         if user is None:
             return jsonify({'success': False, 'error': 'Хэрэглэгч олдсонгүй.'}), 404
 
+        # Dropping requires a reason; stored on the lead + the audit log.
+        # Other status changes don't take a note.
+        note = (data.get('note') or '').strip()
+        if status == 'dropped' and not note:
+            return jsonify({
+                'success': False,
+                'error': 'Шалтгаан заавал бичнэ үү.',
+            }), 400
+
         previous = user.lead_status or 'new'
         user.lead_status = status
+        # Note is recorded only on a drop; other status changes (incl. a later
+        # restore to 'new') intentionally leave any existing note in place.
+        if status == 'dropped':
+            user.notes = note
         db.session.commit()
 
+        detail = f'{previous} → {status}'
+        if status == 'dropped':
+            detail += '. Шалтгаан: ' + note
         log_admin_action(
             'lead.status_change', 'facebook_user', user.id,
             user.name or user.facebook_id,
-            detail=f'{previous} → {status}',
+            detail=detail,
         )
         return jsonify({
             'success': True,

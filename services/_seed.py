@@ -53,6 +53,7 @@ def ensure_schema():
         'bot_muted_until': 'bot_muted_until DATETIME',
         'conversation_topic': 'conversation_topic VARCHAR(100)',
         'last_mute_ack_at': 'last_mute_ack_at DATETIME',
+        'notes': 'notes TEXT',
     })
 
     add_columns('admin_issue', {

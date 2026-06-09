@@ -152,6 +152,11 @@
                     {% endif %}
                 </div>
 
+                {% if fb_user.notes %}
+                <div class="side-label">Тэмдэглэл</div>
+                <div class="side-value text-muted small">{{ fb_user.notes }}</div>
+                {% endif %}
+
                 <div class="side-label">Эхэлсэн</div>
                 <div class="side-value text-muted small">
                     {{ fb_user.created_at.strftime('%Y-%m-%d %H:%M') }}
