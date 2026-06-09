@@ -805,14 +805,28 @@ def update_lead_status():
         if user is None:
             return jsonify({'success': False, 'error': 'Хэрэглэгч олдсонгүй.'}), 404
 
+        # Dropping requires a reason; stored on the lead + the audit log.
+        # Other status changes don't take a note.
+        note = (data.get('note') or '').strip()
+        if status == 'dropped' and not note:
+            return jsonify({
+                'success': False,
+                'error': 'Шалтгаан заавал бичнэ үү.',
+            }), 400
+
         previous = user.lead_status or 'new'
         user.lead_status = status
+        if status == 'dropped':
+            user.notes = note
         db.session.commit()
 
+        detail = f'{previous} → {status}'
+        if status == 'dropped':
+            detail += '. Шалтгаан: ' + note
         log_admin_action(
             'lead.status_change', 'facebook_user', user.id,
             user.name or user.facebook_id,
-            detail=f'{previous} → {status}',
+            detail=detail,
         )
         return jsonify({
             'success': True,

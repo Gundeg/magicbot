@@ -105,9 +105,9 @@ def test_all_six_statuses_accepted(client, admin_user, fb_user):
     # through them all.
     assert len(LEAD_STATUS_KEYS) == 6
     for status in LEAD_STATUS_KEYS:
-        resp = client.post(
-            '/admin/api/lead-status',
-            json={'user_id': fb_user.id, 'status': status},
-        )
+        payload = {'user_id': fb_user.id, 'status': status}
+        if status == 'dropped':
+            payload['note'] = 'Test drop reason'
+        resp = client.post('/admin/api/lead-status', json=payload)
         assert resp.status_code == 200, f'status {status!r} rejected'
         assert resp.get_json()['status'] == status

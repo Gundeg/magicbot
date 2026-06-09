@@ -93,3 +93,41 @@ def test_drop_prospect_with_note_persists(client, admin_user, fb_user):
              .order_by(AuditEntry.id.desc()).first())
     assert entry is not None
     assert 'Дугаар буруу' in (entry.detail or '')
+
+
+# ---- lead drop via /admin/api/lead-status (note required) ----
+
+def test_lead_drop_without_note_rejected(client, admin_user, fb_user):
+    from extensions import db
+    from models import FacebookUser
+    _login(client, admin_user)
+    resp = client.post('/admin/api/lead-status',
+                       json={'user_id': fb_user.id, 'status': 'dropped'})
+    assert resp.status_code == 400
+    assert resp.get_json()['success'] is False
+    refreshed = db.session.get(FacebookUser, fb_user.id)
+    assert refreshed.lead_status != 'dropped'
+
+
+def test_lead_drop_with_note_persists(client, admin_user, fb_user):
+    from extensions import db
+    from models import FacebookUser
+    _login(client, admin_user)
+    resp = client.post('/admin/api/lead-status',
+                       json={'user_id': fb_user.id, 'status': 'dropped',
+                             'note': 'Сонирхолгүй болсон'})
+    assert resp.status_code == 200
+    refreshed = db.session.get(FacebookUser, fb_user.id)
+    assert refreshed.lead_status == 'dropped'
+    assert refreshed.notes == 'Сонирхолгүй болсон'
+
+
+def test_non_dropped_status_needs_no_note(client, admin_user, fb_user):
+    from extensions import db
+    from models import FacebookUser
+    _login(client, admin_user)
+    resp = client.post('/admin/api/lead-status',
+                       json={'user_id': fb_user.id, 'status': 'contacted'})
+    assert resp.status_code == 200
+    refreshed = db.session.get(FacebookUser, fb_user.id)
+    assert refreshed.lead_status == 'contacted'
