@@ -177,6 +177,13 @@
             <span class="count">{{ muted_users|length }}</span>
         </button>
     </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if tab == 'dropped' %}active{% endif %}"
+                data-bs-toggle="tab" data-bs-target="#droppedTab" type="button" role="tab">
+            <i class="bi bi-archive"></i> Орхисон
+            <span class="count">{{ dropped_leads|length }}</span>
+        </button>
+    </li>
 </ul>
 
 <div class="tab-content">
@@ -456,6 +463,64 @@
             <div class="wt-empty">
                 <i class="bi bi-robot"></i>
                 Бот чимээгүй болгосон хэрэглэгч алга. Бүх ярианд бот хариулж байна.
+            </div>
+        {% endif %}
+    </div>
+
+    {# ── Tab 6: Dropped archive ──────────────────────────────────── #}
+    <div class="tab-pane fade {% if tab == 'dropped' %}show active{% endif %}" id="droppedTab" role="tabpanel">
+        {% if dropped_leads %}
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-archive"></i> Орхисон сонирхогч / лидүүд
+                <span class="text-muted small">— сүүлийн ~60 хоног. Хуучин бичлэгийг audit log-оос үзнэ.</span>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Нэр</th>
+                                <th>Утас</th>
+                                <th>Төрөл</th>
+                                <th>Шалтгаан</th>
+                                <th>Орхисон</th>
+                                <th><span class="visually-hidden">Үйлдэл</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for u in dropped_leads %}
+                            <tr data-user-id="{{ u.id }}">
+                                <td>{{ u.name or 'Unknown' }}</td>
+                                <td>
+                                    {% if u.phone %}<a href="tel:{{ u.phone }}">{{ u.phone }}</a>
+                                    {% else %}<span class="text-muted">—</span>{% endif %}
+                                </td>
+                                <td>
+                                    {% if u.is_lead %}<span class="badge bg-success">Лид</span>
+                                    {% else %}<span class="badge bg-secondary">Сонирхогч</span>{% endif %}
+                                </td>
+                                <td class="small">{{ u.notes or '—' }}</td>
+                                <td class="small text-muted">{{ u.updated_at.strftime('%Y-%m-%d %H:%M') if u.updated_at else '—' }}</td>
+                                <td class="text-end text-nowrap">
+                                    <button type="button" class="btn btn-sm btn-outline-success restore-lead" data-user-id="{{ u.id }}" title="Дахин идэвхжүүлэх">
+                                        <i class="bi bi-arrow-counterclockwise"></i> Сэргээх
+                                    </button>
+                                    <a class="btn btn-sm btn-light" href="{{ url_for('conversation', user_id=u.id) }}" title="Яриаг үзэх">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% else %}
+            <div class="wt-empty">
+                <i class="bi bi-archive"></i>
+                Орхисон сонирхогч / лид одоогоор алга.
             </div>
         {% endif %}
     </div>

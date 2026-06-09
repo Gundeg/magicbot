@@ -166,3 +166,21 @@ def test_resolve_issue_with_note_saves(client, admin_user, open_issue):
              .order_by(AuditEntry.id.desc()).first())
     assert entry is not None
     assert 'Утсаар холбогдож шийдсэн' in (entry.detail or '')
+
+
+# ---- dropped archive tab ----
+
+def test_dropped_tab_lists_dropped_user_with_note(client, admin_user, fb_user):
+    from extensions import db
+    from models import FacebookUser
+    _login(client, admin_user)
+    u = db.session.get(FacebookUser, fb_user.id)
+    u.lead_status = 'dropped'
+    u.notes = 'Тест шалтгаан'
+    db.session.commit()
+    resp = client.get('/admin/work-tasks?tab=dropped')
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'Notes Test' in body
+    assert 'Тест шалтгаан' in body
+    assert 'restore-lead' in body  # the Restore button is present

@@ -262,7 +262,7 @@ def pause_bot():
 # Open Issues (every unresolved AdminIssue), Aging Issues (open > N hours),
 # and Muted Users (bot paused for them).
 
-VALID_WORK_TASKS_TABS = ('hot_prospects', 'leads', 'open_issues', 'aging', 'muted')
+VALID_WORK_TASKS_TABS = ('hot_prospects', 'leads', 'open_issues', 'aging', 'muted', 'dropped')
 
 
 @app.route('/admin/inbox')
@@ -521,6 +521,16 @@ def work_tasks():
                    .limit(50)
                    .all())
 
+    # --- Tab 6: dropped archive (prospects + leads we dropped, with the
+    # reason staff recorded). Shows only the un-purged tail — cleanup_old_records
+    # hard-deletes dropped rows after CLEANUP_RETENTION_DAYS; the audit log keeps
+    # the permanent record. 'converted' is a win, not a drop, so it's excluded.
+    dropped_leads = (FacebookUser.query
+                     .filter_by(lead_status='dropped')
+                     .order_by(FacebookUser.updated_at.desc())
+                     .limit(100)
+                     .all())
+
     return render_template(
         'work_tasks.html',
         tab=tab,
@@ -537,6 +547,7 @@ def work_tasks():
         open_issues=open_issues,
         aging_issues=aging_issues,
         muted_users=muted_users,
+        dropped_leads=dropped_leads,
         aging_hours=INBOX_AGING_HOURS,
         now=now,
     )
