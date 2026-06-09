@@ -35,6 +35,13 @@ INBOX_AGING_HOURS = int(os.environ.get('INBOX_AGING_HOURS', '12'))
 BACKFILL_MAX_PER_RUN = int(os.environ.get('BACKFILL_MAX_PER_RUN', '60'))
 BACKFILL_BUDGET_SECONDS = int(os.environ.get('BACKFILL_BUDGET_SECONDS', '40'))
 
+# Same idea for the manual "Ангилах" run: one OpenAI call per user is slow, so
+# cap each run's wall-clock well under gunicorn's 60s worker timeout and let the
+# admin click again to finish the backlog (tracked via FacebookUser.last_classified_at).
+# Without this the loop could run past 60s and the worker is killed mid-request,
+# surfacing as a generic HTML 500 (not the route's JSON error).
+CLASSIFY_BUDGET_SECONDS = int(os.environ.get('CLASSIFY_BUDGET_SECONDS', '40'))
+
 # Retention window for the manual "clean up old records" action: chat messages
 # older than this are purged, and leads that are terminally closed
 # (converted / dropped) and untouched for this long are hard-deleted.
@@ -758,28 +765,50 @@ def classify_conversations_backfill():
                 db.session.commit()
         lookback = get_classification_lookback_days()
         since = datetime.utcnow() - timedelta(days=lookback)
+        # Never-classified first, then oldest-classified, so repeated clicks walk
+        # the whole backlog instead of re-doing the same users. The is_(None) key
+        # puts NULLs first portably (SQLite + Postgres) without relying on NULLS FIRST.
         users = (
             FacebookUser.query
             .join(Message, Message.facebook_user_id == FacebookUser.id)
             .filter(Message.sender == 'user')
             .filter(Message.created_at >= since)
             .group_by(FacebookUser.id)
-            .order_by(FacebookUser.updated_at.asc())
+            .order_by(
+                FacebookUser.last_classified_at.is_(None).desc(),
+                FacebookUser.last_classified_at.asc(),
+            )
             .limit(300)
             .all()
         )
+        # Stop well before gunicorn's 60s worker timeout; the admin clicks again
+        # to continue. classify_user_topics makes one OpenAI call per user.
+        deadline = time.monotonic() + CLASSIFY_BUDGET_SECONDS
         classified = 0
         topics_attached_total = 0
+        processed = 0
+        timed_out = False
         for u in users:
+            if time.monotonic() >= deadline:
+                timed_out = True
+                break
             n = classify_user_topics(u)
+            # Stamp every processed user (with topics or not) so the next run
+            # advances past them. Commit per user so a late timeout can't lose
+            # the progress already made.
+            u.last_classified_at = datetime.utcnow()
+            db.session.commit()
+            processed += 1
             if n:
                 classified += 1
                 topics_attached_total += n
         return jsonify({
-            'attempted': len(users),
+            'attempted': processed,
             'classified': classified,
             'topics_attached': topics_attached_total,
             'lookback_days': lookback,
+            'timed_out': timed_out,
+            'remaining': max(0, len(users) - processed),
         })
     except Exception as e:
         import logging

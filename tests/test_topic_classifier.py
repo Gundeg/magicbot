@@ -59,6 +59,18 @@ def _patch_openai(content):
     )
 
 
+@pytest.fixture
+def reset_session():
+    """Drop the shared SQLAlchemy session around a test that makes an
+    authenticated request. Otherwise Flask-Login's user_loader
+    (db.session.get(User, id)) can hit a detached / deleted-instance marker
+    left by an earlier test module. Same guard as test_roles.py."""
+    from extensions import db
+    db.session.remove()
+    yield
+    db.session.remove()
+
+
 def test_classifier_attaches_matching_topic(app, db_session):
     from models import ConversationTopic
     from services import classify_user_topics
@@ -183,3 +195,51 @@ def test_lookback_setting_is_clamped(app, db_session):
     db.session.commit()
     _bust_cache()
     assert get_classification_lookback_days() == 14
+
+
+def test_classify_route_stamps_last_classified_and_budget_fields(client, db_session, reset_session):
+    """The manual Ангилах run must stamp last_classified_at on processed users
+    (so repeated clicks advance the backlog) and report timed_out / remaining,
+    so the loop can stop before gunicorn's 60s worker timeout instead of 500-ing."""
+    from extensions import db, limiter
+    from models import FacebookUser, User
+    from werkzeug.security import generate_password_hash
+
+    limiter.enabled = False  # the /admin/login form route is rate-limited
+    user = _make_user_with_messages('Аудит хийлгэх үнэ хэд вэ?')
+    user_id = user.id
+
+    User.query.filter_by(username='pytest-classify-admin').delete()
+    db.session.commit()
+    admin = User(username='pytest-classify-admin',
+                 password=generate_password_hash('classify-pw'),
+                 email='pytest-classify-admin@example.com', role='super_admin')
+    db.session.add(admin)
+    db.session.commit()
+    admin_id = admin.id
+
+    # Real login form (like test_roles) — proven to work in the full suite where
+    # session_transaction + the shared session trips Flask-Login's user_loader.
+    login_resp = client.post('/admin/login',
+                             data={'username': 'pytest-classify-admin',
+                                   'password': 'classify-pw'},
+                             follow_redirects=False)
+    assert login_resp.status_code in (302, 303)
+
+    payload = json.dumps({'topics': [
+        {'name': 'Magic Consulting Audit', 'evidence': 'аудитын үнэ'},
+    ]}, ensure_ascii=False)
+    with _patch_openai(payload):
+        resp = client.post('/admin/api/classify-conversations',
+                           json={'lookback_days': 7})
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['timed_out'] is False        # one user fits well inside the budget
+    assert data['remaining'] == 0
+    assert data['attempted'] >= 1
+    refreshed = db.session.get(FacebookUser, user_id)
+    assert refreshed.last_classified_at is not None
+
+    User.query.filter_by(id=admin_id).delete()
+    db.session.commit()
