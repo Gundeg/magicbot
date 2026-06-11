@@ -20,7 +20,7 @@ from threading import Lock
 import requests
 from flask import current_app, g, has_request_context
 from flask_login import current_user
-from openai import OpenAI
+from openai import AuthenticationError, OpenAI, RateLimitError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
@@ -969,6 +969,73 @@ from services._prompt import (  # noqa: E402
 )
 
 
+# ===================== OPENAI ACCOUNT-FAILURE ALERTING =====================
+# Account-level OpenAI failures (quota exhausted, revoked key) kill every
+# customer reply AND the knowledge-gap handoff that would normally page
+# staff — so an outage is invisible from inside the product (the 2026-06-11
+# quota outage ran 6+ hours unnoticed). alert_openai_failure is called from
+# generate_bot_response's failure path and Telegram-pings staff directly,
+# deduplicated via GeneralSetting so the alert storm of an outage (every
+# inbound message fails) produces at most one ping per cooldown window.
+
+OPENAI_ALERT_STATE_KEY = 'openai_failure_alerted_at'
+
+
+def _is_openai_account_error(exc):
+    """True only for errors that mean EVERY call will keep failing — quota
+    exhausted or a bad API key. Transient per-model rate limits
+    (429 rate_limit_exceeded) self-heal and must NOT page staff."""
+    if isinstance(exc, AuthenticationError):
+        return True
+    if isinstance(exc, RateLimitError):
+        code = getattr(exc, 'code', '') or ''
+        return code == 'insufficient_quota' or 'insufficient_quota' in str(exc)
+    return False
+
+
+def alert_openai_failure(exc):
+    """Telegram-alert staff about an account-wide OpenAI failure, at most
+    once per OPENAI_ALERT_COOLDOWN_HOURS (default 6). Runs on the
+    customer-reply path, so it must never raise — any internal failure is
+    logged and swallowed. Returns True if an alert was sent this call."""
+    try:
+        if not _is_openai_account_error(exc):
+            return False
+        cooldown = timedelta(hours=max(1, _safe_int_env('OPENAI_ALERT_COOLDOWN_HOURS', 6)))
+        now = datetime.utcnow()
+        row = GeneralSetting.query.filter_by(key=OPENAI_ALERT_STATE_KEY).first()
+        if row and row.value:
+            try:
+                if now - datetime.fromisoformat(row.value) < cooldown:
+                    return False
+            except ValueError:
+                pass  # unparseable timestamp -> treat as never alerted
+        # Claim the window BEFORE sending: during an outage every inbound
+        # message fails at once across workers, and committing first keeps
+        # that storm from paging staff more than once.
+        if row is None:
+            db.session.add(GeneralSetting(key=OPENAI_ALERT_STATE_KEY, value=now.isoformat()))
+        else:
+            row.value = now.isoformat()
+        db.session.commit()
+        send_telegram_notification(
+            "⚠️ OpenAI данс ажиллахгүй байна — бот хэрэглэгчдэд бодит хариу "
+            "өгч чадахгүй, шилжүүлгийн (handoff) мэдэгдэл ч ажиллахгүй.\n\n"
+            "Шалтгаан: квот дууссан эсвэл API key хүчингүй. "
+            "platform.openai.com → Billing хуудсаар орж кредитээ шалгана уу. "
+            "Кредит ормогц бот шууд сэргэнэ.\n\n"
+            f"Дэлгэрэнгүй: {str(exc)[:300]}"
+        )
+        return True
+    except Exception as alert_exc:
+        logger.error("OpenAI failure alert could not be sent: %s", alert_exc)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return False
+
+
 def generate_bot_response(user_message, conversation_history,
                           session_state='new', funnel_stage='curious',
                           user_first_name='', handoff_pending=False,
@@ -1024,6 +1091,9 @@ def generate_bot_response(user_message, conversation_history,
         return msg.content
     except Exception as e:
         logger.error("Error generating response: %s", e)
+        # Quota/key failures also kill the defer_to_staff handoff tool, so
+        # nothing would page staff — alert them directly (deduplicated).
+        alert_openai_failure(e)
         # If OpenAI fails right after a handoff fires, the dynamic
         # acknowledgement won't arrive — fall back to the static template
         # so the customer still hears something instead of a generic

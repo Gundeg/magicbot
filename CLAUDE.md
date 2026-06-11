@@ -115,7 +115,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 101 tests. They must all pass before any commit.
+Current count: 109 tests. They must all pass before any commit.
 
 Gotchas the test suite learned the hard way:
 - `db.session` is shared across tests. Mutating User/GeneralSetting between tests requires `db.session.remove()` and/or `expire_all()`.
@@ -164,10 +164,11 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 
 Check these in order BEFORE reading code:
 
-1. **Render logs** (`r=1h`, query `Send API`) → `OAuthException code:190 / subcode:463` = expired FB token. Regen via Graph API Explorer.
-2. **Render logs** (`r=1h`, query `database is locked`) → SQLite contention. Confirm `app.py:88` WAL/busy_timeout block is intact.
-3. **Render logs** (`r=1h`, query `FB user profile`) → `status=400 GraphMethodException` = the BAUPA restriction, not a bug.
-4. **Render Events page** — a bad deploy is the easiest explanation when nothing else fits.
+1. **Customers getting the canned apology** ("Уучлаарай, түр зуурын саатал...") → OpenAI failing, NOT Facebook (apology delivered = Send API fine). Render logs query `Error generating response` shows the exception; `insufficient_quota` = account out of credit (2026-06-11 outage) → user tops up at platform.openai.com → Billing, instant recovery. Staff now get a deduplicated Telegram alert on quota/key failures (`alert_openai_failure`, cooldown `OPENAI_ALERT_COOLDOWN_HOURS`=6).
+2. **Render logs** (`r=1h`, query `Send API`) → `OAuthException code:190 / subcode:463` = expired FB token. Regen via Graph API Explorer.
+3. **Render logs** (`r=1h`, query `database is locked`) → SQLite contention. Confirm `app.py:88` WAL/busy_timeout block is intact.
+4. **Render logs** (`r=1h`, query `FB user profile`) → `status=400 GraphMethodException` = the BAUPA restriction, not a bug.
+5. **Render Events page** — a bad deploy is the easiest explanation when nothing else fits.
 
 The production service is `magicbot` at <https://dashboard.render.com/web/srv-d81j1p9j2pic73fbsnv0>, under `My project / Production`. There's a sibling `gmcbot` under the `GMC` env — **abandoned, zero traffic since 2026-05-19, do not diagnose that one.**
 
