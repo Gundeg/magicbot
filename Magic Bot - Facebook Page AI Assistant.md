@@ -86,6 +86,10 @@ pip install -r requirements.txt
 Create a `.env` file in the project root:
 ```
 OPENAI_API_KEY=your_openai_api_key_here
+# Optional: run customer replies on Google Gemini instead of OpenAI.
+# Default model gemini-2.5-flash (free tier OK). For Gemini 3.1 Pro (needs billing) also set
+# REPLY_MODEL=gemini-3.1-pro-preview, GEMINI_REASONING_EFFORT=low, REPLY_MAX_TOKENS=2048
+GEMINI_API_KEY=your_gemini_api_key_here
 FACEBOOK_PAGE_ID=your_facebook_page_id
 FACEBOOK_ACCESS_TOKEN=your_facebook_access_token
 GOOGLE_FORM_URL=https://docs.google.com/forms/d/e/1FAIpQLSerwmfsvdYbcgZBUTySCrx6ueA2thp_7-7n-uUDoRF4lvAXKw/viewform
@@ -196,7 +200,9 @@ The application will start on `http://localhost:5000`
 
 ## LLM Integration
 
-The bot uses OpenAI's GPT-4 Mini model with a comprehensive system prompt that includes:
+Customer replies run on the provider selected at startup: **Google Gemini** when `GEMINI_API_KEY` is set (default `gemini-2.5-flash`, or `gemini-3.1-pro-preview` on a billed key), otherwise **OpenAI** `gpt-5.3-chat-latest`. Gemini is reached through its OpenAI-compatible endpoint, so the same `openai` SDK and `defer_to_staff` function-calling path is reused either way. Background jobs (lead classifier, FAQ clustering, post auto-comments) always run on OpenAI `gpt-4o-mini`.
+
+The reply uses a comprehensive system prompt that includes:
 - Training center information
 - Active courses and pricing
 - FAQ knowledge base
@@ -296,7 +302,11 @@ CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
 
 ### Environment Variables
 ```
-OPENAI_API_KEY          - OpenAI API key for GPT-4 Mini
+OPENAI_API_KEY          - OpenAI key: background jobs (gpt-4o-mini); also replies if no Gemini key
+GEMINI_API_KEY          - Optional: run customer replies on Google Gemini
+REPLY_MODEL             - Optional: override the reply model (e.g. gemini-3.1-pro-preview)
+GEMINI_REASONING_EFFORT - Optional: low|medium|high for Pro/3.x ('none' = thinking off, Flash only)
+REPLY_MAX_TOKENS        - Optional: reply length cap (default 500; use 2048 for Pro)
 FACEBOOK_PAGE_ID        - Your Facebook Page ID
 FACEBOOK_ACCESS_TOKEN   - Facebook Page Access Token
 GOOGLE_FORM_URL         - Registration form link

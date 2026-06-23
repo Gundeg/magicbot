@@ -81,6 +81,7 @@ EAAcwjxqcKBcBRaqUpbmCvqHeqoMZBXvEA6CrUOzLKZAAWhGDF3GqJuyyn5gxXAloji2UeYvM1ZAUa1v
 
 ```
 OPENAI_API_KEY=таны_openai_api_key_энд_бичнэ
+GEMINI_API_KEY=таны_gemini_api_key_энд_бичнэ
 FACEBOOK_PAGE_ID=таны_page_id_энд_бичнэ
 FACEBOOK_ACCESS_TOKEN=EAAcwjxqcKBcBRaqUpbmCvqHeqoMZBXvEA6CrUOzLKZAAWhGDF3GqJuyyn5gxXAloji2UeYvM1ZAUa1vEJ71qF0FBowEYq8PhjeZBFX8LBm7BMay7uGZAZAuJlS7zjRhxPmSBimAVq98FJLk5W9IHEXesQf3ZBn4fZAZCakqiCO8UQaoqHVtOvZAg7yZABDEnmn5d8KwbYMFHK8hoKix5kG09Bbh2odqOWAMlOuC
 GOOGLE_FORM_URL=https://docs.google.com/forms/d/e/1FAIpQLSerwmfsvdYbcgZBUTySCrx6ueA2thp_7-7n-uUDoRF4lvAXKw/viewform
@@ -97,6 +98,16 @@ VERIFY_TOKEN=magic_bot_verify_token
 3. **API Keys** хэсэг рүү орно
 4. **"Create new secret key"** товчийг дарна
 5. Гарч ирсэн key-г хуулж `.env` файлд оруулна
+
+> OpenAI key нь background ажлууд (ангилал, FAQ-cluster, постын коммент)-д **заавал** хэрэгтэй. Gemini ашиглавал ч үлдээнэ.
+
+### Gemini API Key авах (хэрэглэгчид өгөх хариултыг Gemini дээр ажиллуулах бол):
+Ботын **хэрэглэгчид өгөх хариултыг** OpenAI-ийн оронд Google Gemini-ээр ажиллуулж болно (background ажлууд OpenAI дээр хэвээр).
+1. **https://aistudio.google.com/apikey** хаягаар орно
+2. Google акаунтаараа нэвтэрч **"Create API key"** дарна
+3. Key-г хуулж `.env` файлын `GEMINI_API_KEY`-д оруулна
+4. Default нь `gemini-2.5-flash` (үнэгүй tier дээр ажиллана, хурдан). Илүү чанартай **Gemini 3.1 Pro** ашиглах бол Google дээрээ **төлбөр (billing) идэвхжүүлээд** дараах 3 тохиргоог нэмнэ:
+   `REPLY_MODEL=gemini-3.1-pro-preview`, `GEMINI_REASONING_EFFORT=low`, `REPLY_MAX_TOKENS=2048`
 
 ---
 
