@@ -88,6 +88,54 @@ def test_defer_tool_call_becomes_handoff_marker(app, db_session, monkeypatch):
     assert 'Ажилтан тантай эргэж холбогдоно' in out
 
 
+def test_gemini_flash_disables_thinking(app, db_session, monkeypatch):
+    """On 2.5 Flash, reasoning_effort='none' (thinking off) is sent via extra_body."""
+    monkeypatch.setattr(services, 'REPLY_PROVIDER', 'gemini')
+    monkeypatch.setattr(services, 'REPLY_MODEL', 'gemini-2.5-flash')
+    monkeypatch.setattr(services, 'GEMINI_REASONING_EFFORT', 'none')
+    captured = _capture_create(monkeypatch)
+    services.generate_bot_response('Сайн уу', [])
+    assert captured.get('extra_body') == {'reasoning_effort': 'none'}
+
+
+def test_gemini_pro_uses_bounded_thinking(app, db_session, monkeypatch):
+    """On Pro, a valid effort ('low') is passed through verbatim."""
+    monkeypatch.setattr(services, 'REPLY_PROVIDER', 'gemini')
+    monkeypatch.setattr(services, 'REPLY_MODEL', 'gemini-3.1-pro-preview')
+    monkeypatch.setattr(services, 'GEMINI_REASONING_EFFORT', 'low')
+    captured = _capture_create(monkeypatch)
+    services.generate_bot_response('Сайн уу', [])
+    assert captured.get('extra_body') == {'reasoning_effort': 'low'}
+
+
+def test_gemini_pro_skips_invalid_none(app, db_session, monkeypatch):
+    """'none' is invalid on Pro/3.x — it must be OMITTED (sending it would 400),
+    not forwarded, so a stale 'none' default can't brick a Pro deployment."""
+    monkeypatch.setattr(services, 'REPLY_PROVIDER', 'gemini')
+    monkeypatch.setattr(services, 'REPLY_MODEL', 'gemini-3.1-pro-preview')
+    monkeypatch.setattr(services, 'GEMINI_REASONING_EFFORT', 'none')
+    captured = _capture_create(monkeypatch)
+    services.generate_bot_response('Сайн уу', [])
+    assert 'extra_body' not in captured
+
+
+def test_gemini_dynamic_effort_omits_field(app, db_session, monkeypatch):
+    """An 'auto'/empty effort omits the field entirely (Gemini decides)."""
+    monkeypatch.setattr(services, 'REPLY_PROVIDER', 'gemini')
+    monkeypatch.setattr(services, 'REPLY_MODEL', 'gemini-3.1-pro-preview')
+    monkeypatch.setattr(services, 'GEMINI_REASONING_EFFORT', 'auto')
+    captured = _capture_create(monkeypatch)
+    services.generate_bot_response('Сайн уу', [])
+    assert 'extra_body' not in captured
+
+
+def test_openai_path_never_sends_reasoning_effort(app, db_session, monkeypatch):
+    """Default provider is OpenAI in tests — reasoning_effort is Gemini-only."""
+    captured = _capture_create(monkeypatch)
+    services.generate_bot_response('Сайн уу', [])
+    assert 'extra_body' not in captured
+
+
 def test_provider_invariants_hold():
     """The import-time wiring is internally consistent for either provider."""
     assert services.REPLY_PROVIDER in ('openai', 'gemini')

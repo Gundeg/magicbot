@@ -321,7 +321,7 @@
     <thead><tr><th>Layer</th><th>Tech</th></tr></thead>
     <tbody>
         <tr><td>Web framework</td><td>Flask 3 + Flask-Login + Flask-SQLAlchemy</td></tr>
-        <tr><td>LLM (хариулт)</td><td><code>REPLY_MODEL</code> — Gemini 3.1 Pro (<code>gemini-3.1-pro-preview</code>) <code>GEMINI_API_KEY</code> тохируулсан үед, эс бөгөөс OpenAI <code>gpt-5.3-chat-latest</code>. Gemini-г OpenAI-compatible endpoint-ээр дууддаг тул бүгд нэг <code>openai</code> SDK дээр.</td></tr>
+        <tr><td>LLM (хариулт)</td><td><code>REPLY_MODEL</code> — <code>GEMINI_API_KEY</code> тохируулсан үед Google Gemini (default <code>gemini-2.5-flash</code>; төлбөртэй key дээр <code>gemini-3.1-pro-preview</code>), эс бөгөөс OpenAI <code>gpt-5.3-chat-latest</code>. Gemini-г OpenAI-compatible endpoint-ээр дууддаг тул бүгд нэг <code>openai</code> SDK дээр.</td></tr>
         <tr><td>LLM (background)</td><td>OpenAI <code>gpt-4o-mini</code> (ангилал / FAQ-cluster / постын коммент) — үргэлж OpenAI</td></tr>
         <tr><td>Messenger</td><td>Facebook Graph API v18.0 (webhook + Send API)</td></tr>
         <tr><td>Alerts</td><td>Telegram Bot API <code>sendMessage</code></td></tr>
@@ -393,7 +393,8 @@
     <strong>The webhook ACKs Facebook in &lt;1s and generates the reply in a background worker.</strong>
     A fast 200 stops Facebook retrying the delivery on slow hops / cold starts — those retries used to
     inflate the rate limiter and double-send replies. The reply model is <code>REPLY_MODEL</code> —
-    Gemini 3.1 Pro (<code>gemini-3.1-pro-preview</code>) when <code>GEMINI_API_KEY</code> is set, otherwise
+    Google Gemini when <code>GEMINI_API_KEY</code> is set (default <code>gemini-2.5-flash</code> with thinking off;
+    <code>gemini-3.1-pro-preview</code> on a billed key via <code>GEMINI_REASONING_EFFORT=low</code>), otherwise
     OpenAI <code>gpt-5.3-chat-latest</code>; background jobs always stay on OpenAI <code>gpt-4o-mini</code>.
 </p>
 <p><strong>Synchronous half</strong> — <code>POST /webhook</code> (<code>routes/webhook.py:webhook()</code>):</p>
