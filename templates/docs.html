@@ -321,7 +321,8 @@
     <thead><tr><th>Layer</th><th>Tech</th></tr></thead>
     <tbody>
         <tr><td>Web framework</td><td>Flask 3 + Flask-Login + Flask-SQLAlchemy</td></tr>
-        <tr><td>LLM</td><td>OpenAI <code>gpt-4o-mini</code> via <code>openai</code> SDK</td></tr>
+        <tr><td>LLM (хариулт)</td><td><code>REPLY_MODEL</code> — Gemini 3.1 Pro (<code>gemini-3.1-pro-preview</code>) <code>GEMINI_API_KEY</code> тохируулсан үед, эс бөгөөс OpenAI <code>gpt-5.3-chat-latest</code>. Gemini-г OpenAI-compatible endpoint-ээр дууддаг тул бүгд нэг <code>openai</code> SDK дээр.</td></tr>
+        <tr><td>LLM (background)</td><td>OpenAI <code>gpt-4o-mini</code> (ангилал / FAQ-cluster / постын коммент) — үргэлж OpenAI</td></tr>
         <tr><td>Messenger</td><td>Facebook Graph API v18.0 (webhook + Send API)</td></tr>
         <tr><td>Alerts</td><td>Telegram Bot API <code>sendMessage</code></td></tr>
         <tr><td>DB</td><td>SQLite by default, Postgres-compatible via SQLAlchemy URI</td></tr>
@@ -391,8 +392,9 @@
 <p>
     <strong>The webhook ACKs Facebook in &lt;1s and generates the reply in a background worker.</strong>
     A fast 200 stops Facebook retrying the delivery on slow hops / cold starts — those retries used to
-    inflate the rate limiter and double-send replies. The reply model is <code>gpt-5.3-chat-latest</code>
-    (<code>REPLY_MODEL</code>); background jobs stay on <code>gpt-4o-mini</code>.
+    inflate the rate limiter and double-send replies. The reply model is <code>REPLY_MODEL</code> —
+    Gemini 3.1 Pro (<code>gemini-3.1-pro-preview</code>) when <code>GEMINI_API_KEY</code> is set, otherwise
+    OpenAI <code>gpt-5.3-chat-latest</code>; background jobs always stay on OpenAI <code>gpt-4o-mini</code>.
 </p>
 <p><strong>Synchronous half</strong> — <code>POST /webhook</code> (<code>routes/webhook.py:webhook()</code>):</p>
 <ol>
@@ -417,7 +419,7 @@
 <ol>
     <li>Re-check mute; send <code>mark_seen</code> + <code>typing_on</code> sender actions (responsive feel).</li>
     <li><code>is_in_handoff()</code> → <code>handoff_pending</code>; keyword <code>should_handoff()</code> → <code>trigger_handoff(send_user_message=False)</code> on match.</li>
-    <li>Build prompt, call <code>REPLY_MODEL</code> with last 10 messages, <code>max_completion_tokens=REPLY_MAX_TOKENS</code> (500). gpt-5.x rejects <code>temperature</code>/<code>max_tokens</code>.</li>
+    <li>Build prompt, call <code>REPLY_MODEL</code> via <code>reply_client</code> with last 10 messages and a per-provider token cap (<code>REPLY_MAX_TOKENS</code>=500): <code>max_tokens</code> for Gemini, <code>max_completion_tokens</code> for OpenAI gpt-5.x (which rejects <code>max_tokens</code>/<code>temperature</code>).</li>
     <li>Strip the internal <code>[HANDOFF]</code> marker (knowledge-gap deferral via the <code>defer_to_staff</code> tool).</li>
     <li><strong>Pre-send mute re-check</strong>: <code>db.session.rollback()</code> (drop the stale WAL snapshot) then re-read <code>bot_muted_until</code> — if a human took over mid-generation, suppress the reply.</li>
     <li>Persist outbound, send via FB Send API (tagged with <code>BOT_ECHO_TAG</code>).</li>

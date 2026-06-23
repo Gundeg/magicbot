@@ -61,13 +61,26 @@ persona → current time block → canonical course list → training_content (l
 
 ## Reply model + knowledge-gap handoff (the "honest AI" path)
 
-- **Customer replies use `REPLY_MODEL` = `gpt-5.3-chat-latest`** (`services/__init__.py`),
-  upgraded from `gpt-4o-mini` after a Mongolian bake-off — far better at paraphrase /
-  Latin-script / intent. Background jobs (topic classifier, page comments, FAQ
-  clustering) stay on `gpt-4o-mini` on purpose (cheap, high-volume).
-  - **PARAM GOTCHA:** gpt-5.x chat models reject `temperature` and `max_tokens`. Use
-    default temperature + `max_completion_tokens` (also valid on 4o/4.1, so it's safe if
-    REPLY_MODEL is rolled back).
+- **Customer replies run on `REPLY_MODEL` via `reply_client`** (`services/__init__.py`).
+  The provider is chosen once at import:
+  - `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) set → **Google Gemini**, default
+    `gemini-3.1-pro-preview` (the highest model). Reached through Gemini's
+    **OpenAI-compatible endpoint** (`GEMINI_BASE_URL`, default
+    `https://generativelanguage.googleapis.com/v1beta/openai/`), so the entire reply
+    path — `chat.completions`, the `defer_to_staff` function-calling tool, and the
+    `openai.AuthenticationError` / `RateLimitError` types `alert_openai_failure` keys
+    on — is reused unchanged. **No `google-genai` dependency**, no message/tool reshaping.
+  - neither set → **OpenAI** `gpt-5.3-chat-latest` (the prior default, kept after a
+    Mongolian bake-off — far better at paraphrase / Latin-script / intent than 4o-mini).
+  - `REPLY_MODEL` env var overrides the default for either provider (e.g.
+    `gemini-2.5-flash` for cheaper/faster, or a pinned GA id).
+  - **Background jobs** (topic classifier, page comments, FAQ clustering) ALWAYS stay
+    on OpenAI `gpt-4o-mini` via `client` — cheap, high-volume. So `OPENAI_API_KEY` is
+    required even on a Gemini reply deployment.
+  - **PARAM GOTCHA (now provider-aware → `REPLY_MAX_TOKENS_PARAM`):** OpenAI gpt-5.x
+    chat models reject `temperature` + `max_tokens` → use `max_completion_tokens`;
+    Gemini's OpenAI-compat endpoint uses the classic `max_tokens`. We never send an
+    explicit `temperature`, so the default-temperature requirement holds for both.
 - **When the bot lacks the info, it hands off instead of inventing.** In normal mode the
   prompt injects `KNOWLEDGE_GAP_HANDOFF_RULE` and `generate_bot_response` offers the
   **`defer_to_staff` tool** (OpenAI function calling — reliable, unlike a literal text
@@ -164,7 +177,7 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 
 Check these in order BEFORE reading code:
 
-1. **Customers getting the canned apology** ("Уучлаарай, түр зуурын саатал...") → OpenAI failing, NOT Facebook (apology delivered = Send API fine). Render logs query `Error generating response` shows the exception; `insufficient_quota` = account out of credit (2026-06-11 outage) → user tops up at platform.openai.com → Billing, instant recovery. Staff now get a deduplicated Telegram alert on quota/key failures (`alert_openai_failure`, cooldown `OPENAI_ALERT_COOLDOWN_HOURS`=6).
+1. **Customers getting the canned apology** ("Уучлаарай, түр зуурын саатал...") → the **reply provider** is failing, NOT Facebook (apology delivered = Send API fine). Render logs query `Error generating response` shows the exception; `insufficient_quota` = account out of credit (2026-06-11 outage) → instant recovery on top-up. **Which provider?** If `GEMINI_API_KEY` is set, replies are Gemini → fix the key/quota at Google AI Studio (`aistudio.google.com`); otherwise OpenAI → platform.openai.com → Billing. The deduplicated Telegram alert (`alert_openai_failure`, cooldown `OPENAI_ALERT_COOLDOWN_HOURS`=6) names the active provider (`REPLY_PROVIDER_LABEL`) and the right billing page. Note: a Gemini `429` quota error may not match the `insufficient_quota` test, so it can degrade quietly to the apology without paging — Gemini *auth* (401) errors still alert.
 2. **Render logs** (`r=1h`, query `Send API`) → `OAuthException code:190 / subcode:463` = expired FB token. Regen via Graph API Explorer.
 3. **Render logs** (`r=1h`, query `database is locked`) → SQLite contention. Confirm `app.py:88` WAL/busy_timeout block is intact.
 4. **Render logs** (`r=1h`, query `FB user profile`) → `status=400 GraphMethodException` = the BAUPA restriction, not a bug.
