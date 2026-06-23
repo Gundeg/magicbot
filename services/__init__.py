@@ -89,20 +89,56 @@ def enqueue_background(func, *args, **kwargs):
 PHONE_RE = re.compile(r'(?:\+?976[\s-]?)?[89]\d{7}')
 
 # OpenAI client. Reads OPENAI_API_KEY from env at import time — the .env file
-# is loaded before this module is first imported by app.py.
+# is loaded before this module is first imported by app.py. This client serves
+# (a) EVERY background job (topic classifier, page auto-comments, FAQ clustering
+# — kept on cheap, high-volume gpt-4o-mini) and (b) the customer reply ONLY when
+# no Gemini key is configured (see reply_client below). OPENAI_API_KEY is still
+# required even on a Gemini reply deployment, for those background jobs.
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-# Model for the customer-facing reply. Upgraded from gpt-4o-mini after a
-# Mongolian bake-off (2026-06): bigger models read paraphrase / Latin-script /
-# indirect intent far better in Mongolian, which mini routinely missed. The
-# background jobs (topic classifier, page auto-comments, FAQ clustering) stay
-# on gpt-4o-mini on purpose — they're cheap, high-volume, and don't need it.
-#
-# PARAM GOTCHA: gpt-5.x chat models REJECT `temperature` (must be default) and
-# `max_tokens` (use `max_completion_tokens`). `max_completion_tokens` also works
-# on gpt-4o / gpt-4.1, so the reply call below is compatible if REPLY_MODEL is
-# ever changed back to a 4-series model.
-REPLY_MODEL = "gpt-5.3-chat-latest"
+# ----- Customer-reply provider: Google Gemini (preferred if keyed) or OpenAI ---
+# The customer-facing reply can run on Google Gemini. We reach Gemini through its
+# OpenAI-COMPATIBLE endpoint (generativelanguage.../v1beta/openai/), so the whole
+# existing reply path is reused VERBATIM — chat.completions, the defer_to_staff
+# function-calling tool, and the openai AuthenticationError / RateLimitError types
+# that alert_openai_failure keys on — with no second SDK and no message/tool
+# reshaping. Set GEMINI_API_KEY (or GOOGLE_API_KEY) to switch the reply path to
+# Gemini; unset, it stays on OpenAI exactly as before.
+GEMINI_API_KEY = (os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY') or '').strip()
+GEMINI_BASE_URL = (
+    os.environ.get('GEMINI_BASE_URL')
+    or 'https://generativelanguage.googleapis.com/v1beta/openai/'
+).strip()
+
+if GEMINI_API_KEY:
+    REPLY_PROVIDER = 'gemini'
+    reply_client = OpenAI(api_key=GEMINI_API_KEY, base_url=GEMINI_BASE_URL)
+    # Highest Gemini model by default (Gemini 3.1 Pro). Override REPLY_MODEL for a
+    # cheaper/faster tier (e.g. gemini-2.5-flash) or to pin a GA id once one ships.
+    REPLY_MODEL = os.environ.get('REPLY_MODEL', '').strip() or 'gemini-3.1-pro-preview'
+else:
+    REPLY_PROVIDER = 'openai'
+    reply_client = client
+    # gpt-5.3-chat-latest after a Mongolian bake-off (2026-06): bigger models read
+    # paraphrase / Latin-script / indirect intent far better than gpt-4o-mini.
+    REPLY_MODEL = os.environ.get('REPLY_MODEL', '').strip() or 'gpt-5.3-chat-latest'
+
+# Token-cap PARAM GOTCHA — the param name differs by provider, so pick it once:
+#   • OpenAI gpt-5.x chat models REJECT `max_tokens` and a non-default
+#     `temperature`; they require `max_completion_tokens` (also valid on 4o/4.1).
+#   • Gemini's OpenAI-compatible endpoint uses the classic `max_tokens` and
+#     accepts `temperature` normally.
+# We send only the token cap (never an explicit temperature), so the default-
+# temperature requirement is satisfied for both providers.
+REPLY_MAX_TOKENS_PARAM = 'max_tokens' if REPLY_PROVIDER == 'gemini' else 'max_completion_tokens'
+# Human-readable label + billing pointer for the reply provider, surfaced in the
+# account-failure Telegram alert so the telemetry names the right vendor.
+REPLY_PROVIDER_LABEL = 'Gemini' if REPLY_PROVIDER == 'gemini' else 'OpenAI'
+REPLY_PROVIDER_BILLING_HINT = (
+    'aistudio.google.com (Google AI Studio) → API keys / Billing'
+    if REPLY_PROVIDER == 'gemini'
+    else 'platform.openai.com → Billing'
+)
 
 # Hard cap on reply length. Shorter replies = lower latency (the customer
 # waits less, and a slow reply is what makes Facebook retry the webhook) and
@@ -969,14 +1005,17 @@ from services._prompt import (  # noqa: E402
 )
 
 
-# ===================== OPENAI ACCOUNT-FAILURE ALERTING =====================
-# Account-level OpenAI failures (quota exhausted, revoked key) kill every
-# customer reply AND the knowledge-gap handoff that would normally page
-# staff — so an outage is invisible from inside the product (the 2026-06-11
-# quota outage ran 6+ hours unnoticed). alert_openai_failure is called from
-# generate_bot_response's failure path and Telegram-pings staff directly,
+# ===================== REPLY-PROVIDER ACCOUNT-FAILURE ALERTING =============
+# Account-level failures of the reply provider (OpenAI OR Gemini) — quota
+# exhausted, revoked/invalid key — kill every customer reply AND the
+# knowledge-gap handoff that would normally page staff, so an outage is
+# invisible from inside the product (the 2026-06-11 quota outage ran 6+ hours
+# unnoticed). alert_openai_failure is called from generate_bot_response's
+# failure path and Telegram-pings staff directly (naming REPLY_PROVIDER_LABEL),
 # deduplicated via GeneralSetting so the alert storm of an outage (every
-# inbound message fails) produces at most one ping per cooldown window.
+# inbound message fails) produces at most one ping per cooldown window. Both
+# providers surface these as openai.AuthenticationError / RateLimitError because
+# Gemini is reached through the OpenAI-compatible client.
 
 OPENAI_ALERT_STATE_KEY = 'openai_failure_alerted_at'
 
@@ -994,10 +1033,11 @@ def _is_openai_account_error(exc):
 
 
 def alert_openai_failure(exc):
-    """Telegram-alert staff about an account-wide OpenAI failure, at most
-    once per OPENAI_ALERT_COOLDOWN_HOURS (default 6). Runs on the
-    customer-reply path, so it must never raise — any internal failure is
-    logged and swallowed. Returns True if an alert was sent this call."""
+    """Telegram-alert staff about an account-wide reply-provider failure
+    (OpenAI or Gemini), at most once per OPENAI_ALERT_COOLDOWN_HOURS
+    (default 6). Runs on the customer-reply path, so it must never raise —
+    any internal failure is logged and swallowed. Returns True if an alert
+    was sent this call."""
     try:
         if not _is_openai_account_error(exc):
             return False
@@ -1019,11 +1059,12 @@ def alert_openai_failure(exc):
             row.value = now.isoformat()
         db.session.commit()
         send_telegram_notification(
-            "⚠️ OpenAI данс ажиллахгүй байна — бот хэрэглэгчдэд бодит хариу "
-            "өгч чадахгүй, шилжүүлгийн (handoff) мэдэгдэл ч ажиллахгүй.\n\n"
+            f"⚠️ {REPLY_PROVIDER_LABEL} данс ажиллахгүй байна — бот хэрэглэгчдэд "
+            "бодит хариу өгч чадахгүй, шилжүүлгийн (handoff) мэдэгдэл ч "
+            "ажиллахгүй.\n\n"
             "Шалтгаан: квот дууссан эсвэл API key хүчингүй. "
-            "platform.openai.com → Billing хуудсаар орж кредитээ шалгана уу. "
-            "Кредит ормогц бот шууд сэргэнэ.\n\n"
+            f"{REPLY_PROVIDER_BILLING_HINT} хуудсаар орж кредит/түлхүүрээ "
+            "шалгана уу. Засмагц бот шууд сэргэнэ.\n\n"
             f"Дэлгэрэнгүй: {str(exc)[:300]}"
         )
         return True
@@ -1040,7 +1081,9 @@ def generate_bot_response(user_message, conversation_history,
                           session_state='new', funnel_stage='curious',
                           user_first_name='', handoff_pending=False,
                           handoff_just_triggered=False):
-    """Generate bot response using OpenAI. `handoff_pending=True` enables
+    """Generate bot response using the configured reply provider (Gemini via
+    its OpenAI-compatible endpoint, or OpenAI — see reply_client / REPLY_MODEL).
+    `handoff_pending=True` enables
     advisory mode in the system prompt — bot keeps helping but doesn't
     re-route the customer to staff (since the handoff was already fired).
     `handoff_just_triggered=True` is set for the SINGLE reply right after
@@ -1061,18 +1104,19 @@ def generate_bot_response(user_message, conversation_history,
         messages.extend(conversation_history)
         messages.append({"role": "user", "content": user_message})
 
-        create_kwargs = dict(
-            model=REPLY_MODEL,
-            messages=messages,
-            max_completion_tokens=REPLY_MAX_TOKENS,
-        )
+        create_kwargs = {
+            'model': REPLY_MODEL,
+            'messages': messages,
+            # Param name is provider-specific — see REPLY_MAX_TOKENS_PARAM.
+            REPLY_MAX_TOKENS_PARAM: REPLY_MAX_TOKENS,
+        }
         # Offer the staff-handoff tool only in NORMAL mode — i.e. exactly when
         # KNOWLEDGE_GAP_HANDOFF_RULE is in the prompt. In advisory / just-
         # triggered modes the customer is already being routed to staff.
         if not handoff_pending and not handoff_just_triggered:
             create_kwargs['tools'] = DEFER_TO_STAFF_TOOL
 
-        response = client.chat.completions.create(**create_kwargs)
+        response = reply_client.chat.completions.create(**create_kwargs)
         msg = response.choices[0].message
 
         # If the model chose to defer (it lacks the info), translate that
