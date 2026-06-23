@@ -64,7 +64,7 @@ persona → current time block → canonical course list → training_content (l
 - **Customer replies run on `REPLY_MODEL` via `reply_client`** (`services/__init__.py`).
   The provider is chosen once at import:
   - `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) set → **Google Gemini**, default
-    `gemini-3.1-pro-preview` (the highest model). Reached through Gemini's
+    `gemini-2.5-flash`. Reached through Gemini's
     **OpenAI-compatible endpoint** (`GEMINI_BASE_URL`, default
     `https://generativelanguage.googleapis.com/v1beta/openai/`), so the entire reply
     path — `chat.completions`, the `defer_to_staff` function-calling tool, and the
@@ -72,12 +72,22 @@ persona → current time block → canonical course list → training_content (l
     on — is reused unchanged. **No `google-genai` dependency**, no message/tool reshaping.
   - neither set → **OpenAI** `gpt-5.3-chat-latest` (the prior default, kept after a
     Mongolian bake-off — far better at paraphrase / Latin-script / intent than 4o-mini).
-  - `REPLY_MODEL` env var overrides the default for either provider (e.g.
-    `gemini-2.5-flash` for cheaper/faster, or a pinned GA id).
+  - `REPLY_MODEL` env var overrides the default for either provider.
+  - **THINKING GOTCHA (`GEMINI_REASONING_EFFORT`, default `none`):** Gemini 2.5/3.x
+    are *thinking* models and `max_tokens` caps thinking+reply COMBINED on the compat
+    endpoint — so unmanaged thinking eats the whole budget and returns an EMPTY reply
+    (`finish_reason=length`, 0 completion tokens). `none` disables thinking and is the
+    reason `gemini-2.5-flash` is the default. **Pro / 3.x REJECT `none`** and can't
+    disable thinking, so to run **`gemini-3.1-pro-preview`** (needs BILLING — free tier
+    = limit 0) set all three: `REPLY_MODEL=gemini-3.1-pro-preview`,
+    `GEMINI_REASONING_EFFORT=low`, `REPLY_MAX_TOKENS=2048` (headroom for the ~1K
+    thinking budget + the reply). The code auto-skips `none` on non-Flash models so a
+    stale default can't brick a Pro deploy. Prod runs Pro via these env vars; the code
+    default stays on safe Flash.
   - **Background jobs** (topic classifier, page comments, FAQ clustering) ALWAYS stay
     on OpenAI `gpt-4o-mini` via `client` — cheap, high-volume. So `OPENAI_API_KEY` is
     required even on a Gemini reply deployment.
-  - **PARAM GOTCHA (now provider-aware → `REPLY_MAX_TOKENS_PARAM`):** OpenAI gpt-5.x
+  - **PARAM GOTCHA (provider-aware → `REPLY_MAX_TOKENS_PARAM`):** OpenAI gpt-5.x
     chat models reject `temperature` + `max_tokens` → use `max_completion_tokens`;
     Gemini's OpenAI-compat endpoint uses the classic `max_tokens`. We never send an
     explicit `temperature`, so the default-temperature requirement holds for both.

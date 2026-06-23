@@ -113,9 +113,13 @@ GEMINI_BASE_URL = (
 if GEMINI_API_KEY:
     REPLY_PROVIDER = 'gemini'
     reply_client = OpenAI(api_key=GEMINI_API_KEY, base_url=GEMINI_BASE_URL)
-    # Highest Gemini model by default (Gemini 3.1 Pro). Override REPLY_MODEL for a
-    # cheaper/faster tier (e.g. gemini-2.5-flash) or to pin a GA id once one ships.
-    REPLY_MODEL = os.environ.get('REPLY_MODEL', '').strip() or 'gemini-3.1-pro-preview'
+    # Default to gemini-2.5-flash: it works on the FREE tier and lets us turn
+    # thinking OFF (GEMINI_REASONING_EFFORT='none') for fast, full-length chat
+    # replies. The Pro tier (gemini-3.1-pro-preview) is higher quality but needs
+    # BILLING (free tier = limit 0) and CAN'T disable thinking — to use it set
+    # REPLY_MODEL=gemini-3.1-pro-preview, GEMINI_REASONING_EFFORT=low, and raise
+    # REPLY_MAX_TOKENS (e.g. 2048) so the thinking budget + reply both fit.
+    REPLY_MODEL = os.environ.get('REPLY_MODEL', '').strip() or 'gemini-2.5-flash'
 else:
     REPLY_PROVIDER = 'openai'
     reply_client = client
@@ -139,6 +143,21 @@ REPLY_PROVIDER_BILLING_HINT = (
     if REPLY_PROVIDER == 'gemini'
     else 'platform.openai.com → Billing'
 )
+
+# Gemini 2.5/3.x are THINKING models: by default they spend output tokens on
+# internal reasoning BEFORE the visible reply. On the OpenAI-compat endpoint
+# `max_tokens` caps thinking + reply COMBINED, so unmanaged thinking can swallow
+# the whole REPLY_MAX_TOKENS budget and return an EMPTY reply (finish_reason=
+# length, completion_tokens=0) — plus it adds latency/cost we don't want on a
+# chat bot. GEMINI_REASONING_EFFORT maps to the OpenAI-compat `reasoning_effort`:
+#   • 'none'                    -> thinking OFF. Valid ONLY on 2.5 Flash (default).
+#   • 'low' | 'medium' | 'high' -> bounded thinking (~1K / 8K / 24K budget). Use
+#     one of these for Pro / 3.x models (they REJECT 'none'); give REPLY_MAX_TOKENS
+#     headroom for that budget PLUS the reply (e.g. 2048 at 'low').
+#   • '' / 'auto' / 'default' / 'dynamic' -> omit the field; let Gemini decide.
+# Applied only on the Gemini path, and 'none' is auto-skipped on non-Flash models
+# (which 400 on it) so a leftover default can't brick a Pro deployment.
+GEMINI_REASONING_EFFORT = os.environ.get('GEMINI_REASONING_EFFORT', 'none').strip().lower()
 
 # Hard cap on reply length. Shorter replies = lower latency (the customer
 # waits less, and a slow reply is what makes Facebook retry the webhook) and
@@ -1115,6 +1134,24 @@ def generate_bot_response(user_message, conversation_history,
         # triggered modes the customer is already being routed to staff.
         if not handoff_pending and not handoff_just_triggered:
             create_kwargs['tools'] = DEFER_TO_STAFF_TOOL
+
+        # Gemini thinking control (see GEMINI_REASONING_EFFORT). Passed via
+        # extra_body so it works regardless of openai-SDK version, only on the
+        # Gemini path. 'none' is skipped on non-Flash models (they 400 on it) so
+        # a stale default can't hard-fail a Pro/3.x deployment.
+        if REPLY_PROVIDER == 'gemini':
+            effort = GEMINI_REASONING_EFFORT
+            if effort in ('', 'auto', 'default', 'dynamic'):
+                effort = None
+            elif effort == 'none' and 'flash' not in REPLY_MODEL.lower():
+                logger.warning(
+                    "GEMINI_REASONING_EFFORT='none' is invalid for non-Flash model "
+                    "%r; omitting it (model will think dynamically). Set 'low'/"
+                    "'medium'/'high' for Pro/3.x models.", REPLY_MODEL,
+                )
+                effort = None
+            if effort:
+                create_kwargs['extra_body'] = {'reasoning_effort': effort}
 
         response = reply_client.chat.completions.create(**create_kwargs)
         msg = response.choices[0].message
