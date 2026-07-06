@@ -31,6 +31,18 @@ from models import (
     Product, ProductLink, TeamMember, TrainingSnippet, User,
 )
 
+# Warm the stdlib `netrc` import at startup (import for side effect only).
+# `requests` does a LAZY `from netrc import ...` inside get_netrc_auth() during
+# prepare_request. On a COLD gunicorn worker, a first-contact webhook (which
+# calls get_facebook_user_info -> requests.get synchronously) can race a
+# background reply thread that is also importing, and the two deadlock on
+# CPython's import lock — the worker hangs until gunicorn SIGKILLs it at the
+# 60s timeout, the webhook returns 500, and that customer gets no reply.
+# Importing netrc here puts it in sys.modules once, up front, so requests'
+# lazy import is a no-op and never takes the import lock mid-request.
+# Observed in prod 2026-07-06 (routes/webhook.py get_facebook_user_info path).
+import netrc  # noqa: E402,F401
+
 logger = logging.getLogger(__name__)
 
 
