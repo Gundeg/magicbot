@@ -247,10 +247,20 @@
 </ul>
 
 <h4 id="m-troubleshooting" class="doc-section">9. Алдааны шийдэл</h4>
-<h5>Бот хэрэглэгчид хариулахаа больсон</h5>
+<h5>Нэг хэрэглэгчид бот хариулахаа больсон</h5>
 <p>
     <em>Ажлын даалгавар → Бот зогссон</em> таб дээр шалга. "Bot асаах" товчоор шууд сэргээ. Эсвэл
     тухайн хэрэглэгчийн handoff issue-г "Шийдэх" товчоор хаа — бот автоматаар асна.
+</p>
+<h5>Бүх хэрэглэгчид огт хариу авахгүй болсон (бот бүрэн чимээгүй)</h5>
+<p>
+    Нэг биш, <strong>бүх</strong> хэрэглэгч хариу авахгүй бол ихэвчлэн Facebook-ийн
+    <em>Page Access Token</em> хүчингүй болсон байдаг (Facebook нууц үг солигдсон, эсвэл ~60 хоногийн
+    хугацаа дууссан). Бот мессежийг хүлээж авсаар байгаа ч хариу <strong>илгээж чадахгүй</strong> болдог.
+    Засах товч алхам: Graph API Explorer-оос <strong>Page</strong> токен (User токен биш!) шинээр авч,
+    Render → <strong>magicbot</strong> сервисийн <em>Environment</em> дэх <code>FACEBOOK_ACCESS_TOKEN</code>-ийг
+    сольж, "Save, rebuild, and deploy" дарна. Дэлгэрэнгүй, шалгах команд зэргийг
+    <em>«Facebook Page Access Token хэрхэн авах тухай дэлгэрэнгүй заавар» §5 (Runbook)</em>-аас үзнэ үү.
 </p>
 <h5>Шинэ handoff гарсан ч Telegram мэдэгдэхгүй байна</h5>
 <p>
@@ -429,6 +439,20 @@
 <p class="text-muted small">
     <code>enqueue_background</code> runs inline under <code>TESTING</code> (deterministic; in-memory SQLite is
     per-connection). A background failure = no reply, logged, no crash, no FB retry.
+</p>
+<p class="text-muted small">
+    <strong>Two send-path gotchas (both caused live outages):</strong>
+    (1) <code>FACEBOOK_ACCESS_TOKEN</code> must be a <strong>Page</strong> token, not a User token. The Send API
+    posts to <code>me/messages</code>, so <code>me</code> must resolve to the Page. The Graph API Explorer
+    <em>defaults</em> to a User token; copy that and every send fails
+    <code>GraphMethodException code:100 subcode:33 ("Object with ID 'me' does not exist")</code> — the bot looks
+    silent. An expired/invalidated token fails <code>OAuthException code:190</code> (subcode 463 = expiry,
+    460 = FB password change). Verify a token with
+    <code>GET graph.facebook.com/v18.0/me</code> → must return the Page, not a person.
+    (2) Step 3's <code>get_facebook_user_info</code> → <code>requests.get</code> runs synchronously in the webhook.
+    A load-bearing <code>import netrc</code> at the top of <code>services/__init__.py</code> pre-warms requests'
+    lazy <code>get_netrc_auth</code> import so a cold worker can't deadlock on the import lock
+    (60s <code>WORKER TIMEOUT</code> → <code>500</code> → dropped first-contact message). Do not remove it.
 </p>
 
 <h4 id="t-handoff" class="doc-section">7. Handoff lifecycle</h4>
