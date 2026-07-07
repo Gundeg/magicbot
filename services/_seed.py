@@ -22,10 +22,38 @@ import services as _svc
 logger = logging.getLogger(__name__)
 
 # Description stamped on the per-course registration CourseLink seeded for
-# every active course. It's the single form shared across all courses and is
-# kept in sync with GeneralSetting.google_form_url — the admin General tab
-# save propagates changes to every CourseLink carrying this description.
+# every active course. Registration links are admin-managed per course; the
+# seed bootstraps this row create-only and never overwrites it.
 COURSE_REGISTRATION_LINK_DESCRIPTION = 'Сургалтанд сууя, бүртгүүлье'
+
+# The pre-2026-07 seeded body of the registration-routing snippet. Kept so a
+# defaults reseed can one-shot upgrade live installs still carrying it to
+# NEW_REGISTRATION_SNIPPET_BODY while leaving admin-customised bodies alone
+# (mirrors KNOWN_DEFAULT_MF_DESCRIPTIONS below).
+OLD_REGISTRATION_SNIPPET_BODY = (
+    "Хэрэглэгч 'бүртгүүлэх', 'элсэх', 'яаж бүртгүүлэх', "
+    "'шууд бүртгүүлэх боломжтой юу?', 'register hiih', "
+    "'register hiimer', 'burtguulj boloh uu?', 'enroll', "
+    "'элсэлт' гэх мэт асуувал ЭХЛЭЭД БҮРТГЭЛИЙН ЛИНКийг "
+    "үндсэн хариулт болгож үзүүл — энэ нь өөрөө бөглөж "
+    "бүртгүүлэх форм. Эсвэл утсаа үлдээвэл ажилтан "
+    "холбогдоно гэдгийг хоёрдогч сонголт болгож нэм. "
+    "Хэрэглэгчээс заавал утас ШААРДАХГҮЙ — форм линк нь "
+    "хүчинтэй бие даасан зам."
+)
+# Course-specific behaviour: clarify which course, give that course's
+# registration link, fall back to the website when a course has none.
+NEW_REGISTRATION_SNIPPET_BODY = (
+    "Хэрэглэгч 'бүртгүүлэх', 'элсэх', 'яаж бүртгүүлэх', "
+    "'register hiih', 'enroll', 'элсэлт' гэх мэт асуувал ЭХЛЭЭД "
+    "аль сургалтад хамрагдахыг тодруул (ямар анги, ямар хэлбэр). "
+    "Дараа нь тухайн сургалтын бүртгэлийн линкийг (курсын доор "
+    "жагссан 'Сургалтанд сууя, бүртгүүлье' линк) хариултдаа өг. "
+    "Хэрэв тухайн сургалтад бүртгэлийн линк олдохгүй бол манай "
+    "вэбсайтын линкийг өг — тэнд бүх үйлчилгээ, мэдээлэл, холбоос "
+    "байрладаг. Хэрэглэгчээс заавал утас ШААРДАХГҮЙ; утсаа үлдээвэл "
+    "ажилтан холбогдоно гэдгийг хоёрдогч сонголт болгож нэмж болно."
+)
 
 
 # ===================== SCHEMA MIGRATION =====================
@@ -597,17 +625,7 @@ def seed_discovery_phrasing_snippets():
             'title': 'Сургалтад бүртгүүлэх асуултын чиглэл',
             'category': 'course-routing',
             'priority': 'high',
-            'body': (
-                "Хэрэглэгч 'бүртгүүлэх', 'элсэх', 'яаж бүртгүүлэх', "
-                "'шууд бүртгүүлэх боломжтой юу?', 'register hiih', "
-                "'register hiimer', 'burtguulj boloh uu?', 'enroll', "
-                "'элсэлт' гэх мэт асуувал ЭХЛЭЭД БҮРТГЭЛИЙН ЛИНКийг "
-                "үндсэн хариулт болгож үзүүл — энэ нь өөрөө бөглөж "
-                "бүртгүүлэх форм. Эсвэл утсаа үлдээвэл ажилтан "
-                "холбогдоно гэдгийг хоёрдогч сонголт болгож нэм. "
-                "Хэрэглэгчээс заавал утас ШААРДАХГҮЙ — форм линк нь "
-                "хүчинтэй бие даасан зам."
-            ),
+            'body': NEW_REGISTRATION_SNIPPET_BODY,
         },
         {
             'title': 'Анги, хичээл тодруулах асуулт',
@@ -635,6 +653,14 @@ def seed_discovery_phrasing_snippets():
             ),
         },
     ]
+
+    # One-shot upgrade: bump live rows still on the old seeded body to the new
+    # course-specific behaviour, but never clobber an admin-edited body.
+    reg_row = TrainingSnippet.query.filter_by(
+        title='Сургалтад бүртгүүлэх асуултын чиглэл').first()
+    if reg_row and (reg_row.body or '').strip() == OLD_REGISTRATION_SNIPPET_BODY.strip():
+        reg_row.body = NEW_REGISTRATION_SNIPPET_BODY
+        log.append('Upgraded registration snippet body to course-specific rule.')
 
     existing_titles = {
         t for (t,) in db.session.query(TrainingSnippet.title).all() if t

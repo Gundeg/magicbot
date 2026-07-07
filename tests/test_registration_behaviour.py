@@ -77,3 +77,61 @@ def test_seed_does_not_overwrite_admin_course_link(app, db_session):
     CourseLink.query.filter_by(course_id=course.id).delete()
     Course.query.filter_by(id=course.id).delete()
     db.session.commit()
+
+
+NEW_REG_SNIPPET_MARKER = 'аль сургалтад хамрагдахыг тодруул'
+
+
+def test_registration_snippet_seeds_new_behaviour(app, db_session):
+    from extensions import db
+    from models import TrainingSnippet
+    from services import seed_discovery_phrasing_snippets
+
+    TrainingSnippet.query.delete()
+    db.session.commit()
+
+    seed_discovery_phrasing_snippets()
+    db.session.expire_all()
+
+    snip = TrainingSnippet.query.filter_by(
+        title='Сургалтад бүртгүүлэх асуултын чиглэл').first()
+    assert snip is not None
+    assert snip.priority == 'high'
+    assert NEW_REG_SNIPPET_MARKER in snip.body
+    assert 'вэбсайт' in snip.body
+    TrainingSnippet.query.delete()
+    db.session.commit()
+
+
+def test_registration_snippet_updates_known_old_body_but_keeps_admin_edit(app, db_session):
+    from extensions import db
+    from models import TrainingSnippet
+    from services import seed_discovery_phrasing_snippets
+    from services._seed import OLD_REGISTRATION_SNIPPET_BODY
+
+    TrainingSnippet.query.delete()
+    db.session.commit()
+
+    # A live row still carrying the old seeded body -> should be upgraded.
+    db.session.add(TrainingSnippet(
+        title='Сургалтад бүртгүүлэх асуултын чиглэл',
+        body=OLD_REGISTRATION_SNIPPET_BODY, category='course-routing',
+        priority='high', is_active=True))
+    db.session.commit()
+
+    seed_discovery_phrasing_snippets()
+    db.session.expire_all()
+    snip = TrainingSnippet.query.filter_by(
+        title='Сургалтад бүртгүүлэх асуултын чиглэл').first()
+    assert NEW_REG_SNIPPET_MARKER in snip.body
+
+    # An admin-customised body must NOT be touched.
+    snip.body = 'МИНИЙ ГАРААР ЗАССАН ТЕКСТ'
+    db.session.commit()
+    seed_discovery_phrasing_snippets()
+    db.session.expire_all()
+    snip = TrainingSnippet.query.filter_by(
+        title='Сургалтад бүртгүүлэх асуултын чиглэл').first()
+    assert snip.body == 'МИНИЙ ГАРААР ЗАССАН ТЕКСТ'
+    TrainingSnippet.query.delete()
+    db.session.commit()
