@@ -73,7 +73,6 @@ BUSINESS_GENERAL_KEYS = (
     'main_office_address',
     'main_office_phone',
     'business_website_url',
-    'google_form_url',
 )
 
 
