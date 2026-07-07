@@ -197,11 +197,6 @@ if not FACEBOOK_APP_SECRET and not FACEBOOK_ALLOW_UNVERIFIED:
         "without the secret, set FACEBOOK_ALLOW_UNVERIFIED=1 — never use that "
         "in production, as it lets anyone forge Messenger traffic."
     )
-# Loaded at import time as a fallback; the live value is fetched by
-# get_google_form_url() which also checks the DB setting written from
-# the admin panel (Business Management -> General Information).
-GOOGLE_FORM_URL = os.environ.get('GOOGLE_FORM_URL', '')
-
 # Stamped onto every bot-sent Messenger message and echoed back in
 # message_echoes webhook events. Lets the webhook tell its OWN outgoing
 # messages apart from a human agent's reply typed in the Page inbox — the
@@ -213,21 +208,6 @@ HUMAN_TAKEOVER_MUTE_MINUTES = int(
     os.environ.get('HUMAN_TAKEOVER_MUTE_MINUTES', '30')
 )
 
-
-def get_google_form_url():
-    """Self-service registration link the bot can quote. Priority order:
-       1) Admin-panel value (GeneralSetting key 'google_form_url')
-       2) GOOGLE_FORM_URL env var (set at import time)
-       3) Empty string — the prompt drops the registration block entirely.
-
-    Was previously hard-wired to env-var only, which meant admin changes
-    in /business-management/general were silently ignored by the bot
-    even though they showed up in the form.
-    """
-    db_value = get_setting('google_form_url', '')
-    if db_value and db_value.strip():
-        return db_value.strip()
-    return GOOGLE_FORM_URL
 
 # Training content fallback chain: env → file → tiny default. The DB row in
 # GeneralSetting('training_content') takes precedence at runtime; see
@@ -1768,12 +1748,13 @@ def _nudge_message_for(user):
         name_prefix = f"{fname} аа, "
 
     if stage == 'ready':
-        link = get_google_form_url()
-        link_line = f"\n\nБүртгэлийн линк: {link}" if link else ""
+        link = get_business_website_url()
+        link_line = f"\n\nДэлгэрэнгүй мэдээлэл: {link}" if link else ""
         return (
             f"{name_prefix}та бүртгүүлэх талаар бодож үзсэн байх. "
             "Утасны дугаараа үлдээвэл бид өөрсдөө эргэж холбогдоно. "
-            "Эсвэл доорх линкээр шууд бүртгүүлж болно." + link_line
+            "Аль сургалтад хамрагдахаа хэлбэл тухайн ангийн бүртгэлийн "
+            "мэдээллийг илгээе." + link_line
         )
     if stage == 'pricing':
         return (

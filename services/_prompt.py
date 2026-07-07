@@ -460,24 +460,6 @@ def build_system_prompt(session_state='new', funnel_stage='curious',
     answer_lines, refer_lines, paused_services = _format_business_lines()
     services_text = _format_services()
 
-    google_form_url = _svc.get_google_form_url()
-    if google_form_url:
-        registration_block = (
-            f"БҮРТГЭЛИЙН ЛИНК (ӨӨРӨӨ БӨГЛӨЖ БҮРТГҮҮЛЭХ ЗАМ):\n"
-            f"{google_form_url}\n"
-            f"Энэ нь хэрэглэгчийн ӨӨРИЙН биеэр одоо бөглөж бүртгүүлж "
-            f"болох форм. Хэрэглэгч 'шууд бүртгүүлж болох уу?', "
-            f"'яаж бүртгүүлэх вэ?', 'би одоо бүртгүүлмээр байна' гэх "
-            f"мэт асуувал ЭНЭ ЛИНКИЙГ ҮНДСЭН ХАРИУЛТ БОЛГОЖ ӨГ. "
-            f"Хэрэглэгчид 'утсаа үлдээ' гэж шаардахгүйгээр, форм "
-            f"бөглөж бүртгүүлэх нь биеэ дааж шууд бүртгүүлэх "
-            f"бодит сонголт юм. Утасны дугаар үлдээх нь ХОЁР ДАХЬ "
-            f"сонголт (ажилтан тантай эргэж холбогдоно) — хоёуланг "
-            f"нь нэг хариултанд оруулж, хэрэглэгчид сонгох эрхийг өг.\n"
-        )
-    else:
-        registration_block = ""
-
     if user_first_name:
         name_block = (
             f"ХЭРЭГЛЭГЧИЙН НЭР: {user_first_name}\n"
@@ -586,7 +568,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious',
 ТҮГЭЭМЭЛ АСУУЛТУУД:
 {faq_text}
 
-{registration_block}{name_block}{funnel_rule}
+{name_block}{funnel_rule}
 
 {_svc.PROFESSIONAL_ACCURACY_RULE}
 
