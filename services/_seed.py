@@ -21,6 +21,12 @@ import services as _svc
 
 logger = logging.getLogger(__name__)
 
+# Description stamped on the per-course registration CourseLink seeded for
+# every active course. It's the single form shared across all courses and is
+# kept in sync with GeneralSetting.google_form_url — the admin General tab
+# save propagates changes to every CourseLink carrying this description.
+COURSE_REGISTRATION_LINK_DESCRIPTION = 'Сургалтанд сууя, бүртгүүлье'
+
 
 # ===================== SCHEMA MIGRATION =====================
 
@@ -674,25 +680,6 @@ def seed_default_magic_links():
 
     log = []
 
-    # The course registration form is also the global БҮРТГЭЛИЙН ЛИНК
-    # injected at the top of the system prompt. Keep the GeneralSetting in
-    # sync alongside the per-course CourseLink rows below so the prompt's
-    # registration block and the course list quote the same URL.
-    course_form_url = (
-        'https://docs.google.com/forms/d/e/'
-        '1FAIpQLSejDvCSqo6J5cgqrdZdnzttz-1ahobmypNr0wLlPTRGehtEog/viewform'
-    )
-    existing = GeneralSetting.query.filter_by(key='google_form_url').first()
-    if existing:
-        if (existing.value or '').strip() != course_form_url:
-            existing.value = course_form_url
-            log.append(f'Updated GeneralSetting.google_form_url -> {course_form_url}')
-        else:
-            log.append('GeneralSetting.google_form_url already set; left unchanged.')
-    else:
-        db.session.add(GeneralSetting(key='google_form_url', value=course_form_url))
-        log.append(f'Created GeneralSetting.google_form_url = {course_form_url}')
-
     def _find_product(name_substrings):
         for s in name_substrings:
             row = Product.query.filter(Product.name.ilike(f'%{s}%')).order_by(Product.id.asc()).first()
@@ -809,9 +796,15 @@ def seed_default_magic_links():
         )
 
     # ----- Course registration form: one CourseLink per active course -----
-    # Same URL for every course (also held in GeneralSetting.google_form_url
-    # above), so admins editing one course's link won't desync the rest.
-    course_link_description = 'Сургалтанд сууя, бүртгүүлье'
+    # Create-only. The registration form is admin-managed per course; the seed
+    # only bootstraps courses that have NO registration link yet (matched by
+    # description), and never overwrites an existing one. The default URL is
+    # used solely for freshly-created links.
+    course_form_url = (
+        'https://docs.google.com/forms/d/e/'
+        '1FAIpQLSejDvCSqo6J5cgqrdZdnzttz-1ahobmypNr0wLlPTRGehtEog/viewform'
+    )
+    course_link_description = COURSE_REGISTRATION_LINK_DESCRIPTION
     course_link_note = (
         'Бүртгэл бөглөж бүртгүүлэх бодит зам — утас лавлахгүйгээр шууд '
         'бүртгэгдэх боломжтой. Бүх ангид нэг л форм.'
@@ -820,21 +813,26 @@ def seed_default_magic_links():
     if not active_courses:
         log.append('SKIPPED courses: no active Course rows (run seed_courses_and_faqs first).')
     else:
-        c_added = c_updated = c_unchanged = 0
+        c_added = c_skipped = 0
         for c in active_courses:
-            outcome = _upsert_link(
-                CourseLink, 'course_id', c.id,
-                course_link_description, course_form_url, course_link_note,
-            )
-            if outcome == 'added':
-                c_added += 1
-            elif outcome == 'updated':
-                c_updated += 1
-            else:
-                c_unchanged += 1
+            has_reg = CourseLink.query.filter_by(
+                course_id=c.id, description=course_link_description
+            ).first()
+            if has_reg:
+                c_skipped += 1
+                continue
+            db.session.add(CourseLink(
+                course_id=c.id,
+                description=course_link_description,
+                url=course_form_url,
+                note=course_link_note,
+                is_active=True,
+                sort_order=0,
+            ))
+            c_added += 1
         log.append(
-            f'course registration link: +{c_added} new, ~{c_updated} updated, '
-            f'={c_unchanged} unchanged across {len(active_courses)} active course(s).'
+            f'course registration link: +{c_added} new, '
+            f'={c_skipped} left untouched across {len(active_courses)} active course(s).'
         )
 
     # ----- Magic Finance product description: one-shot reword -----

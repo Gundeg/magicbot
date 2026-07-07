@@ -44,3 +44,36 @@ def test_ready_nudge_quotes_website_not_form(app, db_session, _clean_settings):
                         funnel_stage='ready')
     msg = _nudge_message_for(user)
     assert 'https://magicgroup.mn' in msg
+
+
+def test_seed_does_not_overwrite_admin_course_link(app, db_session):
+    from extensions import db
+    from models import Course, CourseLink, GeneralSetting
+    from services import seed_default_magic_links
+    from services._seed import COURSE_REGISTRATION_LINK_DESCRIPTION
+
+    # Course has no business_line_id column (see models.py) — mirror the
+    # minimal Course used in tests/test_seed_idempotency.py::_build_catalog.
+    course = Course(name='Seed Reglink Course', course_type='Classroom',
+                    price=100000, time='18:00', is_active=True)
+    db.session.add(course)
+    db.session.commit()
+    admin_url = 'https://forms.example.com/ADMIN_EDITED'
+    db.session.add(CourseLink(course_id=course.id,
+                              description=COURSE_REGISTRATION_LINK_DESCRIPTION,
+                              url=admin_url, is_active=True))
+    db.session.commit()
+
+    seed_default_magic_links()
+    db.session.expire_all()
+
+    links = CourseLink.query.filter_by(course_id=course.id).all()
+    reg_links = [l for l in links
+                 if l.description == COURSE_REGISTRATION_LINK_DESCRIPTION]
+    assert len(reg_links) == 1, 'seed added a duplicate registration link'
+    assert reg_links[0].url == admin_url, 'seed overwrote the admin link'
+    assert GeneralSetting.query.filter_by(key='google_form_url').first() is None
+
+    CourseLink.query.filter_by(course_id=course.id).delete()
+    Course.query.filter_by(id=course.id).delete()
+    db.session.commit()
