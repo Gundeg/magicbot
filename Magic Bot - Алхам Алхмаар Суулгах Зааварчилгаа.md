@@ -84,7 +84,6 @@ OPENAI_API_KEY=таны_openai_api_key_энд_бичнэ
 GEMINI_API_KEY=таны_gemini_api_key_энд_бичнэ
 FACEBOOK_PAGE_ID=таны_page_id_энд_бичнэ
 FACEBOOK_ACCESS_TOKEN=таны_access_token_энд_бичнэ
-GOOGLE_FORM_URL=https://docs.google.com/forms/d/e/1FAIpQLSerwmfsvdYbcgZBUTySCrx6ueA2thp_7-7n-uUDoRF4lvAXKw/viewform
 SECRET_KEY=magic_bot_secret_key_2024
 VERIFY_TOKEN=magic_bot_verify_token
 ```

@@ -20,7 +20,7 @@ from services import (BOT_PERSONA, build_system_prompt,
 
 
 # Settings keys that belong on the Bot Settings tab. The other half of the
-# old Settings page (center_*, main_office_*, google_form_url) lives on
+# old Settings page (center_*, main_office_*, business_website_url) lives on
 # Business Management > General Information.
 BOT_SETTINGS_KEYS = (
     'training_comment',

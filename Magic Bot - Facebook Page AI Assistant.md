@@ -92,7 +92,6 @@ OPENAI_API_KEY=your_openai_api_key_here
 GEMINI_API_KEY=your_gemini_api_key_here
 FACEBOOK_PAGE_ID=your_facebook_page_id
 FACEBOOK_ACCESS_TOKEN=your_facebook_access_token
-GOOGLE_FORM_URL=https://docs.google.com/forms/d/e/1FAIpQLSerwmfsvdYbcgZBUTySCrx6ueA2thp_7-7n-uUDoRF4lvAXKw/viewform
 VERIFY_TOKEN=magic_bot_verify_token
 SECRET_KEY=your_secret_key_for_sessions
 ```
@@ -309,7 +308,6 @@ GEMINI_REASONING_EFFORT - Optional: low|medium|high for Pro/3.x ('none' = thinki
 REPLY_MAX_TOKENS        - Optional: reply length cap (default 500; use 2048 for Pro)
 FACEBOOK_PAGE_ID        - Your Facebook Page ID
 FACEBOOK_ACCESS_TOKEN   - Facebook Page Access Token
-GOOGLE_FORM_URL         - Registration form link
 VERIFY_TOKEN            - Webhook verification token
 SECRET_KEY              - Session encryption key
 ```

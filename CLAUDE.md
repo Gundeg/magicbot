@@ -51,7 +51,13 @@ The last super_admin cannot be demoted or self-demote; the toggle handler enforc
 Built fresh per request in `services/_prompt.py:build_system_prompt`. Sources in order:
 persona → current time block → canonical course list → training_content (legacy, may be empty)
 → training snippets (★high first) → team members → business lines (answer / refer / paused)
-→ FAQs → registration-link block → session-state rule → funnel rule → behavioral rules.
+→ FAQs → session-state rule → funnel rule → behavioral rules.
+
+Registration is per-course: each course's `CourseLink` (description "Сургалтанд сууя,
+бүртгүүлье") is listed under it, and the website (`business_website_url`) is the fallback
+when a course has none. The clarify-course rule lives in the ★high `Сургалтад бүртгүүлэх
+асуултын чиглэл` snippet, not in code. The old global `google_form_url` form was removed
+2026-07-07.
 
 **Leverage hierarchy for fixing bot behavior** (smallest to largest blast radius):
 1. **Snippet** — one rule for one question. Default choice.
@@ -113,6 +119,7 @@ These look real but were retired. Don't read or write them in new code; don't ad
 | `GeneralSetting.center_address` | Removed in v2 cleanup. Use `main_office_address`. |
 | `GeneralSetting.mute_duration_hours` | UI removed; `trigger_handoff` no longer reads it. Bot mutes on `take_over_chat` OR an untagged Messenger echo (human-agent reply — see "Human-takeover auto-mute"). |
 | `GeneralSetting.training_content` | UI removed; prompt builder still reads for backward compat. Won't be set going forward. |
+| `GeneralSetting.google_form_url` | Removed 2026-07-07 (getter, env var, admin input, prompt block all deleted). Registration is per-course (`CourseLink`) with `business_website_url` as fallback; the clarify-course rule lives in the `Сургалтад бүртгүүлэх асуултын чиглэл` snippet. Any stale DB row is inert. |
 
 When removing a UI for a setting: drop the form input, but leave the underlying setter/getter as a one-release no-op in case rollback is needed.
 

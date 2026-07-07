@@ -369,7 +369,7 @@
         <tr><td><code>chat_question_cluster</code></td><td>LLM-grouped themes from real user messages — populated by services.cluster_chat_questions() weekly or manually. <code>promoted_to_faq_id</code> tracks which clusters were turned into curated FAQ</td></tr>
         <tr><td><code>admin_issue</code></td><td>Handoff queue (issue_type='handoff') and other unresolved items. Drives advisory mode while status='open'</td></tr>
         <tr><td><code>page_post</code></td><td>FB Page posts the bot has already auto-commented on</td></tr>
-        <tr><td><code>general_setting</code></td><td>Key/value bucket for runtime-editable settings (handoff_sensitivity, telegram_chat_ids, mute_duration_hours, google_form_url, etc.)</td></tr>
+        <tr><td><code>general_setting</code></td><td>Key/value bucket for runtime-editable settings (handoff_sensitivity, telegram_chat_ids, mute_duration_hours, business_website_url, etc.)</td></tr>
         <tr><td><code>team_member</code></td><td>Staff directory included in the system prompt</td></tr>
         <tr><td><code>training_snippet</code></td><td>Additive per-topic notes, priority high/normal, optional category. Discovery-phrasing snippets seeded via /admin/api/seed-discovery-snippets</td></tr>
         <tr><td><code>audit_entry</code></td><td>Append-only log of every admin action</td></tr>
@@ -544,7 +544,6 @@
     <tbody>
         <tr><td><code>SQLALCHEMY_DATABASE_URI</code></td><td>Override default <code>sqlite:///magic_bot.db</code>. Use <code>sqlite:////var/data/magic_bot.db</code> with a Render persistent disk, or a Postgres URI.</td></tr>
         <tr><td><code>TELEGRAM_BOT_TOKEN</code></td><td>Enables Telegram handoff notifications</td></tr>
-        <tr><td><code>GOOGLE_FORM_URL</code></td><td>Registration link the bot embeds for "ready" stage users</td></tr>
         <tr><td><code>TRAINING_CONTENT</code> / <code>BOT_PERSONA</code></td><td>Per-deployment branding fallbacks (DB setting wins if present)</td></tr>
         <tr><td><code>COMPANY_*</code> / <code>PRODUCT_NAME</code></td><td>Used by the public <code>/privacy</code> page</td></tr>
         <tr><td><code>SEED_DEFAULTS</code></td><td><code>false</code> to skip seeding Magic's default courses/FAQs (use on non-Magic deployments)</td></tr>

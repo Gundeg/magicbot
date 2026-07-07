@@ -120,7 +120,6 @@ The `.gitignore` keeps your `.env` and the SQLite DB out of git.
    | `FACEBOOK_PAGE_ID` | (from step 2) |
    | `FACEBOOK_ACCESS_TOKEN` | long-lived Page token from step 2 |
    | `VERIFY_TOKEN` | (from step 3) |
-   | `GOOGLE_FORM_URL` | your registration form URL |
    | `INITIAL_ADMIN_PASSWORD` | strong password — you'll log in as `admin` with this |
    | `ADMIN_EMAIL` | your admin email (optional) |
    | `ENABLE_POLLING` | `false` (turn on later if you want post auto-comments) |
