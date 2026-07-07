@@ -13,7 +13,7 @@ A fully automated Facebook Page management system with a Messenger AI bot, admin
 - Automatically detects when to escalate to admin
 
 ### 2. **Lead Capture & Management**
-- Collects user phone numbers and sends Google Form registration link
+- Collects user phone numbers and shares the relevant course's registration link (falling back to the company website when a course has none)
 - Automatically tags users as leads once phone number is provided
 - Sends handoff message to leads: "Now connecting you with our registration team"
 - Separate leads folder/category for easy tracking
