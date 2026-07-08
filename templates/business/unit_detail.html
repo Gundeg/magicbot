@@ -379,7 +379,15 @@
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('meta[name=csrf-token]')?.content || ''},
             body: JSON.stringify(payload),
-        }).then(r => r.json());
+        }).then(async r => {
+            // A validation reject is JSON ({success:false, error}) even on 400,
+            // so parse and return that. A 500/redirect/HTML page is NOT json —
+            // surface it as an error instead of silently swallowing it (which
+            // made a failed save look like a dead button).
+            const ct = r.headers.get('content-type') || '';
+            if (ct.includes('application/json')) return r.json();
+            throw new Error('Сервер алдаа (' + r.status + '). Хуудсаа шинэчилж дахин оролдоно уу.');
+        });
     }
 
     function escapeHtml(s) {
@@ -520,7 +528,7 @@
         post(payload).then(r => {
             if (r.success) location.reload();
             else toast(r.error || 'Алдаа гарлаа.', false);
-        });
+        }).catch(err => toast(err.message || 'Алдаа гарлаа.', false));
     });
 
     document.querySelectorAll('.toggle-item').forEach(btn => {
@@ -528,7 +536,7 @@
             post({action: 'toggle', id: btn.dataset.id}).then(r => {
                 if (r.success) location.reload();
                 else toast(r.error || 'Алдаа гарлаа.', false);
-            });
+            }).catch(err => toast(err.message || 'Алдаа гарлаа.', false));
         });
     });
 
@@ -538,7 +546,7 @@
             post({action: 'delete', id: btn.dataset.id}).then(r => {
                 if (r.success) location.reload();
                 else toast(r.error || 'Алдаа гарлаа.', false);
-            });
+            }).catch(err => toast(err.message || 'Алдаа гарлаа.', false));
         });
     });
 })();

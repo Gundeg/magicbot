@@ -226,6 +226,58 @@ def ensure_schema():
                 logger.info("Schema migration skipped (conversation_topic table): %s", e)
 
 
+def make_course_dates_nullable(engine=None):
+    """One-off migration: drop the legacy NOT NULL on ``course.start_date`` /
+    ``course.end_date`` so self-paced ('100% Online') courses — which have no
+    fixed dates — can be saved without a 500 (``IntegrityError: NOT NULL
+    constraint failed: course.start_date``).
+
+    The model already declares both columns nullable; only older prod SQLite
+    DBs created them NOT NULL. SQLite can't change a column's nullability in
+    place, so rebuild the table from the model schema, copying every existing
+    row. Idempotent: a no-op once the columns are already nullable.
+
+    Deliberately NOT wired into ``ensure_schema()`` (which runs in every web
+    worker at boot) so two gunicorn workers can't race on the table rebuild.
+    Run it once from ``scripts/make_course_dates_nullable.py``. Returns a
+    human-readable status line.
+    """
+    from sqlalchemy import inspect as sa_inspect
+    from models import Course
+
+    eng = engine or db.engine
+    insp = sa_inspect(eng)
+    if 'course' not in insp.get_table_names():
+        return 'SKIP: no course table.'
+
+    cols = {c['name']: c for c in insp.get_columns('course')}
+    start = cols.get('start_date')
+    end = cols.get('end_date')
+    if (start is None or start['nullable']) and (end is None or end['nullable']):
+        return 'OK: course.start_date/end_date already nullable — no change made.'
+
+    # Copy only columns the model and the live table share, so schema drift in
+    # either direction can't break the rebuild.
+    model_cols = [c.name for c in Course.__table__.columns]
+    shared = [c for c in model_cols if c in cols]
+    collist = ', '.join(f'"{c}"' for c in shared)
+
+    with eng.connect() as conn:
+        row_count = conn.exec_driver_sql('SELECT COUNT(*) FROM course').scalar()
+
+    with eng.begin() as conn:
+        conn.exec_driver_sql('DROP TABLE IF EXISTS _course_migrate_old')
+        conn.exec_driver_sql('ALTER TABLE course RENAME TO _course_migrate_old')
+        # Recreate `course` from the current (correct, nullable) model schema.
+        Course.__table__.create(bind=conn)
+        conn.exec_driver_sql(
+            f'INSERT INTO course ({collist}) SELECT {collist} FROM _course_migrate_old'
+        )
+        conn.exec_driver_sql('DROP TABLE _course_migrate_old')
+
+    return (f'DONE: rebuilt course, made start_date/end_date nullable, '
+            f'preserved {row_count} row(s), copied columns: {collist}.')
+
 
 # ===================== TRAINING-DATA LINTER =====================
 

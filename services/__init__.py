@@ -1692,6 +1692,7 @@ def log_admin_action(action, entity_type=None, entity_id=None, entity_label=None
 # Linter, schema migration, advance/archive helpers, and all seed_* fns.
 from services._seed import (  # noqa: E402
     ensure_schema,
+    make_course_dates_nullable,
     lint_training_data,
     advance_recurring_courses,
     archive_past_courses,
