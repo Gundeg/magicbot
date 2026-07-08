@@ -436,17 +436,25 @@ def _parse_course_payload(data, existing=None):
 
     raw_number = data.get('course_number')
     if raw_number in (None, '', 'null'):
-        return None, (
-            'Курсын дугаар (course_number) шаардлагатай. Жишээ: 1881. '
-            'Адилхан нэртэй ангиудыг ялгахад ашиглана.'
-        )
-    try:
-        course_number = int(raw_number)
-    except (TypeError, ValueError):
-        return None, 'course_number бүхэл тоо байх ёстой.'
-    clash = Course.query.filter_by(course_number=course_number).first()
-    if clash and (existing is None or clash.id != existing.id):
-        return None, f'#{course_number} дугаартай анги аль хэдийн бүртгэлтэй (id={clash.id}).'
+        # course_number is OPTIONAL when editing an existing course. The column
+        # is nullable and many courses (seeded, or created before the field
+        # existed) have none — requiring it would reject every save, e.g. a
+        # registration-link edit, and silently discard the change. Still
+        # required on ADD so new same-named classes get a disambiguating number.
+        if existing is None:
+            return None, (
+                'Курсын дугаар (course_number) шаардлагатай. Жишээ: 1881. '
+                'Адилхан нэртэй ангиудыг ялгахад ашиглана.'
+            )
+        course_number = None
+    else:
+        try:
+            course_number = int(raw_number)
+        except (TypeError, ValueError):
+            return None, 'course_number бүхэл тоо байх ёстой.'
+        clash = Course.query.filter_by(course_number=course_number).first()
+        if clash and (existing is None or clash.id != existing.id):
+            return None, f'#{course_number} дугаартай анги аль хэдийн бүртгэлтэй (id={clash.id}).'
 
     raw_duration = data.get('duration_days')
     duration_days = None
