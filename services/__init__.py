@@ -369,6 +369,114 @@ def _fb_auth_headers(extra=None):
     return headers
 
 
+# Telegram-alert state for a dead Page token. Separate key from the reply-
+# provider alert: the two failures are independent and each deserves its own
+# cooldown window.
+FB_TOKEN_ALERT_STATE_KEY = 'facebook_token_alerted_at'
+
+
+def _is_facebook_token_error(body_text):
+    """True when a Send API rejection means the TOKEN ITSELF is dead, so every
+    subsequent send will fail the same way until a human replaces it. Returns
+    (is_token_error, short_reason).
+
+    Paged on:
+      • code 190 — token expired (subcode 463) or invalidated by a password
+        change (subcode 460). This is the recurring ~60-day expiry.
+      • code 102 — session invalid.
+      • code 100 / subcode 33 — `me` does not resolve to a Page, i.e. a USER
+        token was deployed where a Page token belongs. Authenticates fine,
+        sends nothing.
+
+    Deliberately NOT paged: permission errors (code 10, 200) and per-recipient
+    messaging-window errors (code 551, 10 subcode 2018278). Those are policy or
+    per-conversation problems, not a dead credential, and paging on them would
+    train staff to ignore the alert."""
+    text = body_text or ''
+    try:
+        error = (json.loads(text) or {}).get('error') or {}
+        code = error.get('code')
+        subcode = error.get('error_subcode')
+        message = error.get('message') or ''
+    except (ValueError, AttributeError):
+        # Truncated or non-JSON body — fall back to substring matching so a
+        # clipped body still pages rather than failing silently.
+        if 'OAuthException' in text and 'code":190' in text.replace(' ', ''):
+            return True, text[:200]
+        return False, ''
+
+    if code == 190:
+        if subcode == 463:
+            return True, f"Токен хугацаа дууссан (190/463). {message}"
+        if subcode == 460:
+            return True, f"Facebook нууц үг солигдсоны улмаас токен хүчингүй (190/460). {message}"
+        return True, f"Токен хүчингүй (190). {message}"
+    if code == 102:
+        return True, f"Session хүчингүй (102). {message}"
+    if code == 100 and subcode == 33:
+        return True, (
+            "Page token биш USER token тавигдсан байна (100/33) — "
+            f"`me` нь хуудас руу заахгүй байна. {message}"
+        )
+    return False, ''
+
+
+def alert_facebook_token_failure(body_text):
+    """Telegram-alert staff the first time the Send API rejects our Page token,
+    at most once per FB_TOKEN_ALERT_COOLDOWN_HOURS (default 6).
+
+    Why this exists separately from token_health_task: on 2026-09-04 the token
+    expired and NOTHING paged anyone for three days. The 6-hourly health check
+    is an indirect backstop — it only runs on the worker dyno, and it is a
+    silent no-op when Telegram is unconfigured. Meanwhile every single customer
+    message was failing here, loudly, in the logs, and telling nobody. This
+    alerts from the exact place the failure happens, on the first message.
+
+    Runs on the customer-reply path, so it must never raise — every internal
+    failure (including no app context, or no DB) is logged and swallowed.
+    Returns True if an alert was actually sent this call."""
+    try:
+        is_token_error, reason = _is_facebook_token_error(body_text)
+        if not is_token_error:
+            return False
+        cooldown = timedelta(hours=max(1, _safe_int_env('FB_TOKEN_ALERT_COOLDOWN_HOURS', 6)))
+        now = datetime.utcnow()
+        row = GeneralSetting.query.filter_by(key=FB_TOKEN_ALERT_STATE_KEY).first()
+        if row and row.value:
+            try:
+                if now - datetime.fromisoformat(row.value) < cooldown:
+                    return False
+            except ValueError:
+                pass  # unparseable timestamp -> treat as never alerted
+        # Claim the window BEFORE sending: a dead token fails EVERY message at
+        # once across every worker, so committing first is what stops that
+        # storm from paging staff hundreds of times.
+        if row is None:
+            db.session.add(GeneralSetting(key=FB_TOKEN_ALERT_STATE_KEY, value=now.isoformat()))
+        else:
+            row.value = now.isoformat()
+        db.session.commit()
+        send_telegram_notification(
+            "🚨 Facebook Page token хүчингүй боллоо — бот хэрэглэгчдэд ЯМАР Ч "
+            "хариу илгээж чадахгүй байна.\n\n"
+            "Бот хариугаа зөв бэлдэж байгаа ч Facebook руу илгээх алхам дээр "
+            "унаж байна. Хэрэглэгчид юу ч хүлээж авахгүй.\n\n"
+            "Засах: Graph API Explorer-оос ШИНЭ PAGE TOKEN аваад Render дээрх "
+            "magicbot үйлчилгээний FACEBOOK_ACCESS_TOKEN-г солино уу "
+            "(OPERATIONS.md §4). Засмагц бот шууд сэргэнэ.\n\n"
+            f"Дэлгэрэнгүй: {reason[:300]}"
+        )
+        logger.error("Facebook token failure alert sent: %s", reason[:200])
+        return True
+    except Exception as alert_exc:
+        logger.error("Facebook token alert could not be sent: %s", alert_exc)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return False
+
+
 def send_facebook_message(recipient_id, message_text):
     """Send a message via Facebook Messenger API.
 
@@ -388,11 +496,15 @@ def send_facebook_message(recipient_id, message_text):
             timeout=10,
         )
         if response.status_code != 200:
-            body = response.text[:500] if response.text else '<empty>'
+            raw = response.text or ''
+            body = raw[:500] if raw else '<empty>'
             logger.warning(
                 "Send API FAILED recipient=%s status=%s body=%s",
                 recipient_id, response.status_code, body,
             )
+            # A dead token fails every send until a human replaces it, so page
+            # staff from here rather than waiting up to 6h for the health check.
+            alert_facebook_token_failure(raw)
             return False
         return True
     except Exception as e:
