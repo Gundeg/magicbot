@@ -142,16 +142,12 @@ session invalidated).
 provider (the bot composed a good answer), then `Send API FAILED status=401`.
 The bot is thinking correctly and failing at the last inch.
 
-Two things page you on this: `alert_facebook_token_failure` fires from the send
-path on the **first** failed message (cooldown `FB_TOKEN_ALERT_COOLDOWN_HOURS`),
-and the 6-hourly `ENABLE_TOKEN_CHECK` loop is the backstop. Both are silent
-no-ops without Telegram configured — see §5.
-
-> **Replies composed during the outage are not lost.** `process_inbound_reply`
-> commits the bot's message to the DB *before* handing it to Facebook, so every
-> undelivered reply is visible in Admin → Мессежийн түүх. The bot will NOT
-> resend them after the fix — work that history by hand for anyone who wrote
-> during the outage.
+Two paths page you on this and they share one cooldown window, so an outage
+produces **one** Telegram alert rather than one per path:
+`alert_facebook_token_failure` fires from the send path on the **first** failed
+customer message (and runs on the web dynos, so it survives a dead worker), and
+the 6-hourly `ENABLE_TOKEN_CHECK` loop is the backstop. Both are silent no-ops
+without Telegram configured — see §5.
 
 **The one trap that turns a 5-minute fix into an hour:** the replacement **must be
 a Page token, not a User token.** The Send API posts to `me/messages`, so `me` has
@@ -160,72 +156,109 @@ that by mistake and every send fails `GraphMethodException code:100 subcode:33
 ("Object with ID 'me' does not exist")`; the token authenticates but the bot still
 looks silent.
 
-**Steps:**
+### The procedure — a Page token that NEVER expires
+
+**Production has run a non-expiring token since 2026-09-07.** Use this path.
+Do NOT use the Debugger's *Extend Access Token* button: it mints a ~60-day
+token, and that timer is what caused the 2026-09-04 outage — it fired at
+22:23 on a Friday night (Ulaanbaatar) and the bot stayed down all weekend.
+A Page token derived from a **long-lived User token** has no expiry at all.
+
+All browser, no shell:
 
 1. **Graph API Explorer** (<https://developers.facebook.com/tools/explorer/>) →
-   Meta App = **MagicAI Bot** → set the **"User or Page"** dropdown to
-   **Page Access Tokens → Magic Financial Group** (NOT the default User Token).
-2. Extend it to long-lived in the **Access Token Debugger** → *Extend Access Token*
-   (needs the FB account password; ~60-day token). For a non-expiring token, use
-   `GET /me/accounts` with a long-lived user token instead.
-3. **Render → `magicbot` service** (confirm it's `magicbot`, not another service) →
-   **Environment** → replace `FACEBOOK_ACCESS_TOKEN` → **Save, rebuild, and deploy**.
-   Confirm a fresh entry appears on that service's **Events** page.
-4. **Verify** in the `magicbot` **Shell** (read-only, exposes nothing):
-   ```bash
-   python scripts/diagnose.py
-   ```
-   Check 2 must say *"Token is a valid Page token"* with the Page's name. If it
-   says **"This is a USER token, not a PAGE token"** you copied the User token
-   again — redo step 1. (The raw equivalent, if you want just the one call:
-   `python -c "import os,requests;print(requests.get('https://graph.facebook.com/v18.0/me',headers={'Authorization':'Bearer '+os.environ['FACEBOOK_ACCESS_TOKEN']}).text)"`
-   → correct is `{"name":"Magic Financial Group","id":"123001937756085"}`; a
-   person's name means it is still a User token.)
+   Meta App = **MagicAI Bot** → "User or Page" = **User Token** → tick
+   `pages_show_list`, `pages_messaging`, `pages_messaging_subscriptions`,
+   `pages_read_engagement`, `pages_manage_metadata`, `pages_manage_posts` →
+   **Generate Access Token** → approve → copy.
+2. **Access Token Debugger** (<https://developers.facebook.com/tools/debug/accesstoken/>)
+   → paste → **Debug** → **Extend Access Token** (needs the FB password). Copy the
+   *extended* token. This is a long-lived **User** token — NOT what goes into Render.
+3. Back in **Graph API Explorer**: clear the **Access Token** box, paste the
+   extended User token from step 2, query `me/accounts`, **Submit**.
+4. In the JSON find the entry whose `name` is `Magic Financial Group` and copy its
+   **`access_token`**. That is the Page token, and it inherits the non-expiring
+   property from the User token it came from.
+5. **Verify in the Debugger BEFORE deploying:** Type = **Page**, Expires =
+   **Never**, Profile ID = `123001937756085`. An expiry date means step 3 used the
+   short-lived token — redo step 2.
+6. **Render → `magicbot` service** (confirm it's `magicbot`, not another service) →
+   **Environment** → replace `FACEBOOK_ACCESS_TOKEN` → **Save Changes**. Confirm a
+   fresh *Environment updated* / *Deploy live* entry appears on that service's
+   **Events** page — if there is none, the change went to the wrong place.
+7. **Verify it took.** With shell access: `python scripts/diagnose.py` — check 2 must
+   say *"Token is a valid Page token"* with the Page's name. Dashboard only: Render →
+   **Logs** → search `FB token health`; the 6-hourly check logs `FB token health: OK`,
+   which confirms the token AND that the worker dyno is alive. Or just message the
+   Page from a non-admin account.
+
+> **"Never expires" is not "never dies."** A non-expiring token still dies on a
+> **Facebook password change** (`190`/`460` — the likeliest one, because changing a
+> password feels unrelated to the bot), on the generating admin losing their Page
+> role, or on the app being removed from the Page. That risk is now *unscheduled*
+> rather than on a 60-day clock, so it cannot be calendared — the alerting in §5 is
+> the only thing that catches it. Note down **whose** Facebook account the token was
+> generated from; that account is a single point of failure.
+
+### Fallback: the ~60-day token (emergency only)
+
+If step 3 above will not produce a Page token (permissions missing, the account
+lacks a Page role), a short-lived stopgap is: Graph API Explorer → "User or Page"
+→ **Page Access Tokens → Magic Financial Group** → Debugger → *Extend Access
+Token*. **This expires in ~60 days.** If you use it, put the expiry date in a
+calendar the same minute, and replace it with the non-expiring token above as
+soon as you can.
 
 Full user-facing (Mongolian) walk-through:
 `Facebook Page Access Token хэрхэн авах тухай дэлгэрэнгүй заавар.md` §5.
 
-### Better: get a token that never expires (do this once, stop doing §4 forever)
-
-"Extend Access Token" in the Debugger buys ~60 days and then this outage repeats
-— it did on 2026-09-04, three days before anyone noticed. A Page token derived
-from a **long-lived User token** has no expiry at all. All browser, ~3 minutes
-more than the steps above:
-
-1. **Graph API Explorer** → app **MagicAI Bot** → "User or Page" = **User Token**
-   → tick `pages_show_list`, `pages_messaging`, `pages_messaging_subscriptions`,
-   `pages_read_engagement`, `pages_manage_metadata`, `pages_manage_posts` →
-   **Generate Access Token** → copy.
-2. **Access Token Debugger** → paste → **Debug** → **Extend Access Token**
-   (needs the FB password). Copy the extended token — this is a long-lived
-   **User** token, NOT what goes into Render.
-3. Back in **Graph API Explorer**: paste that extended User token into the
-   **Access Token** box, query `me/accounts`, **Submit**.
-4. In the JSON, find the entry whose `name` is `Magic Financial Group` and copy
-   its **`access_token`**. That is the Page token, and it inherits the
-   non-expiring property.
-5. **Verify in the Debugger before deploying:** Type = **Page**, Expires =
-   **Never**, Profile ID = `123001937756085`. An expiry date means step 3 used
-   the short-lived token — redo step 2.
-6. Deploy it as `FACEBOOK_ACCESS_TOKEN` per step 3 above, and confirm the Events
-   entry per step 3's warning.
+> **Replies composed during the outage are not lost.** `process_inbound_reply`
+> commits the bot's message to the DB *before* handing it to Facebook, so every
+> undelivered reply is visible in Admin → Мессежийн түүх. The bot will NOT
+> resend them after the fix — work that history by hand for anyone who wrote
+> during the outage.
 
 ---
 
-## 5. If a token dies and nobody gets paged
+## 5. When the alert fires and nothing happens
 
-Both alert paths go through `send_telegram_notification`, which is a **silent
-no-op** when `TELEGRAM_BOT_TOKEN` is unset or no chat IDs are configured — so a
-misconfigured Telegram turns every alert in this system into a log line nobody
-reads. On 2026-09-04 that is exactly what happened: the token died on a Friday
-and the outage ran until Monday.
+**What actually went wrong on 2026-09-04.** Telegram *was* configured and the
+alerts *did* arrive — roughly ten of them, one every 6 hours from Friday night
+to Monday. The detection worked; the response didn't. Two reasons, both fixed:
 
-Check, on the **worker** service (the 6-hourly health check only runs there):
+1. **The wording hedged.** The old health-check alert said the bot *"хариу
+   илгээж чадахгүй **байж магадгүй**"* — "might not be able to reply." That reads
+   like a warning about a possible future problem, not "the bot is down right
+   now." A confirmed `190`/`463` is not a maybe. Confirmed token deaths now go
+   through `alert_facebook_token_failure`, which states the outage as fact and
+   names the fix; only genuinely ambiguous failures (Graph unreachable, a
+   timeout) keep the soft wording, where it is honest.
+2. **It repeated identically, forever.** `token_health_task` had no cooldown, so
+   the same text arrived every 6 hours for three days. Both paths now share
+   `FB_TOKEN_ALERT_COOLDOWN_HOURS` (6) and one state key, so an outage pages you
+   once rather than ten times with a message you have already dismissed.
+
+**The timing was the rest of it.** The token expired at **22:23 Friday,
+Ulaanbaatar time** (07:23:45 PDT), i.e. the start of a weekend. No amount of
+faster alerting fixes a Friday-night failure — which is why the real fix was
+the non-expiring token in §4, not the alerting.
+
+### If an alert never arrives at all
+
+Both paths go through `send_telegram_notification`, a **silent no-op** when
+`TELEGRAM_BOT_TOKEN` is unset or no chat IDs are configured. Check, on the
+**worker** service (the 6-hourly health check only runs there):
 
 - `TELEGRAM_BOT_TOKEN` is set.
 - At least one chat ID is configured (Admin → Систем, or the env var).
 - `WORKER_ROLE=worker` and `ENABLE_TOKEN_CHECK` is not set to false.
 
-The send-path alert (`alert_facebook_token_failure`) fires from the **web**
-dynos too, so it survives a dead worker — but it still needs Telegram. Send
-yourself a test notification from the admin panel after any change here.
+The send-path alert fires from the **web** dynos too, so it survives a dead
+worker — but it still needs Telegram. Send yourself a test notification from the
+admin panel after any change here.
+
+### Where the alert lands matters as much as whether it fires
+
+An outage alert that arrives in the same Telegram chat as routine handoff pings
+competes with them for attention. If this recurs, route token/outage alerts to a
+chat used for nothing else, so an unread message there means exactly one thing.

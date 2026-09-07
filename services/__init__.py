@@ -375,6 +375,47 @@ def _fb_auth_headers(extra=None):
 FB_TOKEN_ALERT_STATE_KEY = 'facebook_token_alerted_at'
 
 
+# Separate window for the health check's "couldn't verify" alert: it reports a
+# DIFFERENT thing (we could not reach Graph at all) and must not be silenced by,
+# or silence, a confirmed dead-token alert.
+FB_HEALTH_ALERT_STATE_KEY = 'facebook_health_alerted_at'
+
+
+def _claim_alert_window(state_key, cooldown_hours=None):
+    """Return True if an alert under `state_key` may be sent now, and claim the
+    window in the same call.
+
+    The claim is COMMITTED BEFORE the caller sends anything: a dead token fails
+    every message on every worker simultaneously, and a check-then-send without
+    the pre-claim pages staff hundreds of times during one outage. Returns False
+    on any failure (no app context, no DB) — a broken cooldown must fail to
+    silence, never to spam."""
+    try:
+        hours = cooldown_hours or max(1, _safe_int_env('FB_TOKEN_ALERT_COOLDOWN_HOURS', 6))
+        cooldown = timedelta(hours=hours)
+        now = datetime.utcnow()
+        row = GeneralSetting.query.filter_by(key=state_key).first()
+        if row and row.value:
+            try:
+                if now - datetime.fromisoformat(row.value) < cooldown:
+                    return False
+            except ValueError:
+                pass  # unparseable timestamp -> treat as never alerted
+        if row is None:
+            db.session.add(GeneralSetting(key=state_key, value=now.isoformat()))
+        else:
+            row.value = now.isoformat()
+        db.session.commit()
+        return True
+    except Exception as exc:
+        logger.error("alert cooldown claim failed for %s: %s", state_key, exc)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return False
+
+
 def _is_facebook_token_error(body_text):
     """True when a Send API rejection means the TOKEN ITSELF is dead, so every
     subsequent send will fail the same way until a human replaces it. Returns
@@ -393,8 +434,11 @@ def _is_facebook_token_error(body_text):
     per-conversation problems, not a dead credential, and paging on them would
     train staff to ignore the alert."""
     text = body_text or ''
+    # check_facebook_token hands us "status=401 body={...}", the send path hands
+    # us the raw body. Locate the JSON either way rather than parsing blind.
+    payload = text[text.index('{'):] if '{' in text else text
     try:
-        error = (json.loads(text) or {}).get('error') or {}
+        error = (json.loads(payload) or {}).get('error') or {}
         code = error.get('code')
         subcode = error.get('error_subcode')
         message = error.get('message') or ''
@@ -422,15 +466,18 @@ def _is_facebook_token_error(body_text):
 
 
 def alert_facebook_token_failure(body_text):
-    """Telegram-alert staff the first time the Send API rejects our Page token,
-    at most once per FB_TOKEN_ALERT_COOLDOWN_HOURS (default 6).
+    """Telegram-alert staff that the Page token is dead, at most once per
+    FB_TOKEN_ALERT_COOLDOWN_HOURS (default 6). Shared by BOTH detection paths —
+    send_facebook_message (fires on the first failed customer message, and runs
+    on the web dynos so it survives a dead worker) and token_health_task (the
+    6-hourly backstop) — so one outage produces ONE alert, not one per path.
 
-    Why this exists separately from token_health_task: on 2026-09-04 the token
-    expired and NOTHING paged anyone for three days. The 6-hourly health check
-    is an indirect backstop — it only runs on the worker dyno, and it is a
-    silent no-op when Telegram is unconfigured. Meanwhile every single customer
-    message was failing here, loudly, in the logs, and telling nobody. This
-    alerts from the exact place the failure happens, on the first message.
+    The wording is deliberately unambiguous. During the 2026-09-04 outage the
+    health check said the bot "might" not be able to reply, which reads like a
+    warning; it repeated that identical text every 6h for three days with no
+    cooldown. `body_text` here is proof of a specific dead credential, so the
+    message states the outage as fact and names the fix. Genuinely uncertain
+    failures keep the hedged wording, in token_health_task.
 
     Runs on the customer-reply path, so it must never raise — every internal
     failure (including no app context, or no DB) is logged and swallowed.
@@ -439,23 +486,8 @@ def alert_facebook_token_failure(body_text):
         is_token_error, reason = _is_facebook_token_error(body_text)
         if not is_token_error:
             return False
-        cooldown = timedelta(hours=max(1, _safe_int_env('FB_TOKEN_ALERT_COOLDOWN_HOURS', 6)))
-        now = datetime.utcnow()
-        row = GeneralSetting.query.filter_by(key=FB_TOKEN_ALERT_STATE_KEY).first()
-        if row and row.value:
-            try:
-                if now - datetime.fromisoformat(row.value) < cooldown:
-                    return False
-            except ValueError:
-                pass  # unparseable timestamp -> treat as never alerted
-        # Claim the window BEFORE sending: a dead token fails EVERY message at
-        # once across every worker, so committing first is what stops that
-        # storm from paging staff hundreds of times.
-        if row is None:
-            db.session.add(GeneralSetting(key=FB_TOKEN_ALERT_STATE_KEY, value=now.isoformat()))
-        else:
-            row.value = now.isoformat()
-        db.session.commit()
+        if not _claim_alert_window(FB_TOKEN_ALERT_STATE_KEY):
+            return False
         send_telegram_notification(
             "🚨 Facebook Page token хүчингүй боллоо — бот хэрэглэгчдэд ЯМАР Ч "
             "хариу илгээж чадахгүй байна.\n\n"
@@ -2027,6 +2059,34 @@ def ensure_page_subscriptions():
     }
 
 
+def report_token_health(detail):
+    """Alert on ONE failed health check, and say which kind of failure it was.
+
+    A recognised token death (190/463, 190/460, 102, 100/33) is a CONFIRMED
+    outage, so it routes through the same definite, cooled-down alert the send
+    path fires — one outage produces one message, whichever path notices first.
+    Only a genuinely ambiguous failure (Graph unreachable, a 500, a timeout)
+    gets the hedged wording, because only there is the uncertainty real.
+
+    Returns 'token', 'unknown' or 'quiet' (cooldown still holding). Extracted
+    from token_health_task purely so this decision is testable without running
+    an infinite loop."""
+    if alert_facebook_token_failure(detail):
+        return 'token'
+    if _is_facebook_token_error(detail)[0]:
+        return 'quiet'  # confirmed dead token, already alerted this window
+    if _claim_alert_window(FB_HEALTH_ALERT_STATE_KEY):
+        send_telegram_notification(
+            "⚠️ Facebook Page token-г шалгаж чадсангүй. Graph API-тай "
+            "холбогдоход алдаа гарлаа — түр зуурын сүлжээний асуудал байж "
+            "болох ч, бот хариу илгээхгүй байвал токеноо шалгана уу "
+            "(OPERATIONS.md §4).\n\n"
+            f"Дэлгэрэнгүй: {detail[:300]}"
+        )
+        return 'unknown'
+    return 'quiet'
+
+
 def token_health_task(app):
     """Background loop: every TOKEN_CHECK_INTERVAL_HOURS, verify the Facebook
     Page token and Telegram-alert staff if it's invalid/expired — catching the
@@ -2041,12 +2101,7 @@ def token_health_task(app):
                     logger.info("FB token health: OK")
                 else:
                     logger.warning("FB token health: FAILED %s", detail)
-                    send_telegram_notification(
-                        "⚠️ Facebook Page token алдаатай байна. Бот хариу "
-                        "илгээж чадахгүй байж магадгүй. Graph API Explorer-оос "
-                        "токеноо шинэчилнэ үү.\n\n"
-                        f"Дэлгэрэнгүй: {detail[:300]}"
-                    )
+                    report_token_health(detail)
         except Exception as e:
             logger.error("token_health_task error: %s", e)
         time.sleep(interval)
