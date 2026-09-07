@@ -91,21 +91,170 @@ def test_pause_bot_mutes_then_resumes(client, admin_user, db_session):
     db.session.commit()
 
 
+class _TokenResp:
+    """Minimal requests.Response stand-in for the Graph /me probe."""
+
+    def __init__(self, code, payload=None):
+        self.status_code = code
+        self._payload = payload or {}
+        self.text = 'body'
+
+    def json(self):
+        return self._payload
+
+
 def test_check_facebook_token(monkeypatch):
     import services
 
-    class _Resp:
-        def __init__(self, code):
-            self.status_code = code
-            self.text = 'body'
+    monkeypatch.setattr(services, 'FACEBOOK_PAGE_ID', '123001937756085')
 
-    monkeypatch.setattr(services.requests, 'get', lambda *a, **k: _Resp(200))
+    monkeypatch.setattr(
+        services.requests, 'get',
+        lambda *a, **k: _TokenResp(200, {'id': '123001937756085',
+                                         'name': 'Magic Financial Group'}),
+    )
+    ok, detail = services.check_facebook_token()
+    assert ok is True and 'Magic Financial Group' in detail
+
+    monkeypatch.setattr(services.requests, 'get', lambda *a, **k: _TokenResp(401))
+    ok, detail = services.check_facebook_token()
+    assert ok is False and 'status=401' in detail
+
+
+def test_check_facebook_token_rejects_a_user_token(monkeypatch):
+    """A USER token reads the Page by id happily, so the health check must
+    verify that `me` resolves to the PAGE — otherwise it reports OK while every
+    send fails GraphMethodException code:100 subcode:33."""
+    import services
+
+    monkeypatch.setattr(services, 'FACEBOOK_PAGE_ID', '123001937756085')
+    monkeypatch.setattr(
+        services.requests, 'get',
+        lambda *a, **k: _TokenResp(200, {'id': '77777777', 'name': 'Some Person'}),
+    )
+    ok, detail = services.check_facebook_token()
+    assert ok is False
+    assert 'USER token' in detail and 'Some Person' in detail
+
+
+def test_check_facebook_token_without_page_id_configured(monkeypatch):
+    """Dev deployments leave FACEBOOK_PAGE_ID unset — a reachable token still
+    counts as OK there; there is nothing to compare the id against."""
+    import services
+
+    monkeypatch.setattr(services, 'FACEBOOK_PAGE_ID', '')
+    monkeypatch.setattr(
+        services.requests, 'get',
+        lambda *a, **k: _TokenResp(200, {'id': '999', 'name': 'Dev Page'}),
+    )
     ok, _ = services.check_facebook_token()
     assert ok is True
 
-    monkeypatch.setattr(services.requests, 'get', lambda *a, **k: _Resp(401))
-    ok, detail = services.check_facebook_token()
-    assert ok is False and 'status=401' in detail
+
+# The verbatim Send API body from the 2026-09-04 outage — the bot composed
+# every reply correctly and then failed at the last inch for three days with
+# nobody paged.
+EXPIRED_TOKEN_BODY = (
+    '{"error":{"message":"Error validating access token: Session has expired on '
+    'Friday, 04-Sep-26 07:23:45 PDT. The current time is Monday, 07-Sep-26 '
+    '13:13:44 PDT.","type":"OAuthException","code":190,"error_subcode":463,'
+    '"fbtrace_id":"AZQGzg5iCup-vnK-058zbD8"}}'
+)
+USER_TOKEN_BODY = (
+    '{"error":{"message":"Object with ID \'me\' does not exist",'
+    '"type":"GraphMethodException","code":100,"error_subcode":33}}'
+)
+PERMISSION_BODY = (
+    '{"error":{"message":"Application does not have permission for this action",'
+    '"type":"OAuthException","code":10}}'
+)
+
+
+def test_is_facebook_token_error_classifies_real_bodies():
+    import services
+
+    ok, reason = services._is_facebook_token_error(EXPIRED_TOKEN_BODY)
+    assert ok is True and '190/463' in reason
+
+    ok, reason = services._is_facebook_token_error(USER_TOKEN_BODY)
+    assert ok is True and '100/33' in reason
+
+    # Permission problems are policy issues, not a dead credential. Paging on
+    # them would train staff to ignore the alert.
+    assert services._is_facebook_token_error(PERMISSION_BODY)[0] is False
+    assert services._is_facebook_token_error('')[0] is False
+    assert services._is_facebook_token_error('<html>502 Bad Gateway</html>')[0] is False
+
+
+def test_send_api_token_failure_pages_staff_once(db_session, monkeypatch):
+    """A dead token fails EVERY send at once, so the alert must fire on the
+    first failure and then stay quiet for the cooldown window."""
+    import services
+    from extensions import db
+    from models import GeneralSetting
+
+    GeneralSetting.query.filter_by(key=services.FB_TOKEN_ALERT_STATE_KEY).delete()
+    db.session.commit()
+
+    sent = []
+    monkeypatch.setattr(services, 'send_telegram_notification', lambda text: sent.append(text))
+
+    assert services.alert_facebook_token_failure(EXPIRED_TOKEN_BODY) is True
+    assert len(sent) == 1
+    assert 'FACEBOOK_ACCESS_TOKEN' in sent[0]
+
+    # Same outage, next customer message — must NOT page again.
+    assert services.alert_facebook_token_failure(EXPIRED_TOKEN_BODY) is False
+    assert len(sent) == 1
+
+    GeneralSetting.query.filter_by(key=services.FB_TOKEN_ALERT_STATE_KEY).delete()
+    db.session.commit()
+
+
+def test_send_facebook_message_alerts_on_dead_token(db_session, monkeypatch):
+    """The alert must fire from the send path itself, not only from the
+    6-hourly health check — that check is a no-op without Telegram and only
+    runs on the worker dyno."""
+    import services
+    from extensions import db
+    from models import GeneralSetting
+
+    GeneralSetting.query.filter_by(key=services.FB_TOKEN_ALERT_STATE_KEY).delete()
+    db.session.commit()
+
+    class _Resp:
+        status_code = 401
+        text = EXPIRED_TOKEN_BODY
+
+    sent = []
+    monkeypatch.setattr(services.requests, 'post', lambda *a, **k: _Resp())
+    monkeypatch.setattr(services, 'send_telegram_notification', lambda text: sent.append(text))
+
+    assert services.send_facebook_message('psid-1', 'hi') is False
+    assert len(sent) == 1
+
+    GeneralSetting.query.filter_by(key=services.FB_TOKEN_ALERT_STATE_KEY).delete()
+    db.session.commit()
+
+
+def test_send_facebook_message_does_not_alert_on_permission_error(db_session, monkeypatch):
+    import services
+    from extensions import db
+    from models import GeneralSetting
+
+    GeneralSetting.query.filter_by(key=services.FB_TOKEN_ALERT_STATE_KEY).delete()
+    db.session.commit()
+
+    class _Resp:
+        status_code = 403
+        text = PERMISSION_BODY
+
+    sent = []
+    monkeypatch.setattr(services.requests, 'post', lambda *a, **k: _Resp())
+    monkeypatch.setattr(services, 'send_telegram_notification', lambda text: sent.append(text))
+
+    assert services.send_facebook_message('psid-1', 'hi') is False
+    assert sent == []
 
 
 def test_ensure_page_subscriptions_adds_echoes_without_dropping(monkeypatch):

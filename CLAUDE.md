@@ -130,7 +130,7 @@ Loops gated by an env var AND `WORKER_ROLE in (worker, all)`:
 - `ENABLE_POLLING=true` → `polling_task` — Facebook Page auto-commenting
 - `ENABLE_NUDGE=true` → `nudge_task` — silent-lead follow-ups
 - `ENABLE_CHAT_CLUSTERING=true` → `cluster_task` — weekly FAQ-cluster regeneration
-- `ENABLE_TOKEN_CHECK` (**defaults ON**) → `token_health_task` — every `TOKEN_CHECK_INTERVAL_HOURS` (6) pings the Graph API and Telegram-alerts staff if the Page token is expired/invalid (the OAuthException 190/463 that silently kills the bot). Cheap one-call check; no-op without Telegram configured.
+- `ENABLE_TOKEN_CHECK` (**defaults ON**) → `token_health_task` — every `TOKEN_CHECK_INTERVAL_HOURS` (6) pings the Graph API and Telegram-alerts staff if the Page token is expired/invalid (the OAuthException 190/463 that silently kills the bot). Cheap one-call check; no-op without Telegram configured. It is the **backstop**, not the primary pager — `alert_facebook_token_failure` fires from the send path on the first failed message (see below).
 
 Production deploy uses ONE worker dyno with `WORKER_ROLE=worker` and N web dynos with `WORKER_ROLE=web`. Don't run loops on web — they'd N-multiply.
 
@@ -180,6 +180,8 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 - `classification_lookback_days` controller lives at the top of `work_tasks.html` (outside any tab) so it's visible from the default Hot Prospects landing. Don't move it back into a single tab.
 - **SQLite WAL + busy_timeout in `app.py:88`** is load-bearing — without it, 2 gunicorn workers + admin polling deadlock on SQLite locks. Do not remove the `@event.listens_for(Engine, "connect")` block.
 - **`get_facebook_user_info` returns HTTP 400 at Standard Access** — Meta restricted PSID profile lookups. The bot now asks customers for their name on first contact (`services/_prompt.py:481+` injects the rule; `routes/webhook.py:107+` captures the reply via `extract_name_from_reply`). When App Review for "Business Asset User Profile Access" lands, the existing API call will start succeeding and the ask-for-name path silently becomes redundant. Don't remove either path until BAUPA is approved AND re-tested in prod.
+- **A dead Page token pages staff from the send path, not just the health check** (added 2026-09-07 after a 3-day silent outage). `send_facebook_message` calls `alert_facebook_token_failure(raw_body)` on every non-200; `_is_facebook_token_error` pages only on a genuinely dead credential — code `190` (expired 463 / password-changed 460), `102`, and `100/33` (a USER token deployed where a Page token belongs). It deliberately does NOT page on permission errors (`10`, `200`) or per-conversation messaging-window errors, because an alert that cries wolf gets ignored. Cooldown `FB_TOKEN_ALERT_COOLDOWN_HOURS` (6), claimed by committing the `GeneralSetting` row BEFORE sending — a dead token fails every message on every worker at once, and without the pre-claim that storm pages staff hundreds of times. Same pattern as `alert_openai_failure`; separate state key. **Both alert paths are silent no-ops without Telegram configured** — that is how the 2026-09-04 expiry went unnoticed from Friday to Monday. See OPERATIONS.md §5.
+- **Undelivered replies survive in the DB.** `process_inbound_reply` commits the bot `Message` row *before* `send_facebook_message`. So during a send-path outage the history in Мессежийн түүх shows what each customer should have received; the bot never resends it. Useful for manual follow-up after any token outage.
 - **`import netrc` at the top of `services/__init__.py` is load-bearing** (added PR #11, 2026-07-06) — do NOT remove it. `requests` does a LAZY `from netrc import ...` inside `get_netrc_auth()` during `prepare_request`. On a *cold* gunicorn worker, a first-contact webhook (`get_facebook_user_info` → `requests.get`, which runs *synchronously* in the webhook) racing a background reply thread that is also importing can deadlock on CPython's import lock → 60s `WORKER TIMEOUT` → `POST /webhook 500` → that customer gets no reply (the log's `SIGKILL! Perhaps out of memory?` is misleading — it's a timeout). Eager-importing netrc at startup warms `sys.modules` so the lazy import is a no-op that never takes the lock mid-request; protects every `requests` call, not just that path. Intermittent — only cold workers + first-contact senders; returning users skip `get_facebook_user_info` entirely.
 
 - **Staff-action notes:** dropping a hot prospect or a lead **requires** a reason
@@ -193,7 +195,19 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 
 ## Telemetry shortcuts — first place to look when user says "bot is broken"
 
-Check these in order BEFORE reading code:
+**Step 0 — run `python scripts/diagnose.py` in the Render shell of `magicbot`.**
+It is read-only and collapses the whole list below into one command: env vars +
+which reply provider is live, FB token reachable *and actually a Page token*
+(it asks `me` and asserts the id is `FACEBOOK_PAGE_ID` — a User token reads the
+Page by id, so only that comparison catches the trap), Page webhook
+subscription (`messages` / `message_echoes`), a **live** call to the deployed
+`REPLY_MODEL` (separates retired-preview-model 404 / quota 429 / bad key 401 /
+the empty-reply thinking trap), and how long ago the last inbound and outbound
+messages were — which alone splits "Facebook isn't delivering" from "the reply
+or send path is broken". Full description: OPERATIONS.md §0.
+
+If it is all green, the outage is per-conversation (mute / takeover / handoff),
+not global. Otherwise, the manual checks:
 
 1. **Customers getting the canned apology** ("Уучлаарай, түр зуурын саатал...") → the **reply provider** is failing, NOT Facebook (apology delivered = Send API fine). Render logs query `Error generating response` shows the exception; `insufficient_quota` = account out of credit (2026-06-11 outage) → instant recovery on top-up. **Which provider?** If `GEMINI_API_KEY` is set, replies are Gemini → fix the key/quota at Google AI Studio (`aistudio.google.com`); otherwise OpenAI → platform.openai.com → Billing. The deduplicated Telegram alert (`alert_openai_failure`, cooldown `OPENAI_ALERT_COOLDOWN_HOURS`=6) names the active provider (`REPLY_PROVIDER_LABEL`) and the right billing page. Note: a Gemini `429` quota error may not match the `insufficient_quota` test, so it can degrade quietly to the apology without paging — Gemini *auth* (401) errors still alert.
 2. **Render logs** (`r=1h`, query `Send API`) → `OAuthException code:190` = bad FB token (`subcode:463` = expired; `subcode:460` = FB account password changed / session invalidated). Regen via Graph API Explorer — **and it MUST be a Page token, not the default User token.** The Explorer defaults "User or Page" to **User Token**; copy that and every send fails `GraphMethodException code:100 subcode:33 "Object with ID 'me' does not exist"` (the bot sends via `me/messages`, so `me` must resolve to the Page). Fix: set "User or Page" → **Page Access Tokens → Magic Financial Group**, extend to long-lived, then update `FACEBOOK_ACCESS_TOKEN` on the **magicbot** service. Verify in the Render shell: `python -c "import os,requests;print(requests.get('https://graph.facebook.com/v18.0/me',params={'access_token':os.environ['FACEBOOK_ACCESS_TOKEN']}).text)"` → must return `Magic Financial Group`, not a person's name. Full walk-through: `Facebook Page Access Token хэрхэн авах тухай дэлгэрэнгүй заавар.md` §5.
