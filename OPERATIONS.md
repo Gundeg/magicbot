@@ -7,6 +7,44 @@ live once deployed — nothing to do.
 
 ---
 
+## 0. "The bot stopped working" — run the diagnosis first
+
+Before reading logs or guessing, open the **Render Shell** on the `magicbot`
+service and run:
+
+```bash
+python scripts/diagnose.py
+```
+
+It is read-only (sends no message, writes nothing) and checks, in order:
+
+1. **Env vars** present, and which provider customer replies actually run on.
+2. **Facebook token** — reachable, *and* that it is a **Page** token, by asking
+   `me` and asserting the id equals `FACEBOOK_PAGE_ID`. A User token reads the
+   Page by id perfectly well, so only the `me` comparison catches the trap in §4.
+3. **Page webhook subscription** — `messages` (fatal if missing: Facebook
+   delivers nothing) and `message_echoes` (human-takeover mute only).
+4. **The reply model, live** — a real one-line completion with the deployed
+   `REPLY_MODEL` / `REPLY_MAX_TOKENS` / `GEMINI_REASONING_EFFORT`. Separates
+   *retired preview model* (404) from *quota* (429), *bad key* (401) and the
+   empty-reply thinking trap, and prints the exact billing page to open.
+5. **Background provider** — `OPENAI_API_KEY` is required even on a Gemini
+   deployment (classifier, clustering, page comments).
+6. **Traffic** — how long ago the last INBOUND and last OUTBOUND message was.
+   This is the fastest split there is: an inbound row from minutes ago with no
+   outbound after it means delivery is fine and the break is in the reply/send
+   path; no inbound for days means Facebook is not delivering at all (check 3,
+   the app's Live/Dev mode, the Callback URL).
+
+It ends with a verdict listing every failure, most likely cause first. Secrets
+are masked, so the output is safe to paste into a chat.
+
+Only when it comes back all-green is the problem per-conversation (a mute,
+staff takeover, or handoff) rather than global — check that one user in
+Admin → Мессежийн түүх.
+
+---
+
 ## 1. Keep the service warm (stops cold-start retries)
 
 **Why:** when the Render service spins down after idle time, the first customer
@@ -117,10 +155,14 @@ looks silent.
    Confirm a fresh entry appears on that service's **Events** page.
 4. **Verify** in the `magicbot` **Shell** (read-only, exposes nothing):
    ```bash
-   python -c "import os,requests;print(requests.get('https://graph.facebook.com/v18.0/me',params={'access_token':os.environ['FACEBOOK_ACCESS_TOKEN']}).text)"
+   python scripts/diagnose.py
    ```
-   Correct = `{"name":"Magic Financial Group","id":"123001937756085"}`. A person's
-   name = you copied a User token again — redo step 1.
+   Check 2 must say *"Token is a valid Page token"* with the Page's name. If it
+   says **"This is a USER token, not a PAGE token"** you copied the User token
+   again — redo step 1. (The raw equivalent, if you want just the one call:
+   `python -c "import os,requests;print(requests.get('https://graph.facebook.com/v18.0/me',headers={'Authorization':'Bearer '+os.environ['FACEBOOK_ACCESS_TOKEN']}).text)"`
+   → correct is `{"name":"Magic Financial Group","id":"123001937756085"}`; a
+   person's name means it is still a User token.)
 
 Full user-facing (Mongolian) walk-through:
 `Facebook Page Access Token хэрхэн авах тухай дэлгэрэнгүй заавар.md` §5.

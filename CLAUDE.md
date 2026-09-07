@@ -193,7 +193,19 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 
 ## Telemetry shortcuts — first place to look when user says "bot is broken"
 
-Check these in order BEFORE reading code:
+**Step 0 — run `python scripts/diagnose.py` in the Render shell of `magicbot`.**
+It is read-only and collapses the whole list below into one command: env vars +
+which reply provider is live, FB token reachable *and actually a Page token*
+(it asks `me` and asserts the id is `FACEBOOK_PAGE_ID` — a User token reads the
+Page by id, so only that comparison catches the trap), Page webhook
+subscription (`messages` / `message_echoes`), a **live** call to the deployed
+`REPLY_MODEL` (separates retired-preview-model 404 / quota 429 / bad key 401 /
+the empty-reply thinking trap), and how long ago the last inbound and outbound
+messages were — which alone splits "Facebook isn't delivering" from "the reply
+or send path is broken". Full description: OPERATIONS.md §0.
+
+If it is all green, the outage is per-conversation (mute / takeover / handoff),
+not global. Otherwise, the manual checks:
 
 1. **Customers getting the canned apology** ("Уучлаарай, түр зуурын саатал...") → the **reply provider** is failing, NOT Facebook (apology delivered = Send API fine). Render logs query `Error generating response` shows the exception; `insufficient_quota` = account out of credit (2026-06-11 outage) → instant recovery on top-up. **Which provider?** If `GEMINI_API_KEY` is set, replies are Gemini → fix the key/quota at Google AI Studio (`aistudio.google.com`); otherwise OpenAI → platform.openai.com → Billing. The deduplicated Telegram alert (`alert_openai_failure`, cooldown `OPENAI_ALERT_COOLDOWN_HOURS`=6) names the active provider (`REPLY_PROVIDER_LABEL`) and the right billing page. Note: a Gemini `429` quota error may not match the `insufficient_quota` test, so it can degrade quietly to the apology without paging — Gemini *auth* (401) errors still alert.
 2. **Render logs** (`r=1h`, query `Send API`) → `OAuthException code:190` = bad FB token (`subcode:463` = expired; `subcode:460` = FB account password changed / session invalidated). Regen via Graph API Explorer — **and it MUST be a Page token, not the default User token.** The Explorer defaults "User or Page" to **User Token**; copy that and every send fails `GraphMethodException code:100 subcode:33 "Object with ID 'me' does not exist"` (the bot sends via `me/messages`, so `me` must resolve to the Page). Fix: set "User or Page" → **Page Access Tokens → Magic Financial Group**, extend to long-lived, then update `FACEBOOK_ACCESS_TOKEN` on the **magicbot** service. Verify in the Render shell: `python -c "import os,requests;print(requests.get('https://graph.facebook.com/v18.0/me',params={'access_token':os.environ['FACEBOOK_ACCESS_TOKEN']}).text)"` → must return `Magic Financial Group`, not a person's name. Full walk-through: `Facebook Page Access Token хэрхэн авах тухай дэлгэрэнгүй заавар.md` §5.

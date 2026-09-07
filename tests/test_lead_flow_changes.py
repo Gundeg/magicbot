@@ -91,21 +91,64 @@ def test_pause_bot_mutes_then_resumes(client, admin_user, db_session):
     db.session.commit()
 
 
+class _TokenResp:
+    """Minimal requests.Response stand-in for the Graph /me probe."""
+
+    def __init__(self, code, payload=None):
+        self.status_code = code
+        self._payload = payload or {}
+        self.text = 'body'
+
+    def json(self):
+        return self._payload
+
+
 def test_check_facebook_token(monkeypatch):
     import services
 
-    class _Resp:
-        def __init__(self, code):
-            self.status_code = code
-            self.text = 'body'
+    monkeypatch.setattr(services, 'FACEBOOK_PAGE_ID', '123001937756085')
 
-    monkeypatch.setattr(services.requests, 'get', lambda *a, **k: _Resp(200))
-    ok, _ = services.check_facebook_token()
-    assert ok is True
+    monkeypatch.setattr(
+        services.requests, 'get',
+        lambda *a, **k: _TokenResp(200, {'id': '123001937756085',
+                                         'name': 'Magic Financial Group'}),
+    )
+    ok, detail = services.check_facebook_token()
+    assert ok is True and 'Magic Financial Group' in detail
 
-    monkeypatch.setattr(services.requests, 'get', lambda *a, **k: _Resp(401))
+    monkeypatch.setattr(services.requests, 'get', lambda *a, **k: _TokenResp(401))
     ok, detail = services.check_facebook_token()
     assert ok is False and 'status=401' in detail
+
+
+def test_check_facebook_token_rejects_a_user_token(monkeypatch):
+    """A USER token reads the Page by id happily, so the health check must
+    verify that `me` resolves to the PAGE — otherwise it reports OK while every
+    send fails GraphMethodException code:100 subcode:33."""
+    import services
+
+    monkeypatch.setattr(services, 'FACEBOOK_PAGE_ID', '123001937756085')
+    monkeypatch.setattr(
+        services.requests, 'get',
+        lambda *a, **k: _TokenResp(200, {'id': '77777777', 'name': 'Some Person'}),
+    )
+    ok, detail = services.check_facebook_token()
+    assert ok is False
+    assert 'USER token' in detail and 'Some Person' in detail
+
+
+def test_check_facebook_token_without_page_id_configured(monkeypatch):
+    """Dev deployments leave FACEBOOK_PAGE_ID unset — a reachable token still
+    counts as OK there; there is nothing to compare the id against."""
+    import services
+
+    monkeypatch.setattr(services, 'FACEBOOK_PAGE_ID', '')
+    monkeypatch.setattr(
+        services.requests, 'get',
+        lambda *a, **k: _TokenResp(200, {'id': '999', 'name': 'Dev Page'}),
+    )
+    ok, _ = services.check_facebook_token()
+    assert ok is True
 
 
 def test_ensure_page_subscriptions_adds_echoes_without_dropping(monkeypatch):

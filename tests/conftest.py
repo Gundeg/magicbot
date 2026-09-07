@@ -60,10 +60,20 @@ def client(app):
 
 @pytest.fixture
 def db_session(app):
-    """A clean DB session for each test. Rolls back any pending changes."""
+    """A clean DB session for each test.
+
+    Rolling back is not enough: `db.session` is scoped to the whole test
+    session, so instances from earlier tests linger in its identity map. When a
+    later test flushes a row whose primary key collides with one of those stale
+    objects, SQLAlchemy tries to refresh the stale one and raises
+    DetachedInstanceError mid-flush (it shows up first as the
+    "Identity map already had an identity for ..." SAWarning). `remove()` drops
+    the session and its identity map, so each test starts from a clean map and
+    the suite stops depending on collection order."""
     from extensions import db
     yield db.session
     db.session.rollback()
+    db.session.remove()
 
 
 @pytest.fixture(autouse=True)

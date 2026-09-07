@@ -1830,17 +1830,37 @@ def check_facebook_token():
     """Ping the Graph API to verify the Page access token still works.
     Returns (ok: bool, detail: str). The recurring OAuthException 190/463
     (expired long-lived token) is the #1 cause of a silently-dead bot, so we
-    surface it proactively rather than waiting for customers to notice."""
-    target = FACEBOOK_PAGE_ID or 'me'
-    url = f"https://graph.facebook.com/v18.0/{target}"
+    surface it proactively rather than waiting for customers to notice.
+
+    We deliberately query `me` (never FACEBOOK_PAGE_ID) and then assert the id
+    it returns IS the Page: a USER token reads a Page by its numeric id just
+    fine, so targeting the id would report a healthy token while every send
+    fails GraphMethodException code:100 subcode:33 ("Object with ID 'me' does
+    not exist"). The Send API posts to me/messages, so the only check that
+    matches production is whether `me` resolves to the Page."""
+    url = "https://graph.facebook.com/v18.0/me"
     try:
         resp = requests.get(
             url, params={'fields': 'id,name'},
             headers=_fb_auth_headers(), timeout=8,
         )
-        if resp.status_code == 200:
-            return True, 'ok'
-        return False, f"status={resp.status_code} body={(resp.text or '')[:300]}"
+        if resp.status_code != 200:
+            return False, f"status={resp.status_code} body={(resp.text or '')[:300]}"
+        try:
+            data = resp.json() or {}
+        except ValueError:
+            return False, "status=200 but the body was not JSON"
+        me_id = str(data.get('id') or '')
+        me_name = data.get('name') or ''
+        if FACEBOOK_PAGE_ID and me_id != str(FACEBOOK_PAGE_ID):
+            return False, (
+                f"USER token, not a PAGE token: me/ returned id={me_id} "
+                f"name={me_name!r} but FACEBOOK_PAGE_ID={FACEBOOK_PAGE_ID}. "
+                "Every send will fail with GraphMethodException code:100 "
+                "subcode:33. Re-copy the token from Graph API Explorer with "
+                "'User or Page' set to Page Access Tokens."
+            )
+        return True, f"ok (page={me_name!r} id={me_id})"
     except Exception as e:
         return False, f"exception={e}"
 
