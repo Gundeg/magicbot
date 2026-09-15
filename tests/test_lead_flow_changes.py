@@ -257,6 +257,84 @@ def test_send_facebook_message_does_not_alert_on_permission_error(db_session, mo
     assert sent == []
 
 
+def _reset_alert_windows():
+    """Both alert cooldowns share the DB, and db.session is session-scoped."""
+    import services
+    from extensions import db
+    from models import GeneralSetting
+
+    for key in (services.FB_TOKEN_ALERT_STATE_KEY, services.FB_HEALTH_ALERT_STATE_KEY):
+        GeneralSetting.query.filter_by(key=key).delete()
+    db.session.commit()
+
+
+def test_token_error_classifier_reads_the_health_checks_wrapped_detail():
+    """check_facebook_token returns "status=401 body={...}", the send path
+    returns the raw body. One classifier has to read both."""
+    import services
+
+    wrapped = 'status=401 body=' + EXPIRED_TOKEN_BODY
+    ok, reason = services._is_facebook_token_error(wrapped)
+    assert ok is True and '190/463' in reason
+
+
+def test_health_check_uses_the_definite_alert_for_a_dead_token(db_session, monkeypatch):
+    """A confirmed dead token must not be reported as "the bot MIGHT not be
+    able to reply" — that hedged wording is why the 2026-09-04 outage read like
+    a warning and sat unactioned over a weekend."""
+    import services
+
+    _reset_alert_windows()
+    sent = []
+    monkeypatch.setattr(services, 'send_telegram_notification', lambda text: sent.append(text))
+
+    detail = 'status=401 body=' + EXPIRED_TOKEN_BODY
+    assert services.report_token_health(detail) == 'token'
+    assert len(sent) == 1
+    assert 'ЯМАР Ч' in sent[0]          # states the outage as fact
+    assert 'магадгүй' not in sent[0]    # no hedging
+    _reset_alert_windows()
+
+
+def test_health_check_hedges_only_when_the_failure_is_ambiguous(db_session, monkeypatch):
+    """Graph unreachable is genuinely uncertain — there the soft wording is
+    honest, and it still gets a cooldown so it can't repeat every 6h forever."""
+    import services
+
+    _reset_alert_windows()
+    sent = []
+    monkeypatch.setattr(services, 'send_telegram_notification', lambda text: sent.append(text))
+
+    detail = 'exception=HTTPSConnectionPool(host=\'graph.facebook.com\'): timed out'
+    assert services.report_token_health(detail) == 'unknown'
+    assert len(sent) == 1
+    assert 'шалгаж чадсангүй' in sent[0]
+
+    # Same ambiguous failure 6h later -> silent, not a twelfth identical message.
+    assert services.report_token_health(detail) == 'quiet'
+    assert len(sent) == 1
+    _reset_alert_windows()
+
+
+def test_one_outage_produces_one_alert_across_both_paths(db_session, monkeypatch):
+    """The send path and the health check share a cooldown window, so a dead
+    token pages staff once — not once per detection path."""
+    import services
+
+    _reset_alert_windows()
+    sent = []
+    monkeypatch.setattr(services, 'send_telegram_notification', lambda text: sent.append(text))
+
+    # Send path notices first (first failed customer message).
+    assert services.alert_facebook_token_failure(EXPIRED_TOKEN_BODY) is True
+    assert len(sent) == 1
+
+    # The 6-hourly health check then sees the same outage -> stays quiet.
+    assert services.report_token_health('status=401 body=' + EXPIRED_TOKEN_BODY) == 'quiet'
+    assert len(sent) == 1
+    _reset_alert_windows()
+
+
 def test_ensure_page_subscriptions_adds_echoes_without_dropping(monkeypatch):
     import services
 
