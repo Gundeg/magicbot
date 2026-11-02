@@ -5,7 +5,7 @@ knowledge gaps, no price dump). Run it before and after ANY persona / snippet /
 prompt-rule change so the change is measured, not guessed.
 
     python scripts/eval_replies.py            # list scenarios, no model calls
-    python scripts/eval_replies.py --run      # ~12 Claude calls (costs money)
+    python scripts/eval_replies.py --run      # ~8 Claude calls (costs money)
     python scripts/eval_replies.py --run --persona my_persona.txt
 
 Uses an in-memory DB seeded with Magic's defaults plus placeholder registration
@@ -46,7 +46,21 @@ SCENARIOS = [
     ('хүнтэй ярих хүсэлт', 'Би ботоор биш, жинхэнэ хүнтэй ярьмаар байна',
      [('user', 'Сайн уу'), ('assistant', 'Сайн байна уу! Танд юугаар туслах вэ?')],
      'active', 'curious', dict(handoff=True, category='wants_human')),
+    ('орос хэлээр асуусан', 'Здравствуйте, сколько стоит курс бухгалтера?', [], 'new', 'curious',
+     dict(max_chars=400, handoff=False, mongolian=True)),
+    ('англиар асуусан', 'Hi, how much is the accounting course?', [], 'new', 'curious',
+     dict(max_chars=400, handoff=False, mongolian=True)),
 ]
+
+# Mongolian-specific Cyrillic letters: Russian has neither ө nor ү, English has
+# no Cyrillic at all — so their presence (and no Russian/English opener) is a
+# cheap "replied in Mongolian" check.
+_MN_LETTERS = re.compile(r'[өүӨҮ]')
+_FOREIGN_OPENERS = re.compile(r'^(Здравствуйте|Привет|Hello|Hi)', re.I)
+
+
+def is_mongolian(reply):
+    return bool(_MN_LETTERS.search(reply)) and not _FOREIGN_OPENERS.search(reply.strip())
 
 
 def seed_links():
@@ -86,6 +100,8 @@ def score(reply, detail, exp):
         checks['link'] = 'magicfinance.mn' in reply
     if 'max_prices' in exp:
         checks[f"une<={exp['max_prices']}"] = reply.count('₮') <= exp['max_prices']
+    if exp.get('mongolian'):
+        checks['mongol_helteer'] = is_mongolian(reply)
     return checks
 
 

@@ -221,3 +221,14 @@ def test_refresh_user_summary_fails_soft(app, db_session, monkeypatch):
         assert user.bot_summary == 'хуучин хураангуй'   # previous memory kept
     finally:
         _cleanup(user)
+
+
+# ----------------------------------------------------------- reply language
+
+def test_always_mongolian_rule_is_in_the_cached_stable_half(app, db_session):
+    """Seen live 2026-11-03: with a persona that no longer said "Үргэлж монгол
+    хэлээр", the bot answered Russian in Russian and English in English. The
+    guarantee now lives in code, independent of whatever persona is pasted."""
+    assert 'ҮРГЭЛЖ МОНГОЛ (КИРИЛЛ)' in services.LANGUAGE_QUALITY_RULE
+    stable, volatile = _prompt.build_system_blocks()
+    assert 'ҮРГЭЛЖ МОНГОЛ (КИРИЛЛ)' in stable and 'ҮРГЭЛЖ МОНГОЛ (КИРИЛЛ)' not in volatile
