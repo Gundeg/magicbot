@@ -10,8 +10,9 @@ python-dotenv==1.0.1
 # Postgres driver — only used when SQLALCHEMY_DATABASE_URI points at Postgres
 # (Render managed Postgres). Harmless on SQLite-only deployments.
 psycopg2-binary==2.9.9
-openai==1.51.0
-httpx==0.27.2
+# Claude (Anthropic) SDK — every model call in the app (customer replies +
+# background jobs). Pulls in httpx2 itself; no separate HTTP pin needed.
+anthropic==2.3.0
 gunicorn==23.0.0
 pytest==8.3.3
 pytest-flask==1.3.0

@@ -23,9 +23,10 @@ def _seed_env():
     os.environ.setdefault('SECRET_KEY', 'test-secret-key')
     os.environ.setdefault('FACEBOOK_ACCESS_TOKEN', 'test-access-token')
     os.environ.setdefault('FACEBOOK_APP_SECRET', 'test-app-secret')
-    # OpenAI's client raises at construction without a key. We never make
-    # real API calls in unit tests; the value is a stub.
-    os.environ.setdefault('OPENAI_API_KEY', 'sk-test-key')
+    # We never make real Claude API calls in unit tests; the stub key keeps
+    # the "ANTHROPIC_API_KEY missing" boot warning (and the early skip in
+    # cluster_chat_questions) out of the test run.
+    os.environ.setdefault('ANTHROPIC_API_KEY', 'sk-ant-test-key')
     os.environ.setdefault('SQLALCHEMY_DATABASE_URI', 'sqlite:///:memory:')
     # Skip init_db() so tests can build their own minimal schema.
     os.environ.setdefault('FLASK_SKIP_INIT_DB', '1')

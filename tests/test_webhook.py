@@ -1,4 +1,4 @@
-"""Webhook round-trip with stubbed FB signature and OpenAI client."""
+"""Webhook round-trip with stubbed FB signature and Claude client."""
 import hashlib
 import hmac
 import json

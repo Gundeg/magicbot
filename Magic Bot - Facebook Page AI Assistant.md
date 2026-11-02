@@ -60,7 +60,7 @@ A fully automated Facebook Page management system with a Messenger AI bot, admin
 ### Prerequisites
 - Python 3.8+
 - pip (Python package manager)
-- OpenAI API key
+- Anthropic (Claude) API key
 - Facebook Page Access Token
 - Facebook Page ID
 
@@ -85,11 +85,9 @@ pip install -r requirements.txt
 4. **Set environment variables**
 Create a `.env` file in the project root:
 ```
-OPENAI_API_KEY=your_openai_api_key_here
-# Optional: run customer replies on Google Gemini instead of OpenAI.
-# Default model gemini-2.5-flash (free tier OK). For Gemini 3.1 Pro (needs billing) also set
-# REPLY_MODEL=gemini-3.1-pro-preview, GEMINI_REASONING_EFFORT=low, REPLY_MAX_TOKENS=2048
-GEMINI_API_KEY=your_gemini_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+# Optional model tuning (defaults shown): REPLY_MODEL=claude-opus-5-5,
+# REPLY_EFFORT=low, REPLY_MAX_TOKENS=2048, BACKGROUND_MODEL=claude-haiku-5-5
 FACEBOOK_PAGE_ID=your_facebook_page_id
 FACEBOOK_ACCESS_TOKEN=your_facebook_access_token
 VERIFY_TOKEN=magic_bot_verify_token
@@ -199,7 +197,7 @@ The application will start on `http://localhost:5000`
 
 ## LLM Integration
 
-Customer replies run on the provider selected at startup: **Google Gemini** when `GEMINI_API_KEY` is set (default `gemini-2.5-flash`, or `gemini-3.1-pro-preview` on a billed key), otherwise **OpenAI** `gpt-5.3-chat-latest`. Gemini is reached through its OpenAI-compatible endpoint, so the same `openai` SDK and `defer_to_staff` function-calling path is reused either way. Background jobs (lead classifier, FAQ clustering, post auto-comments) always run on OpenAI `gpt-4o-mini`.
+Every model call runs on **Claude (Anthropic)** through one `anthropic` client and one `ANTHROPIC_API_KEY`. Customer replies use `REPLY_MODEL` (default `claude-opus-5-5`, adaptive thinking at `REPLY_EFFORT=low`, `REPLY_MAX_TOKENS=2048` shared between thinking and the reply) with the `defer_to_staff` tool for knowledge-gap handoffs. Background jobs (lead classifier, FAQ clustering, post auto-comments) run on `BACKGROUND_MODEL` (default `claude-haiku-5-5`) with structured-output JSON schemas.
 
 The reply uses a comprehensive system prompt that includes:
 - Training center information
@@ -276,7 +274,7 @@ CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
 ## Troubleshooting
 
 ### Bot not responding
-- Check OpenAI API key is valid
+- Check the Anthropic API key is valid and the account has prepaid credit
 - Verify Facebook access token
 - Check logs for errors
 - Ensure polling thread is running
@@ -301,11 +299,11 @@ CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
 
 ### Environment Variables
 ```
-OPENAI_API_KEY          - OpenAI key: background jobs (gpt-4o-mini); also replies if no Gemini key
-GEMINI_API_KEY          - Optional: run customer replies on Google Gemini
-REPLY_MODEL             - Optional: override the reply model (e.g. gemini-3.1-pro-preview)
-GEMINI_REASONING_EFFORT - Optional: low|medium|high for Pro/3.x ('none' = thinking off, Flash only)
-REPLY_MAX_TOKENS        - Optional: reply length cap (default 500; use 2048 for Pro)
+ANTHROPIC_API_KEY       - Anthropic (Claude) key: every model call (replies + background jobs)
+REPLY_MODEL             - Optional: reply model (default claude-opus-5-5; claude-sonnet-5-5 is cheaper)
+REPLY_EFFORT            - Optional: low|medium|high reasoning depth for replies (default low)
+REPLY_MAX_TOKENS        - Optional: reply length cap incl. thinking (default 2048)
+BACKGROUND_MODEL        - Optional: model for classifier / clustering / comments (default claude-haiku-5-5)
 FACEBOOK_PAGE_ID        - Your Facebook Page ID
 FACEBOOK_ACCESS_TOKEN   - Facebook Page Access Token
 VERIFY_TOKEN            - Webhook verification token

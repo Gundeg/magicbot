@@ -112,7 +112,7 @@
     const csrf = document.querySelector('meta[name=csrf-token]')?.content || '';
 
     refreshBtn.addEventListener('click', function () {
-        if (!confirm('LLM-ийг ажиллуулах уу? Энэ нь OpenAI зардал гаргана.')) return;
+        if (!confirm('LLM-ийг ажиллуулах уу? Энэ нь Claude API зардал гаргана.')) return;
         const original = refreshBtn.innerHTML;
         refreshBtn.disabled = true;
         refreshBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Ажиллаж байна...';

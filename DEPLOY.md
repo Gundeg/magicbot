@@ -12,8 +12,7 @@ You already have the Facebook Page. You still need:
 
 - **Facebook Developer App** (free, ~10 min)
 - **Long-lived Page Access Token** (~5 min)
-- **OpenAI API key** with at least ~$5 credit (~3 min) — runs the background jobs (lead classifier, FAQ clustering, post auto-comments), and the customer replies too unless you add a Gemini key below
-- **Google Gemini API key** *(optional)* — to run customer replies on Gemini instead of OpenAI. The default `gemini-2.5-flash` works on the free tier; the higher-quality Gemini 3.1 Pro needs billing enabled
+- **Anthropic API key** with some prepaid credit (~3 min) — every model call runs on Claude: customer replies (Claude Opus 5.5) and the background jobs (lead classifier, FAQ clustering, post auto-comments on Claude Haiku 5.5). No other AI provider key is needed
 - **GitHub account** (to push the repo to Render)
 - **Render account** at https://render.com (free)
 
@@ -69,9 +68,9 @@ python -c "import secrets; print('VERIFY_TOKEN=' + secrets.token_hex(16))"
 
 Save both values; you'll paste them into Render in step 5.
 
-Also get your **OpenAI API key** from https://platform.openai.com/api-keys (top up at least ~$5 of credit — the background jobs run on cheap `gpt-4o-mini`, which won't run on a $0 balance).
+Also get your **Anthropic API key** from https://console.anthropic.com/settings/keys and add prepaid credit under **Plans & Billing** — the API won't run on a $0 balance (every reply would degrade to the canned apology and page staff on Telegram).
 
-**Customer-reply provider — OpenAI (default) or Gemini.** Out of the box, customer replies use OpenAI `gpt-5.3-chat-latest`. To run them on **Google Gemini** instead, get a key from https://aistudio.google.com/apikey and set `GEMINI_API_KEY` (step 5). With nothing else configured the bot uses `gemini-2.5-flash` (free tier OK, fast, thinking off). For the higher-quality **Gemini 3.1 Pro** you must enable **billing** on the Google key (the free tier returns `limit: 0`) and set three vars together: `REPLY_MODEL=gemini-3.1-pro-preview`, `GEMINI_REASONING_EFFORT=low` (Pro can't disable "thinking", so bound it), and `REPLY_MAX_TOKENS=2048` (room for the thinking budget + the reply). Either way, **keep `OPENAI_API_KEY` set** — the background jobs always use it.
+**Models.** Out of the box, customer replies use `claude-opus-5-5` at `REPLY_EFFORT=low` with `REPLY_MAX_TOKENS=2048`, and the background jobs use `claude-haiku-5-5`. Override with `REPLY_MODEL` / `REPLY_EFFORT` / `REPLY_MAX_TOKENS` / `BACKGROUND_MODEL` (step 5) — e.g. `REPLY_MODEL=claude-sonnet-5-5` to roughly halve reply cost. Thinking can't be switched off on Opus 5.5; `REPLY_EFFORT` is the dial, and `max_tokens` is shared between thinking and the visible reply, so keep headroom.
 
 ---
 
@@ -112,11 +111,11 @@ The `.gitignore` keeps your `.env` and the SQLite DB out of git.
    | Key | Value |
    |---|---|
    | `SECRET_KEY` | (from step 3) |
-   | `OPENAI_API_KEY` | sk-... (background jobs; also customer replies when no Gemini key) |
-   | `GEMINI_API_KEY` | *(optional)* Google AI Studio key — switches customer replies to Gemini |
-   | `REPLY_MODEL` | *(optional)* `gemini-3.1-pro-preview` for the Pro tier; default is `gemini-2.5-flash` |
-   | `GEMINI_REASONING_EFFORT` | *(optional)* `low` when using a Pro/3.x model (it can't disable thinking) |
-   | `REPLY_MAX_TOKENS` | *(optional)* `2048` for Pro (room for thinking + reply); default 500 |
+   | `ANTHROPIC_API_KEY` | sk-ant-... (every model call: customer replies + background jobs) |
+   | `REPLY_MODEL` | *(optional)* default `claude-opus-5-5`; `claude-sonnet-5-5` to cut cost |
+   | `REPLY_EFFORT` | *(optional)* `low` (default, fast chat) / `medium` / `high` — reasoning depth |
+   | `REPLY_MAX_TOKENS` | *(optional)* default `2048`; thinking + reply share it, keep headroom |
+   | `BACKGROUND_MODEL` | *(optional)* default `claude-haiku-5-5` for classifier / clustering / comments |
    | `FACEBOOK_PAGE_ID` | (from step 2) |
    | `FACEBOOK_ACCESS_TOKEN` | long-lived Page token from step 2 |
    | `VERIFY_TOKEN` | (from step 3) |
@@ -166,8 +165,8 @@ Render's free tier wipes the disk on every redeploy, so leads and conversation l
 | Render build fails on import | Missing env var (`SECRET_KEY` or `FACEBOOK_ACCESS_TOKEN`) | Add it under *Environment*, redeploy |
 | Webhook verification fails (red ❌) | `VERIFY_TOKEN` mismatch | Make sure Render env var and Facebook field are identical, no whitespace |
 | DM gets no reply | Page not subscribed to `messages`, or Page is in dev mode and your account isn't a tester | Add yourself as a tester at *App Roles → Testers*; recheck webhook subscription |
-| Reply says "Уучлаарай, түр зуурын саатал..." | Reply-provider 401/429 — bad key or no credit/quota | If `GEMINI_API_KEY` is set, replies are Gemini → fix the key/billing at aistudio.google.com; otherwise recheck `OPENAI_API_KEY` + top up. The Telegram alert names the active provider. |
-| Gemini replies come back blank or cut off | Pro/3.x model with no headroom for "thinking" | Set `GEMINI_REASONING_EFFORT=low` **and** `REPLY_MAX_TOKENS=2048` (thinking shares the `max_tokens` budget with the reply) |
+| Reply says "Уучлаарай, түр зуурын саатал..." | Claude API 400 `credit balance is too low` or 401 — no prepaid credit or a bad key | Top up at console.anthropic.com → Plans & Billing, or fix `ANTHROPIC_API_KEY`. The Telegram alert fires on exactly these account-level errors (not on transient 429/529). |
+| Same apology, logs show `Empty reply from … stop_reason=max_tokens` | `REPLY_MAX_TOKENS` too tight — thinking and the reply share the budget | Raise `REPLY_MAX_TOKENS` (default 2048) or lower `REPLY_EFFORT` |
 | 500 on `/webhook` | Most often `db.session` outside app context — confirm latest code is deployed | Check Render *Events* tab for the deploy commit hash |
 
 ---

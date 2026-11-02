@@ -1,4 +1,4 @@
-"""classify_user_topics — multi-topic, DB-driven, OpenAI stubbed.
+"""classify_user_topics — multi-topic, DB-driven, Claude client stubbed.
 
 The classifier must:
 - only return topics that exist in the active catalog,
@@ -9,6 +9,7 @@ The classifier must:
 - return 0 on any LLM/parse failure (never raise).
 """
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -40,22 +41,16 @@ def _make_user_with_messages(text='Аудит хийдэг үү?'):
     return user
 
 
-class _StubChoice:
-    def __init__(self, content):
-        self.message = type('M', (), {'content': content})()
-
-
-class _StubCompletion:
-    def __init__(self, content):
-        self.choices = [_StubChoice(content)]
-
-
-def _patch_openai(content):
-    """Patch the OpenAI client's chat.completions.create to return content."""
+def _patch_claude(content):
+    """Patch the Claude client's messages.create to return `content` as the
+    single text block of the response."""
     import services
     return patch.object(
-        services.client.chat.completions, 'create',
-        return_value=_StubCompletion(content),
+        services.client.messages, 'create',
+        return_value=SimpleNamespace(
+            content=[SimpleNamespace(type='text', text=content)],
+            stop_reason='end_turn',
+        ),
     )
 
 
@@ -82,7 +77,7 @@ def test_classifier_attaches_matching_topic(app, db_session):
         ],
     }, ensure_ascii=False)
 
-    with _patch_openai(payload):
+    with _patch_claude(payload):
         n = classify_user_topics(user.id)
 
     assert n == 1
@@ -101,11 +96,30 @@ def test_classifier_silently_drops_hallucinated_topics(app, db_session):
     # LLM invents a topic not in our catalog — must be ignored.
     payload = json.dumps({'topics': [{'name': 'Crypto Trading', 'evidence': 'fake'}]})
 
-    with _patch_openai(payload):
+    with _patch_claude(payload):
         n = classify_user_topics(user.id)
 
     assert n == 0
     assert ConversationTopic.query.filter_by(facebook_user_id=user.id).count() == 0
+
+
+def test_classifier_tolerates_kind_suffix_in_name(app, db_session):
+    """Haiku copies the "(kind)" annotation from the ALLOWED list onto the
+    name (seen live 2026-11-02); the matcher must strip it, not drop the tag."""
+    from models import ConversationTopic
+    from services import classify_user_topics
+
+    user = _make_user_with_messages('Аудит хийлгэх үнэ хэд вэ?')
+    payload = json.dumps({'topics': [
+        {'name': 'Magic Consulting Audit (business_line)', 'evidence': 'аудитын үнэ'},
+    ]}, ensure_ascii=False)
+
+    with _patch_claude(payload):
+        n = classify_user_topics(user.id)
+
+    assert n == 1
+    row = ConversationTopic.query.filter_by(facebook_user_id=user.id).one()
+    assert row.topic == 'Magic Consulting Audit'   # catalog name, not the model's copy
 
 
 def test_classifier_upserts_on_repeat_run(app, db_session):
@@ -116,7 +130,7 @@ def test_classifier_upserts_on_repeat_run(app, db_session):
     payload = json.dumps({
         'topics': [{'name': 'Magic Consulting Audit', 'evidence': 'first'}],
     })
-    with _patch_openai(payload):
+    with _patch_claude(payload):
         classify_user_topics(user.id)
     first = ConversationTopic.query.filter_by(facebook_user_id=user.id).one()
     first_seen = first.first_seen_at
@@ -125,7 +139,7 @@ def test_classifier_upserts_on_repeat_run(app, db_session):
     payload2 = json.dumps({
         'topics': [{'name': 'Magic Consulting Audit', 'evidence': 'second'}],
     })
-    with _patch_openai(payload2):
+    with _patch_claude(payload2):
         classify_user_topics(user.id)
 
     rows = ConversationTopic.query.filter_by(facebook_user_id=user.id).all()
@@ -139,7 +153,7 @@ def test_classifier_returns_zero_on_garbage_response(app, db_session):
     from services import classify_user_topics
 
     user = _make_user_with_messages('hi')
-    with _patch_openai('not json at all'):
+    with _patch_claude('not json at all'):
         n = classify_user_topics(user.id)
     assert n == 0
 
@@ -156,7 +170,7 @@ def test_classifier_no_active_catalog_returns_zero(app, db_session):
             row.is_active = False
     db.session.commit()
 
-    # No OpenAI call should be needed — classifier bails early.
+    # No model call should be needed — classifier bails early.
     n = classify_user_topics(user.id)
     assert n == 0
 
@@ -229,7 +243,7 @@ def test_classify_route_stamps_last_classified_and_budget_fields(client, db_sess
     payload = json.dumps({'topics': [
         {'name': 'Magic Consulting Audit', 'evidence': 'аудитын үнэ'},
     ]}, ensure_ascii=False)
-    with _patch_openai(payload):
+    with _patch_claude(payload):
         resp = client.post('/admin/api/classify-conversations',
                            json={'lookback_days': 7})
 

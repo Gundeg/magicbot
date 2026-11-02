@@ -356,7 +356,7 @@ if _run_background_loops and os.environ.get('ENABLE_NUDGE', 'false').lower() == 
     Thread(target=nudge_task, args=(app,), daemon=True).start()
 
 # Optional weekly LLM clustering of user chat messages into FAQ candidates
-# (Phase 5b). Off by default to avoid OpenAI credit burn on dev / unused
+# (Phase 5b). Off by default to avoid API credit burn on dev / unused
 # deployments; turn on per-service in Render env. Admins can also trigger
 # a one-shot run via the "Шинэчлэх" button on the FAQ tab without flipping
 # this var.

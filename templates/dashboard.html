@@ -240,9 +240,9 @@
             <div class="card-header"><i class="bi bi-plug"></i> Холболтын төлөв</div>
             <div class="card-body py-2">
                 <div class="health-row">
-                    <span class="dot {{ 'ok' if health.openai_ready else 'err' }}"></span>
-                    <span class="label">OpenAI API түлхүүр</span>
-                    <span class="detail">{{ 'Тогтоосон' if health.openai_ready else 'Тогтоогоогүй' }}</span>
+                    <span class="dot {{ 'ok' if health.anthropic_ready else 'err' }}"></span>
+                    <span class="label">Claude API түлхүүр (Anthropic)</span>
+                    <span class="detail">{{ 'Тогтоосон' if health.anthropic_ready else 'Тогтоогоогүй' }}</span>
                 </div>
                 <div class="health-row">
                     <span class="dot {{ 'ok' if health.facebook_token_ready else 'err' }}"></span>

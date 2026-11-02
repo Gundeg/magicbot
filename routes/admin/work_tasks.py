@@ -35,7 +35,7 @@ INBOX_AGING_HOURS = int(os.environ.get('INBOX_AGING_HOURS', '12'))
 BACKFILL_MAX_PER_RUN = int(os.environ.get('BACKFILL_MAX_PER_RUN', '60'))
 BACKFILL_BUDGET_SECONDS = int(os.environ.get('BACKFILL_BUDGET_SECONDS', '40'))
 
-# Same idea for the manual "Ангилах" run: one OpenAI call per user is slow, so
+# Same idea for the manual "Ангилах" run: one model call per user is slow, so
 # cap each run's wall-clock well under gunicorn's 60s worker timeout and let the
 # admin click again to finish the backlog (tracked via FacebookUser.last_classified_at).
 # Without this the loop could run past 60s and the worker is killed mid-request,
@@ -129,7 +129,7 @@ def dashboard():
     last_message_at = latest_message.created_at if latest_message else None
     telegram_ready = bool(os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()) and bool(get_telegram_chat_ids())
     health = {
-        'openai_ready': bool(os.environ.get('OPENAI_API_KEY', '').strip()),
+        'anthropic_ready': bool(os.environ.get('ANTHROPIC_API_KEY', '').strip()),
         'facebook_token_ready': bool(FACEBOOK_ACCESS_TOKEN),
         'facebook_signature_ready': bool(FACEBOOK_APP_SECRET),
         'telegram_ready': telegram_ready,
@@ -782,7 +782,7 @@ def classify_conversations_backfill():
             .all()
         )
         # Stop well before gunicorn's 60s worker timeout; the admin clicks again
-        # to continue. classify_user_topics makes one OpenAI call per user.
+        # to continue. classify_user_topics makes one model call per user.
         deadline = time.monotonic() + CLASSIFY_BUDGET_SECONDS
         classified = 0
         topics_attached_total = 0

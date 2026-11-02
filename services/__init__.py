@@ -1,9 +1,9 @@
-"""Domain services: Facebook Messenger API, OpenAI helpers, rate limit,
-funnel/session classifiers, settings getters, AI prompt builder, schema
+"""Domain services: Facebook Messenger API, Claude (Anthropic) helpers, rate
+limit, funnel/session classifiers, settings getters, AI prompt builder, schema
 migration, seed routines, background tasks, handoff flow, and audit logging.
 
 Route modules import functions from here; they should not poke at Facebook
-or OpenAI directly.
+or the Claude API directly.
 """
 import hmac
 import hashlib
@@ -17,10 +17,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
 
+import anthropic
 import requests
+from anthropic import (
+    AuthenticationError, BadRequestError, PermissionDeniedError, RateLimitError,
+)
 from flask import current_app, g, has_request_context
 from flask_login import current_user
-from openai import AuthenticationError, OpenAI, RateLimitError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
@@ -47,9 +50,9 @@ logger = logging.getLogger(__name__)
 
 
 # ===================== BACKGROUND WORK QUEUE =====================
-# Small thread-pool used to push slow side-effects (OpenAI classify calls,
+# Small thread-pool used to push slow side-effects (model classify calls,
 # Telegram pings, follow-up FB messages) off the webhook request path so
-# Facebook doesn't retry on slow OpenAI hops. Workers establish their own
+# Facebook doesn't retry on slow model hops. Workers establish their own
 # Flask app context so SQLAlchemy queries inside the callable still work.
 
 from concurrent.futures import ThreadPoolExecutor  # noqa: E402
@@ -100,84 +103,126 @@ def enqueue_background(func, *args, **kwargs):
 
 PHONE_RE = re.compile(r'(?:\+?976[\s-]?)?[89]\d{7}')
 
-# OpenAI client. Reads OPENAI_API_KEY from env at import time — the .env file
-# is loaded before this module is first imported by app.py. This client serves
-# (a) EVERY background job (topic classifier, page auto-comments, FAQ clustering
-# — kept on cheap, high-volume gpt-4o-mini) and (b) the customer reply ONLY when
-# no Gemini key is configured (see reply_client below). OPENAI_API_KEY is still
-# required even on a Gemini reply deployment, for those background jobs.
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+# ===================== CLAUDE (ANTHROPIC) CLIENT =====================
+# ONE Anthropic client serves every model call in the app. The customer-facing
+# reply runs on REPLY_MODEL; the background jobs (topic classifier, page
+# auto-comments, FAQ clustering) run on the cheaper BACKGROUND_MODEL. Reads
+# ANTHROPIC_API_KEY from env at import time — the .env file is loaded before
+# this module is first imported by app.py.
+#
+# The SDK does NOT fail at construction without a key; the first request would,
+# and every customer would then get the canned apology. Warn loudly in the boot
+# log instead so a missing key is obvious on the Render Events/Logs page.
+ANTHROPIC_API_KEY = (os.environ.get('ANTHROPIC_API_KEY') or '').strip()
+if not ANTHROPIC_API_KEY:
+    logger.warning(
+        "ANTHROPIC_API_KEY is not set — every Claude call will fail and customers "
+        "will get the canned apology. Set it in the environment (console.anthropic.com)."
+    )
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY or None)
 
-# ----- Customer-reply provider: Google Gemini (preferred if keyed) or OpenAI ---
-# The customer-facing reply can run on Google Gemini. We reach Gemini through its
-# OpenAI-COMPATIBLE endpoint (generativelanguage.../v1beta/openai/), so the whole
-# existing reply path is reused VERBATIM — chat.completions, the defer_to_staff
-# function-calling tool, and the openai AuthenticationError / RateLimitError types
-# that alert_openai_failure keys on — with no second SDK and no message/tool
-# reshaping. Set GEMINI_API_KEY (or GOOGLE_API_KEY) to switch the reply path to
-# Gemini; unset, it stays on OpenAI exactly as before.
-GEMINI_API_KEY = (os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY') or '').strip()
-GEMINI_BASE_URL = (
-    os.environ.get('GEMINI_BASE_URL')
-    or 'https://generativelanguage.googleapis.com/v1beta/openai/'
-).strip()
+# Customer-reply model. Claude Opus 5.5 is the default: the reply has to read
+# paraphrase / Latin-script / indirect intent in Mongolian, where the bigger
+# tier is markedly better (the earlier OpenAI/Gemini bake-offs showed the same
+# thing). REPLY_MODEL overrides it, e.g. claude-sonnet-5-5 to trade a little
+# quality for cost.
+REPLY_MODEL = os.environ.get('REPLY_MODEL', '').strip() or 'claude-opus-5-5'
 
-if GEMINI_API_KEY:
-    REPLY_PROVIDER = 'gemini'
-    reply_client = OpenAI(api_key=GEMINI_API_KEY, base_url=GEMINI_BASE_URL)
-    # Default to gemini-2.5-flash: it works on the FREE tier and lets us turn
-    # thinking OFF (GEMINI_REASONING_EFFORT='none') for fast, full-length chat
-    # replies. The Pro tier (gemini-3.1-pro-preview) is higher quality but needs
-    # BILLING (free tier = limit 0) and CAN'T disable thinking — to use it set
-    # REPLY_MODEL=gemini-3.1-pro-preview, GEMINI_REASONING_EFFORT=low, and raise
-    # REPLY_MAX_TOKENS (e.g. 2048) so the thinking budget + reply both fit.
-    REPLY_MODEL = os.environ.get('REPLY_MODEL', '').strip() or 'gemini-2.5-flash'
-else:
-    REPLY_PROVIDER = 'openai'
-    reply_client = client
-    # gpt-5.3-chat-latest after a Mongolian bake-off (2026-06): bigger models read
-    # paraphrase / Latin-script / indirect intent far better than gpt-4o-mini.
-    REPLY_MODEL = os.environ.get('REPLY_MODEL', '').strip() or 'gpt-5.3-chat-latest'
+# Background model for the cheap, high-volume jobs (classifier / comments /
+# clustering). Haiku is plenty for structured tagging and grouping.
+BACKGROUND_MODEL = os.environ.get('BACKGROUND_MODEL', '').strip() or 'claude-haiku-5-5'
 
-# Token-cap PARAM GOTCHA — the param name differs by provider, so pick it once:
-#   • OpenAI gpt-5.x chat models REJECT `max_tokens` and a non-default
-#     `temperature`; they require `max_completion_tokens` (also valid on 4o/4.1).
-#   • Gemini's OpenAI-compatible endpoint uses the classic `max_tokens` and
-#     accepts `temperature` normally.
-# We send only the token cap (never an explicit temperature), so the default-
-# temperature requirement is satisfied for both providers.
-REPLY_MAX_TOKENS_PARAM = 'max_tokens' if REPLY_PROVIDER == 'gemini' else 'max_completion_tokens'
-# Human-readable label + billing pointer for the reply provider, surfaced in the
-# account-failure Telegram alert so the telemetry names the right vendor.
-REPLY_PROVIDER_LABEL = 'Gemini' if REPLY_PROVIDER == 'gemini' else 'OpenAI'
-REPLY_PROVIDER_BILLING_HINT = (
-    'aistudio.google.com (Google AI Studio) → API keys / Billing'
-    if REPLY_PROVIDER == 'gemini'
-    else 'platform.openai.com → Billing'
-)
+# THINKING / EFFORT: current Claude models think adaptively and that can't be
+# switched off on Opus 5.5 — depth is controlled with `output_config.effort`.
+# A chat bot is latency-sensitive and the question is usually simple, so the
+# default is 'low' (fast, cheap, still thinks when the message calls for it).
+# Raise to 'medium'/'high' via REPLY_EFFORT if replies ever feel shallow.
+_EFFORT_LEVELS = ('low', 'medium', 'high', 'xhigh', 'max')
+REPLY_EFFORT = os.environ.get('REPLY_EFFORT', '').strip().lower() or 'low'
+if REPLY_EFFORT not in _EFFORT_LEVELS:
+    logger.warning(
+        "REPLY_EFFORT=%r is not one of %s; using 'low'.", REPLY_EFFORT, _EFFORT_LEVELS,
+    )
+    REPLY_EFFORT = 'low'
 
-# Gemini 2.5/3.x are THINKING models: by default they spend output tokens on
-# internal reasoning BEFORE the visible reply. On the OpenAI-compat endpoint
-# `max_tokens` caps thinking + reply COMBINED, so unmanaged thinking can swallow
-# the whole REPLY_MAX_TOKENS budget and return an EMPTY reply (finish_reason=
-# length, completion_tokens=0) — plus it adds latency/cost we don't want on a
-# chat bot. GEMINI_REASONING_EFFORT maps to the OpenAI-compat `reasoning_effort`:
-#   • 'none'                    -> thinking OFF. Valid ONLY on 2.5 Flash (default).
-#   • 'low' | 'medium' | 'high' -> bounded thinking (~1K / 8K / 24K budget). Use
-#     one of these for Pro / 3.x models (they REJECT 'none'); give REPLY_MAX_TOKENS
-#     headroom for that budget PLUS the reply (e.g. 2048 at 'low').
-#   • '' / 'auto' / 'default' / 'dynamic' -> omit the field; let Gemini decide.
-# Applied only on the Gemini path, and 'none' is auto-skipped on non-Flash models
-# (which 400 on it) so a leftover default can't brick a Pro deployment.
-GEMINI_REASONING_EFFORT = os.environ.get('GEMINI_REASONING_EFFORT', 'none').strip().lower()
+# Label + billing pointer surfaced in the account-failure Telegram alert so the
+# telemetry points staff at the right console.
+REPLY_PROVIDER_LABEL = 'Claude (Anthropic)'
+REPLY_PROVIDER_BILLING_HINT = 'console.anthropic.com → Plans & Billing'
 
-# Hard cap on reply length. Shorter replies = lower latency (the customer
-# waits less, and a slow reply is what makes Facebook retry the webhook) and
-# lower cost. Env-tunable so it can be tightened without a redeploy.
+# Hard cap on reply length. NOTE: on Claude `max_tokens` caps the model's
+# thinking AND the visible reply COMBINED, so leave headroom above the reply
+# itself — too tight a cap returns an EMPTY reply (stop_reason=max_tokens),
+# which generate_bot_response turns into the canned apology and logs. 2048 is
+# comfortable at effort 'low'. Env-tunable without a redeploy.
 try:
-    REPLY_MAX_TOKENS = int(os.environ.get('REPLY_MAX_TOKENS', '500') or '500')
+    REPLY_MAX_TOKENS = int(os.environ.get('REPLY_MAX_TOKENS', '2048') or '2048')
 except ValueError:
-    REPLY_MAX_TOKENS = 500
+    REPLY_MAX_TOKENS = 2048
+
+
+def _response_text(response):
+    """Concatenate the text blocks of a Messages API response (thinking and
+    tool_use blocks are skipped). Returns '' when the model produced no text —
+    e.g. it stopped on max_tokens mid-thinking, or only called a tool."""
+    return ''.join(
+        getattr(block, 'text', '') or '' for block in response.content
+        if getattr(block, 'type', None) == 'text'
+    ).strip()
+
+
+# Structured-output schemas (output_config.format) for the two background jobs
+# that must return JSON. The grammar guarantees the reply parses and matches
+# the shape — no code fences, no prose — so the json.loads at the call site
+# only fails on a genuinely broken response. Keep these to the plain subset
+# (object / array / string / integer, required, additionalProperties).
+TOPIC_TAGS_FORMAT = {
+    'type': 'json_schema',
+    'schema': {
+        'type': 'object',
+        'properties': {
+            'topics': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'name': {'type': 'string'},
+                        'evidence': {'type': 'string'},
+                    },
+                    'required': ['name', 'evidence'],
+                    'additionalProperties': False,
+                },
+            },
+        },
+        'required': ['topics'],
+        'additionalProperties': False,
+    },
+}
+
+CLUSTERS_FORMAT = {
+    'type': 'json_schema',
+    'schema': {
+        'type': 'object',
+        'properties': {
+            'clusters': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'title': {'type': 'string'},
+                        'representative_question': {'type': 'string'},
+                        'sample_questions': {'type': 'array', 'items': {'type': 'string'}},
+                        'count': {'type': 'integer'},
+                    },
+                    'required': ['title', 'representative_question', 'sample_questions', 'count'],
+                    'additionalProperties': False,
+                },
+            },
+        },
+        'required': ['clusters'],
+        'additionalProperties': False,
+    },
+}
 
 # Facebook credentials (read once at import).
 FACEBOOK_PAGE_ID = os.environ.get('FACEBOOK_PAGE_ID', '')
@@ -724,7 +769,7 @@ def classify_user_topics(fb_user):
     Returns the number of topics attached (or refreshed). Catches its own
     errors and logs them — callers (webhook background queue and the
     /admin/api/classify-conversations route) must keep working even if
-    OpenAI is having a bad day.
+    the model API is having a bad day.
 
     Accepts either a FacebookUser instance or its primary key, mirroring
     the contract callers expect from the background queue.
@@ -780,21 +825,21 @@ def classify_user_topics(fb_user):
             '{"topics": [{"name": "<exact name from ALLOWED list>", '
             '"evidence": "<short Mongolian quote / paraphrase from the '
             'user explaining why this topic was tagged, <= 160 chars>"}]}\n'
-            "Use the names verbatim from the ALLOWED list. Maximum 5 "
-            "topics. Empty list is valid."
+            "Use the names verbatim from the ALLOWED list — the name text "
+            "only, WITHOUT the list number or the kind in parentheses. "
+            "Maximum 5 topics. Empty list is valid."
         )
 
-        result = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You output strict JSON only."},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={'type': 'json_object'},
-            temperature=0,
-            max_tokens=400,
+        # Structured outputs constrain the reply to TOPIC_TAGS_FORMAT. Low
+        # effort: this is a lookup against a fixed list, not reasoning.
+        result = client.messages.create(
+            model=BACKGROUND_MODEL,
+            max_tokens=1024,
+            output_config={'effort': 'low', 'format': TOPIC_TAGS_FORMAT},
+            system="You output strict JSON only.",
+            messages=[{"role": "user", "content": prompt}],
         )
-        raw = result.choices[0].message.content or '{}'
+        raw = _response_text(result) or '{}'
 
         try:
             parsed = json.loads(raw)
@@ -811,8 +856,18 @@ def classify_user_topics(fb_user):
 
         # Match LLM-returned names back to the catalog case-insensitively.
         # Anything that doesn't match an active topic is dropped silently —
-        # we don't trust the model to invent topic names.
-        by_name = {t['name'].lower(): t for t in catalog}
+        # we don't trust the model to invent topic names. Models sometimes copy
+        # the "(kind)" annotation from the ALLOWED list onto the name (Haiku
+        # does), so a trailing "(course)" etc. is stripped before the lookup.
+        kinds = {t['kind'] for t in catalog}
+        kind_suffix = re.compile(
+            r'\s*\((' + '|'.join(map(re.escape, kinds)) + r')\)\s*$', re.I,
+        )
+
+        def _norm(topic_name):
+            return kind_suffix.sub('', topic_name).strip().lower()
+
+        by_name = {_norm(t['name']): t for t in catalog}
         now = datetime.utcnow()
         attached = 0
         for it in items[:10]:
@@ -822,7 +877,7 @@ def classify_user_topics(fb_user):
             evidence = (it.get('evidence') or '').strip()[:500] or None
             if not name:
                 continue
-            matched = by_name.get(name.lower())
+            matched = by_name.get(_norm(name))
             if not matched:
                 continue
             row = (ConversationTopic.query
@@ -1160,45 +1215,47 @@ from services._prompt import (  # noqa: E402
 )
 
 
-# ===================== REPLY-PROVIDER ACCOUNT-FAILURE ALERTING =============
-# Account-level failures of the reply provider (OpenAI OR Gemini) — quota
-# exhausted, revoked/invalid key — kill every customer reply AND the
-# knowledge-gap handoff that would normally page staff, so an outage is
-# invisible from inside the product (the 2026-06-11 quota outage ran 6+ hours
-# unnoticed). alert_openai_failure is called from generate_bot_response's
+# ===================== REPLY-MODEL ACCOUNT-FAILURE ALERTING ================
+# Account-level failures of the Claude API — credit balance exhausted, revoked/
+# invalid key — kill every customer reply AND the knowledge-gap handoff that
+# would normally page staff, so an outage is invisible from inside the product
+# (the 2026-06-11 quota outage on the previous provider ran 6+ hours
+# unnoticed). alert_model_failure is called from generate_bot_response's
 # failure path and Telegram-pings staff directly (naming REPLY_PROVIDER_LABEL),
 # deduplicated via GeneralSetting so the alert storm of an outage (every
-# inbound message fails) produces at most one ping per cooldown window. Both
-# providers surface these as openai.AuthenticationError / RateLimitError because
-# Gemini is reached through the OpenAI-compatible client.
+# inbound message fails) produces at most one ping per cooldown window.
 
-OPENAI_ALERT_STATE_KEY = 'openai_failure_alerted_at'
+MODEL_ALERT_STATE_KEY = 'model_failure_alerted_at'
 
 
-def _is_openai_account_error(exc):
-    """True only for errors that mean EVERY call will keep failing — quota
-    exhausted or a bad API key. Transient per-model rate limits
-    (429 rate_limit_exceeded) self-heal and must NOT page staff."""
-    if isinstance(exc, AuthenticationError):
+def _is_account_error(exc):
+    """True only for errors that mean EVERY call will keep failing — a bad
+    API key or an exhausted credit balance. Transient failures (429 rate
+    limit, 529 overloaded, 5xx) self-heal and must NOT page staff.
+
+    Anthropic reports an empty prepaid balance as a 400 invalid_request_error
+    whose message says "credit balance is too low" — NOT as a 429 — so the
+    billing check lives on BadRequestError. A 429 that mentions credit or a
+    spend limit is treated the same way, defensively."""
+    if isinstance(exc, (AuthenticationError, PermissionDeniedError)):
         return True
-    if isinstance(exc, RateLimitError):
-        code = getattr(exc, 'code', '') or ''
-        return code == 'insufficient_quota' or 'insufficient_quota' in str(exc)
+    if isinstance(exc, (BadRequestError, RateLimitError)):
+        msg = str(exc).lower()
+        return 'credit balance' in msg or 'spend limit' in msg
     return False
 
 
-def alert_openai_failure(exc):
-    """Telegram-alert staff about an account-wide reply-provider failure
-    (OpenAI or Gemini), at most once per OPENAI_ALERT_COOLDOWN_HOURS
-    (default 6). Runs on the customer-reply path, so it must never raise —
-    any internal failure is logged and swallowed. Returns True if an alert
-    was sent this call."""
+def alert_model_failure(exc):
+    """Telegram-alert staff about an account-wide Claude API failure, at most
+    once per MODEL_ALERT_COOLDOWN_HOURS (default 6). Runs on the customer-
+    reply path, so it must never raise — any internal failure is logged and
+    swallowed. Returns True if an alert was sent this call."""
     try:
-        if not _is_openai_account_error(exc):
+        if not _is_account_error(exc):
             return False
-        cooldown = timedelta(hours=max(1, _safe_int_env('OPENAI_ALERT_COOLDOWN_HOURS', 6)))
+        cooldown = timedelta(hours=max(1, _safe_int_env('MODEL_ALERT_COOLDOWN_HOURS', 6)))
         now = datetime.utcnow()
-        row = GeneralSetting.query.filter_by(key=OPENAI_ALERT_STATE_KEY).first()
+        row = GeneralSetting.query.filter_by(key=MODEL_ALERT_STATE_KEY).first()
         if row and row.value:
             try:
                 if now - datetime.fromisoformat(row.value) < cooldown:
@@ -1209,7 +1266,7 @@ def alert_openai_failure(exc):
         # message fails at once across workers, and committing first keeps
         # that storm from paging staff more than once.
         if row is None:
-            db.session.add(GeneralSetting(key=OPENAI_ALERT_STATE_KEY, value=now.isoformat()))
+            db.session.add(GeneralSetting(key=MODEL_ALERT_STATE_KEY, value=now.isoformat()))
         else:
             row.value = now.isoformat()
         db.session.commit()
@@ -1217,14 +1274,14 @@ def alert_openai_failure(exc):
             f"⚠️ {REPLY_PROVIDER_LABEL} данс ажиллахгүй байна — бот хэрэглэгчдэд "
             "бодит хариу өгч чадахгүй, шилжүүлгийн (handoff) мэдэгдэл ч "
             "ажиллахгүй.\n\n"
-            "Шалтгаан: квот дууссан эсвэл API key хүчингүй. "
+            "Шалтгаан: кредит дууссан эсвэл API key хүчингүй. "
             f"{REPLY_PROVIDER_BILLING_HINT} хуудсаар орж кредит/түлхүүрээ "
             "шалгана уу. Засмагц бот шууд сэргэнэ.\n\n"
             f"Дэлгэрэнгүй: {str(exc)[:300]}"
         )
         return True
     except Exception as alert_exc:
-        logger.error("OpenAI failure alert could not be sent: %s", alert_exc)
+        logger.error("Model failure alert could not be sent: %s", alert_exc)
         try:
             db.session.rollback()
         except Exception:
@@ -1232,13 +1289,44 @@ def alert_openai_failure(exc):
         return False
 
 
+TRANSIENT_ERROR_REPLY = (
+    "Уучлаарай, түр зуурын саатал гарсан байна. Хэдхэн минутын дараа дахин бичээрэй."
+)
+
+
+def _degraded_reply(handoff_just_triggered):
+    """What the customer hears when no model reply is available. Right after a
+    handoff fired this turn the dynamic acknowledgement won't arrive, so fall
+    back to the static, office-hours-aware handoff template — the customer
+    still hears about staff routing instead of a generic 'try again later'."""
+    if handoff_just_triggered:
+        return _static_handoff_reply()
+    return TRANSIENT_ERROR_REPLY
+
+
+def _claude_messages(conversation_history, user_message):
+    """Shape the stored conversation for the Messages API. The API rejects
+    whitespace-only text blocks and requires the first message to come from
+    the user, so empty turns and any leading assistant turns are dropped (the
+    last-10 window can open on a bot reply). The inbound message goes last."""
+    messages = []
+    for m in conversation_history:
+        content = (m.get('content') or '').strip()
+        if not content:
+            continue
+        if not messages and m.get('role') != 'user':
+            continue
+        messages.append({'role': m['role'], 'content': content})
+    messages.append({'role': 'user', 'content': user_message})
+    return messages
+
+
 def generate_bot_response(user_message, conversation_history,
                           session_state='new', funnel_stage='curious',
                           user_first_name='', handoff_pending=False,
                           handoff_just_triggered=False):
-    """Generate bot response using the configured reply provider (Gemini via
-    its OpenAI-compatible endpoint, or OpenAI — see reply_client / REPLY_MODEL).
-    `handoff_pending=True` enables
+    """Generate the customer reply on REPLY_MODEL (Claude — see the client
+    block at the top of this module). `handoff_pending=True` enables
     advisory mode in the system prompt — bot keeps helping but doesn't
     re-route the customer to staff (since the handoff was already fired).
     `handoff_just_triggered=True` is set for the SINGLE reply right after
@@ -1246,24 +1334,21 @@ def generate_bot_response(user_message, conversation_history,
     bot can craft a warm, mood-aware acknowledgement that mentions staff
     routing and the office-hours ETA."""
     try:
-        messages = [{
-            "role": "system",
-            "content": build_system_prompt(
+        create_kwargs = {
+            'model': REPLY_MODEL,
+            'max_tokens': REPLY_MAX_TOKENS,
+            # Thinking is adaptive and stays ON (Opus 5.5 rejects turning it
+            # off); effort is the depth control — see REPLY_EFFORT. We never
+            # send sampling params (temperature etc.) — current models 400.
+            'output_config': {'effort': REPLY_EFFORT},
+            'system': build_system_prompt(
                 session_state=session_state,
                 funnel_stage=funnel_stage,
                 user_first_name=user_first_name,
                 handoff_pending=handoff_pending,
                 handoff_just_triggered=handoff_just_triggered,
             ),
-        }]
-        messages.extend(conversation_history)
-        messages.append({"role": "user", "content": user_message})
-
-        create_kwargs = {
-            'model': REPLY_MODEL,
-            'messages': messages,
-            # Param name is provider-specific — see REPLY_MAX_TOKENS_PARAM.
-            REPLY_MAX_TOKENS_PARAM: REPLY_MAX_TOKENS,
+            'messages': _claude_messages(conversation_history, user_message),
         }
         # Offer the staff-handoff tool only in NORMAL mode — i.e. exactly when
         # KNOWLEDGE_GAP_HANDOFF_RULE is in the prompt. In advisory / just-
@@ -1271,60 +1356,37 @@ def generate_bot_response(user_message, conversation_history,
         if not handoff_pending and not handoff_just_triggered:
             create_kwargs['tools'] = DEFER_TO_STAFF_TOOL
 
-        # Gemini thinking control (see GEMINI_REASONING_EFFORT). Passed via
-        # extra_body so it works regardless of openai-SDK version, only on the
-        # Gemini path. 'none' is skipped on non-Flash models (they 400 on it) so
-        # a stale default can't hard-fail a Pro/3.x deployment.
-        if REPLY_PROVIDER == 'gemini':
-            effort = GEMINI_REASONING_EFFORT
-            if effort in ('', 'auto', 'default', 'dynamic'):
-                effort = None
-            elif effort == 'none' and 'flash' not in REPLY_MODEL.lower():
-                logger.warning(
-                    "GEMINI_REASONING_EFFORT='none' is invalid for non-Flash model "
-                    "%r; omitting it (model will think dynamically). Set 'low'/"
-                    "'medium'/'high' for Pro/3.x models.", REPLY_MODEL,
-                )
-                effort = None
-            if effort:
-                create_kwargs['extra_body'] = {'reasoning_effort': effort}
-
-        response = reply_client.chat.completions.create(**create_kwargs)
-        msg = response.choices[0].message
+        response = client.messages.create(**create_kwargs)
 
         # If the model chose to defer (it lacks the info), translate that
         # structured tool call into the internal HANDOFF_MARKER the webhook
         # detects. This is reliable, unlike asking the model to emit a literal
-        # marker in its text (which chat models strip).
-        for tc in (msg.tool_calls or []):
-            if tc.function.name == 'defer_to_staff':
-                try:
-                    args = json.loads(tc.function.arguments or '{}')
-                except (ValueError, TypeError):
-                    args = {}
+        # marker in its text (which chat models strip). The tool call wins
+        # over any preamble text in the same response.
+        for block in response.content:
+            if block.type == 'tool_use' and block.name == 'defer_to_staff':
+                args = block.input if isinstance(block.input, dict) else {}
                 reply = (args.get('reply_to_customer') or '').strip() or _static_handoff_reply()
                 return f"{HANDOFF_MARKER} {reply}"
 
-        return msg.content
+        text = _response_text(response)
+        if text:
+            return text
+        # No text at all: thinking ate the whole max_tokens budget
+        # (stop_reason=max_tokens) or a safety refusal (stop_reason=refusal).
+        # Never send the customer an empty message.
+        logger.warning(
+            "Empty reply from %s (stop_reason=%s); sending the degraded reply. "
+            "If stop_reason is max_tokens, raise REPLY_MAX_TOKENS.",
+            REPLY_MODEL, getattr(response, 'stop_reason', None),
+        )
+        return _degraded_reply(handoff_just_triggered)
     except Exception as e:
         logger.error("Error generating response: %s", e)
-        # Quota/key failures also kill the defer_to_staff handoff tool, so
+        # Key/credit failures also kill the defer_to_staff handoff tool, so
         # nothing would page staff — alert them directly (deduplicated).
-        alert_openai_failure(e)
-        # If OpenAI fails right after a handoff fires, the dynamic
-        # acknowledgement won't arrive — fall back to the static template
-        # so the customer still hears something instead of a generic
-        # "try again later" error.
-        if handoff_just_triggered:
-            if _is_off_hours():
-                try:
-                    oh_start = int(get_setting('office_hours_start', '8') or '8')
-                    oh_end = int(get_setting('office_hours_end', '22') or '22')
-                except ValueError:
-                    oh_start, oh_end = 8, 22
-                return HANDOFF_USER_REPLY_OFF_HOURS.format(start=oh_start, end=oh_end)
-            return HANDOFF_USER_REPLY
-        return "Уучлаарай, түр зуурын саатал гарсан байна. Хэдхэн минутын дараа дахин бичээрэй."
+        alert_model_failure(e)
+        return _degraded_reply(handoff_just_triggered)
 
 
 def analyze_and_comment_on_post(post_content):
@@ -1342,13 +1404,13 @@ def analyze_and_comment_on_post(post_content):
 
 Монгол хэлээр л хариулна. Коммент текст л өгнө, бусад зүйл бичихгүй."""
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = client.messages.create(
+            model=BACKGROUND_MODEL,
+            max_tokens=512,
+            output_config={'effort': 'low'},
             messages=[{"role": "user", "content": analysis_prompt}],
-            temperature=0.7,
-            max_tokens=200
         )
-        return response.choices[0].message.content
+        return _response_text(response) or None
     except Exception as e:
         logger.error("Error analyzing post: %s", e)
         return None
@@ -1374,7 +1436,7 @@ HANDOFF_USER_REPLY_OFF_HOURS = (
 # Injected into the system prompt when the user is in a handoff window
 # (bot_muted_until > now). Tells the bot to keep helping the customer
 # without re-routing them to staff again — that step has already fired.
-# Hard rule on Mongolian fluency. gpt-4o-mini occasionally slips into
+# Hard rule on Mongolian fluency. Reply models occasionally slip into
 # AI-translation-flavoured constructions (wrong case on subject pronouns,
 # verbose noun-clause objects, machine-translated idioms). The model needs
 # explicit ✗/✓ pairs to anchor on; the named-error pattern is the same
@@ -1512,43 +1574,43 @@ KNOWLEDGE_GAP_HANDOFF_RULE = (
 )
 
 # Tool the reply model can call (normal mode only) to hand off to a human when
-# it lacks the information to answer. generate_bot_response detects the call and
-# re-emits HANDOFF_MARKER so the existing webhook handoff path fires.
+# it lacks the information to answer. generate_bot_response detects the
+# tool_use block and re-emits HANDOFF_MARKER so the existing webhook handoff
+# path fires. Claude Messages API tool shape (name / description /
+# input_schema); tool choice stays on the default 'auto' — Opus 5.5 rejects a
+# forced tool call, and the prompt rule already says when to use it.
 DEFER_TO_STAFF_TOOL = [{
-    "type": "function",
-    "function": {
-        "name": "defer_to_staff",
-        "description": (
-            "Hand the conversation to a human staff member because you do NOT "
-            "have the information to answer correctly and must not guess — e.g. "
-            "how to log in to the online class platform, a login name / "
-            "password / link, payment-access problems, technical issues, or "
-            "any specific fact, policy, or URL not present in your knowledge. "
-            "Do NOT call this for questions you CAN answer from your knowledge: "
-            "courses, prices, schedule, FAQs, or listed services."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "reply_to_customer": {
-                    "type": "string",
-                    "description": (
-                        "Warm Mongolian message to send the customer now: "
-                        "briefly acknowledge the question, say a staff member "
-                        "will help, give the ETA (within office hours -> "
-                        "~10-30 min; outside office hours -> tomorrow during "
-                        "office hours, using the time + office-hours info in "
-                        "the system prompt), and offer to keep helping with "
-                        "anything else in the meantime."
-                    ),
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "Short note for staff: what info is missing.",
-                },
+    "name": "defer_to_staff",
+    "description": (
+        "Hand the conversation to a human staff member because you do NOT "
+        "have the information to answer correctly and must not guess — e.g. "
+        "how to log in to the online class platform, a login name / "
+        "password / link, payment-access problems, technical issues, or "
+        "any specific fact, policy, or URL not present in your knowledge. "
+        "Do NOT call this for questions you CAN answer from your knowledge: "
+        "courses, prices, schedule, FAQs, or listed services."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reply_to_customer": {
+                "type": "string",
+                "description": (
+                    "Warm Mongolian message to send the customer now: "
+                    "briefly acknowledge the question, say a staff member "
+                    "will help, give the ETA (within office hours -> "
+                    "~10-30 min; outside office hours -> tomorrow during "
+                    "office hours, using the time + office-hours info in "
+                    "the system prompt), and offer to keep helping with "
+                    "anything else in the meantime."
+                ),
             },
-            "required": ["reply_to_customer"],
+            "reason": {
+                "type": "string",
+                "description": "Short note for staff: what info is missing.",
+            },
         },
+        "required": ["reply_to_customer"],
     },
 }]
 
@@ -2168,14 +2230,13 @@ def cluster_chat_questions(lookback_days=30, max_questions=400):
 
     Returns the number of clusters written. Returns 0 on any failure
     rather than raising, so the weekly background thread doesn't crash on
-    a transient OpenAI hiccup. Promoted clusters (admin already turned
+    a transient model-API hiccup. Promoted clusters (admin already turned
     them into FAQ) are preserved across runs.
     """
     import json as _json
 
-    api_key = os.environ.get('OPENAI_API_KEY', '').strip()
-    if not api_key:
-        logger.info('cluster_chat_questions: OPENAI_API_KEY not set, skipping.')
+    if not ANTHROPIC_API_KEY:
+        logger.info('cluster_chat_questions: ANTHROPIC_API_KEY not set, skipping.')
         return 0
 
     since = datetime.utcnow() - timedelta(days=lookback_days)
@@ -2201,20 +2262,19 @@ def cluster_chat_questions(lookback_days=30, max_questions=400):
         return 0
 
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
-            model='gpt-4o-mini',
-            messages=[
-                {'role': 'system', 'content': 'You output strict JSON only. No prose, no markdown.'},
-                {'role': 'user', 'content': _build_clustering_prompt(questions)},
-            ],
-            response_format={'type': 'json_object'},
-            temperature=0.2,
+        # Structured outputs constrain the reply to CLUSTERS_FORMAT. Medium
+        # effort: grouping a few hundred phrasings into themes is real
+        # reasoning, and this runs once a week on the cheap model.
+        resp = client.messages.create(
+            model=BACKGROUND_MODEL,
+            max_tokens=8192,
+            output_config={'effort': 'medium', 'format': CLUSTERS_FORMAT},
+            system='You output strict JSON only. No prose, no markdown.',
+            messages=[{'role': 'user', 'content': _build_clustering_prompt(questions)}],
         )
-        raw = resp.choices[0].message.content or ''
+        raw = _response_text(resp)
     except Exception as e:
-        logger.error('cluster_chat_questions: OpenAI error: %s', e)
+        logger.error('cluster_chat_questions: Claude API error: %s', e)
         return 0
 
     try:
@@ -2306,12 +2366,12 @@ def cluster_chat_questions(lookback_days=30, max_questions=400):
 def cluster_task(app):
     """Background loop running cluster_chat_questions() weekly. Gated by
     ENABLE_CHAT_CLUSTERING=true so dev / non-MagicBot deploys don't burn
-    OpenAI credits unnecessarily."""
+    API credits unnecessarily."""
     while True:
         try:
             with app.app_context():
                 cluster_chat_questions()
         except Exception as e:
             logger.error("Clustering error: %s", e)
-        # Once per week. Don't tighten without checking OpenAI cost.
+        # Once per week. Don't tighten without checking the model cost.
         time.sleep(7 * 24 * 60 * 60)

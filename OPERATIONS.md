@@ -118,7 +118,7 @@ After cutover, the `app.py` SQLite PRAGMA block simply no-ops (it's guarded to
 
 | Var | Default | Effect |
 |---|---|---|
-| `REPLY_MAX_TOKENS` | 500 | Max length of a bot reply. Lower = faster + cheaper. |
+| `REPLY_MAX_TOKENS` | 2048 | Max length of a bot reply, shared with the model's thinking. Lower = faster + cheaper, but too low = empty reply → canned apology. |
 | `ENABLE_TOKEN_CHECK` | true | Worker pings the FB token every N hours, alerts on expiry. |
 | `TOKEN_CHECK_INTERVAL_HOURS` | 6 | How often the token health check runs. |
 | `FB_TOKEN_ALERT_COOLDOWN_HOURS` | 6 | Min gap between "Page token is dead" Telegram alerts fired from the send path. |

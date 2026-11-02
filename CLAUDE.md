@@ -67,40 +67,40 @@ when a course has none. The clarify-course rule lives in the ★high `Сурга
 
 ## Reply model + knowledge-gap handoff (the "honest AI" path)
 
-- **Customer replies run on `REPLY_MODEL` via `reply_client`** (`services/__init__.py`).
-  The provider is chosen once at import:
-  - `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) set → **Google Gemini**, default
-    `gemini-2.5-flash`. Reached through Gemini's
-    **OpenAI-compatible endpoint** (`GEMINI_BASE_URL`, default
-    `https://generativelanguage.googleapis.com/v1beta/openai/`), so the entire reply
-    path — `chat.completions`, the `defer_to_staff` function-calling tool, and the
-    `openai.AuthenticationError` / `RateLimitError` types `alert_openai_failure` keys
-    on — is reused unchanged. **No `google-genai` dependency**, no message/tool reshaping.
-  - neither set → **OpenAI** `gpt-5.3-chat-latest` (the prior default, kept after a
-    Mongolian bake-off — far better at paraphrase / Latin-script / intent than 4o-mini).
-  - `REPLY_MODEL` env var overrides the default for either provider.
-  - **THINKING GOTCHA (`GEMINI_REASONING_EFFORT`, default `none`):** Gemini 2.5/3.x
-    are *thinking* models and `max_tokens` caps thinking+reply COMBINED on the compat
-    endpoint — so unmanaged thinking eats the whole budget and returns an EMPTY reply
-    (`finish_reason=length`, 0 completion tokens). `none` disables thinking and is the
-    reason `gemini-2.5-flash` is the default. **Pro / 3.x REJECT `none`** and can't
-    disable thinking, so to run **`gemini-3.1-pro-preview`** (needs BILLING — free tier
-    = limit 0) set all three: `REPLY_MODEL=gemini-3.1-pro-preview`,
-    `GEMINI_REASONING_EFFORT=low`, `REPLY_MAX_TOKENS=2048` (headroom for the ~1K
-    thinking budget + the reply). The code auto-skips `none` on non-Flash models so a
-    stale default can't brick a Pro deploy. Prod runs Pro via these env vars; the code
-    default stays on safe Flash.
-  - **Background jobs** (topic classifier, page comments, FAQ clustering) ALWAYS stay
-    on OpenAI `gpt-4o-mini` via `client` — cheap, high-volume. So `OPENAI_API_KEY` is
-    required even on a Gemini reply deployment.
-  - **PARAM GOTCHA (provider-aware → `REPLY_MAX_TOKENS_PARAM`):** OpenAI gpt-5.x
-    chat models reject `temperature` + `max_tokens` → use `max_completion_tokens`;
-    Gemini's OpenAI-compat endpoint uses the classic `max_tokens`. We never send an
-    explicit `temperature`, so the default-temperature requirement holds for both.
+- **Every model call runs on Claude (Anthropic) through ONE `client`**
+  (`services/__init__.py`, `anthropic.Anthropic`). `ANTHROPIC_API_KEY` is the only model
+  credential (OpenAI + Gemini were retired 2026-11-02). The SDK does NOT fail at
+  construction without a key — the module logs a loud boot warning instead, and the
+  dashboard's "Холболтын төлөв" card shows the key status.
+  - **Customer replies** → `REPLY_MODEL`, default **`claude-opus-5-5`**. Mongolian
+    paraphrase / Latin-script / indirect intent is where the big tier earns its cost
+    (same lesson as the earlier OpenAI/Gemini bake-offs). `REPLY_MODEL=claude-sonnet-5-5`
+    trades some quality for ~half the cost.
+  - **Background jobs** (topic classifier, page comments, FAQ clustering) →
+    `BACKGROUND_MODEL`, default **`claude-haiku-5-5`** — cheap, high-volume.
+  - **THINKING / EFFORT GOTCHA:** current Claude models think *adaptively* and Opus 5.5
+    REJECTS turning thinking off (`thinking: {type: "disabled"}` → 400). Never send a
+    `thinking` param; depth is `output_config.effort`. Replies use `REPLY_EFFORT`
+    (default `low` — fast chat; raise to `medium` if replies feel shallow). Classifier
+    and comments run at `low`, clustering at `medium`.
+  - **`max_tokens` caps thinking + reply COMBINED.** `REPLY_MAX_TOKENS` default is 2048
+    (it was 500 on the OpenAI path). Too tight → the model stops mid-thinking with zero
+    text (`stop_reason=max_tokens`); `generate_bot_response` logs `Empty reply from …`
+    and sends the canned apology rather than an empty Messenger send.
+  - **Never send sampling params** (`temperature` / `top_p` / `top_k`) — current models 400.
+  - **Message shaping (`_claude_messages`):** the prompt travels in `system`; the
+    Messages API rejects whitespace-only text and requires the first message to be
+    `user`, so empty turns and a leading assistant turn from the last-10 window are
+    dropped before the call.
+  - **Structured outputs:** the classifier and the clusterer pass
+    `output_config.format = {type: json_schema, schema}` (`TOPIC_TAGS_FORMAT` /
+    `CLUSTERS_FORMAT`) so the JSON always parses — the replacement for the old
+    `response_format=json_object`.
 - **When the bot lacks the info, it hands off instead of inventing.** In normal mode the
   prompt injects `KNOWLEDGE_GAP_HANDOFF_RULE` and `generate_bot_response` offers the
-  **`defer_to_staff` tool** (OpenAI function calling — reliable, unlike a literal text
-  marker, which chat models strip). On a tool call, `generate_bot_response` re-emits the
+  **`defer_to_staff` tool** (Messages API tool use — reliable, unlike a literal text
+  marker, which chat models strip; `tool_choice` stays on the default `auto` because Opus
+  5.5 rejects a forced tool). On a `tool_use` block, `generate_bot_response` re-emits the
   internal `HANDOFF_MARKER` prefix; the webhook's `extract_handoff_marker` strips it (never
   shown to the user) and fires the existing `trigger_handoff` (Work Tasks + Telegram). The
   tool's `reply_to_customer` carries the ETA + "anything else?" message.
@@ -136,7 +136,7 @@ Production deploy uses ONE worker dyno with `WORKER_ROLE=worker` and N web dynos
 
 ## Webhook is async (ACK fast, reply in the background)
 
-`routes/webhook.py:webhook()` does only the FAST work synchronously — verify signature, handle echoes, dedupe by `mid`, persist the inbound row, rate-limit, funnel/name/phone capture, mute gate — then hands the SLOW work to `enqueue_background(process_inbound_reply, ...)` and returns `200` immediately. `process_inbound_reply` (same file) builds the prompt, calls OpenAI, sends the reply (with a typing indicator), and fires handoffs. **Why:** a fast 200 stops Facebook retrying the delivery on cold starts / slow model hops — the root of the phantom rate-limit. When editing reply behaviour, edit `process_inbound_reply`, NOT the webhook loop. `enqueue_background` runs **inline under TESTING** (deterministic + in-memory SQLite is per-connection). A background failure = no reply, logged, no crash, no FB retry.
+`routes/webhook.py:webhook()` does only the FAST work synchronously — verify signature, handle echoes, dedupe by `mid`, persist the inbound row, rate-limit, funnel/name/phone capture, mute gate — then hands the SLOW work to `enqueue_background(process_inbound_reply, ...)` and returns `200` immediately. `process_inbound_reply` (same file) builds the prompt, calls Claude, sends the reply (with a typing indicator), and fires handoffs. **Why:** a fast 200 stops Facebook retrying the delivery on cold starts / slow model hops — the root of the phantom rate-limit. When editing reply behaviour, edit `process_inbound_reply`, NOT the webhook loop. `enqueue_background` runs **inline under TESTING** (deterministic + in-memory SQLite is per-connection). A background failure = no reply, logged, no crash, no FB retry.
 
 ## Test conventions
 
@@ -145,7 +145,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 109 tests. They must all pass before any commit.
+Current count: 130 tests. They must all pass before any commit.
 
 Gotchas the test suite learned the hard way:
 - `db.session` is shared across tests. Mutating User/GeneralSetting between tests requires `db.session.remove()` and/or `expire_all()`.
@@ -175,7 +175,7 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 
 - `services/__init__.py:trigger_handoff` used to auto-mute the bot via `mute_duration_hours`. That's been removed — DO NOT add it back; the bot keeps advisory-replying after a *handoff* until either staff `take_over_chat` OR the human-takeover auto-mute fires (see below).
 - **Human-takeover auto-mute:** every bot-sent Messenger message carries `metadata=BOT_ECHO_TAG` (`services/__init__.py:send_facebook_message`). The webhook handles `message_echoes`: an echo WITHOUT that tag = a human agent replied in the FB Page inbox → `routes/webhook.py:human_takeover_pause` sets `bot_muted_until = now + HUMAN_TAKEOVER_MUTE_MINUTES` (30, env-tunable). Echoes must `continue` before the inbound pipeline (sender is the Page, recipient the customer). Requires the `message_echoes` webhook field enabled in the Meta dashboard — without it FB never sends echoes and this path is inert. NEVER drop the metadata tag: an untagged bot echo would make the bot mute *itself* on every reply.
-- **Webhook idempotency / "rate-limited on the first message":** Facebook delivers at-least-once and RETRIES the same event (same `message.mid`) when the webhook is slow — a Render cold start after weeks idle, or a slow OpenAI hop (the reply is still generated *synchronously* before we return 200). Each retry used to re-enter the handler and increment the per-sender rate limiter, so a single first message could trip "5 msgs / 60s" and emit the throttle text — and the bot replied twice. Fix: `Message.mid` is a UNIQUE idempotency key; `routes/webhook.py` persists the inbound row keyed by `mid` and drops a retry on `IntegrityError` BEFORE the rate limiter and before generate/send. Do NOT move the rate-limit check above this claim, and keep the claim committed before the OpenAI call. SQLite can't `ADD COLUMN ... UNIQUE`, so `ensure_schema()` adds `message.mid` then `CREATE UNIQUE INDEX` separately (multiple NULLs allowed → bot/legacy rows are fine). The webhook now also ACKs 200 immediately and generates the reply in the background (see "Webhook is async"), so FB largely stops retrying in the first place — the `mid` dedup is the belt-and-suspenders guarantee.
+- **Webhook idempotency / "rate-limited on the first message":** Facebook delivers at-least-once and RETRIES the same event (same `message.mid`) when the webhook is slow — a Render cold start after weeks idle, or a slow model hop (the reply is still generated *synchronously* before we return 200). Each retry used to re-enter the handler and increment the per-sender rate limiter, so a single first message could trip "5 msgs / 60s" and emit the throttle text — and the bot replied twice. Fix: `Message.mid` is a UNIQUE idempotency key; `routes/webhook.py` persists the inbound row keyed by `mid` and drops a retry on `IntegrityError` BEFORE the rate limiter and before generate/send. Do NOT move the rate-limit check above this claim, and keep the claim committed before the model call. SQLite can't `ADD COLUMN ... UNIQUE`, so `ensure_schema()` adds `message.mid` then `CREATE UNIQUE INDEX` separately (multiple NULLs allowed → bot/legacy rows are fine). The webhook now also ACKs 200 immediately and generates the reply in the background (see "Webhook is async"), so FB largely stops retrying in the first place — the `mid` dedup is the belt-and-suspenders guarantee.
 - `seed_default_magic_links` historically missed a `GeneralSetting` import — it's fixed, but any new helper that touches `GeneralSetting.query` must import it from `models`.
 - `classification_lookback_days` controller lives at the top of `work_tasks.html` (outside any tab) so it's visible from the default Hot Prospects landing. Don't move it back into a single tab.
 - **SQLite WAL + busy_timeout in `app.py:88`** is load-bearing — without it, 2 gunicorn workers + admin polling deadlock on SQLite locks. Do not remove the `@event.listens_for(Engine, "connect")` block.
@@ -209,7 +209,7 @@ or send path is broken". Full description: OPERATIONS.md §0.
 If it is all green, the outage is per-conversation (mute / takeover / handoff),
 not global. Otherwise, the manual checks:
 
-1. **Customers getting the canned apology** ("Уучлаарай, түр зуурын саатал...") → the **reply provider** is failing, NOT Facebook (apology delivered = Send API fine). Render logs query `Error generating response` shows the exception; `insufficient_quota` = account out of credit (2026-06-11 outage) → instant recovery on top-up. **Which provider?** If `GEMINI_API_KEY` is set, replies are Gemini → fix the key/quota at Google AI Studio (`aistudio.google.com`); otherwise OpenAI → platform.openai.com → Billing. The deduplicated Telegram alert (`alert_openai_failure`, cooldown `OPENAI_ALERT_COOLDOWN_HOURS`=6) names the active provider (`REPLY_PROVIDER_LABEL`) and the right billing page. Note: a Gemini `429` quota error may not match the `insufficient_quota` test, so it can degrade quietly to the apology without paging — Gemini *auth* (401) errors still alert.
+1. **Customers getting the canned apology** ("Уучлаарай, түр зуурын саатал...") → the **Claude API** is failing, NOT Facebook (apology delivered = Send API fine). Render logs query `Error generating response` shows the exception: `credit balance is too low` (400) = account out of prepaid credit → instant recovery on top-up at console.anthropic.com → Plans & Billing (the 2026-06-11 outage was this failure mode on the old provider); `authentication_error` (401) = bad/revoked `ANTHROPIC_API_KEY`. The deduplicated Telegram alert (`alert_model_failure`, cooldown `MODEL_ALERT_COOLDOWN_HOURS`=6) fires on exactly those account-level errors; a `429` rate limit or `529` overloaded degrades to the apology WITHOUT paging (transient, self-heals). Also scan the boot log for `ANTHROPIC_API_KEY is not set`, and query `Empty reply from` — that is thinking exhausting `REPLY_MAX_TOKENS`, fix by raising it.
 2. **Render logs** (`r=1h`, query `Send API`) → `OAuthException code:190` = bad FB token (`subcode:463` = expired; `subcode:460` = FB account password changed / session invalidated). Regen via Graph API Explorer — **and it MUST be a Page token, not the default User token.** The Explorer defaults "User or Page" to **User Token**; copy that and every send fails `GraphMethodException code:100 subcode:33 "Object with ID 'me' does not exist"` (the bot sends via `me/messages`, so `me` must resolve to the Page). Fix: set "User or Page" → **Page Access Tokens → Magic Financial Group**, extend to long-lived, then update `FACEBOOK_ACCESS_TOKEN` on the **magicbot** service. Verify in the Render shell: `python -c "import os,requests;print(requests.get('https://graph.facebook.com/v18.0/me',params={'access_token':os.environ['FACEBOOK_ACCESS_TOKEN']}).text)"` → must return `Magic Financial Group`, not a person's name. Full walk-through: `Facebook Page Access Token хэрхэн авах тухай дэлгэрэнгүй заавар.md` §5.
 3. **Render logs** (`r=1h`, query `database is locked`) → SQLite contention. Confirm `app.py:88` WAL/busy_timeout block is intact.
 4. **Render logs** (`r=1h`, query `FB user profile`) → `status=400 GraphMethodException` = the BAUPA restriction, not a bug.

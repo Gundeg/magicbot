@@ -570,8 +570,8 @@ _DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION = [
 def seed_discovery_phrasing_snippets():
     """Seed TrainingSnippet rows that map common customer phrasings (in
     Cyrillic and Latin transliteration) to the right service / product
-    / course. Helps gpt-4o-mini route reliably even when customers don't
-    use the exact service name.
+    / course. Helps the reply model route reliably even when customers
+    don't use the exact service name.
 
     Idempotent: matches by snippet title — re-running is a no-op for
     existing rows, and adds only the missing ones. Returns a multi-line

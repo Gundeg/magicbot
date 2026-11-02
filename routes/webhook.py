@@ -55,7 +55,7 @@ def human_takeover_pause(customer_psid):
 def process_inbound_reply(fb_user_id, message_text, session_state):
     """Slow half of inbound handling, run in a background thread so the webhook
     can ACK Facebook in <1s (a fast 200 is what stops FB retrying the delivery
-    on cold starts / slow model hops). Builds the prompt, calls OpenAI, sends
+    on cold starts / slow model hops). Builds the prompt, calls Claude, sends
     the reply, and fires any handoff. Runs with its own app context + DB
     session via enqueue_background; errors are logged there, so a failure here
     just means no reply — never a crash or a Facebook retry.
@@ -72,7 +72,7 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
     if fb_user.bot_muted_until and fb_user.bot_muted_until > datetime.utcnow():
         return
 
-    # Read receipt + typing bubble so the wait feels responsive while OpenAI
+    # Read receipt + typing bubble so the wait feels responsive while the model
     # composes the reply. Best-effort — failures never block the reply.
     send_sender_action(sender_id, 'mark_seen')
     send_sender_action(sender_id, 'typing_on')
@@ -153,7 +153,7 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
                     send_user_message=False,
                 )
 
-    # Topic classifier — another OpenAI call; we're already off the webhook's
+    # Topic classifier — another model call; we're already off the webhook's
     # critical path, so just run it inline here.
     classify_user_topics(fb_user.id)
 
@@ -249,7 +249,7 @@ def webhook():
                     # Idempotency claim — the real fix for "rate-limited on the
                     # very first message". Facebook delivers at-least-once and
                     # RETRIES the same event (same mid) when our webhook is slow
-                    # (a cold start after weeks idle, or a slow OpenAI hop). We
+                    # (a cold start after weeks idle, or a slow model hop). We
                     # persist the inbound message under a UNIQUE mid: the first
                     # delivery wins; a retry raises IntegrityError and is dropped
                     # here — BEFORE the rate limiter (so retries can't look like
@@ -337,7 +337,7 @@ def webhook():
                         fb_user.bot_muted_until = None
                         db.session.commit()
 
-                    # Hand the slow work (OpenAI reply + send + handoff pings +
+                    # Hand the slow work (Claude reply + send + handoff pings +
                     # topic classify) to a background worker and ACK Facebook
                     # immediately. A fast 200 is what stops FB retrying the
                     # delivery on a cold start or slow model hop — the root cause

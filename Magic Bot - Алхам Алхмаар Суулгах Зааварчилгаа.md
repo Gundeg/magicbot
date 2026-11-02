@@ -80,8 +80,7 @@ magic_bot/
 2. Notepad нээгээд дараах мэдээллийг бичнэ (өөрийн мэдээллээр солино):
 
 ```
-OPENAI_API_KEY=таны_openai_api_key_энд_бичнэ
-GEMINI_API_KEY=таны_gemini_api_key_энд_бичнэ
+ANTHROPIC_API_KEY=таны_anthropic_api_key_энд_бичнэ
 FACEBOOK_PAGE_ID=таны_page_id_энд_бичнэ
 FACEBOOK_ACCESS_TOKEN=таны_access_token_энд_бичнэ
 SECRET_KEY=magic_bot_secret_key_2024
@@ -91,22 +90,17 @@ VERIFY_TOKEN=magic_bot_verify_token
 3. **"Save As"** дарж, файлын нэрийг `.env` гэж бичнэ (цэг орсон!)
 4. **"Save as type"** хэсэгт "All Files" сонгоно
 
-### OpenAI API Key авах (хэрвээ байхгүй бол):
-1. **https://platform.openai.com/** хаягаар орно
+### Anthropic (Claude) API Key авах (хэрвээ байхгүй бол):
+1. **https://console.anthropic.com/** хаягаар орно
 2. Бүртгүүлж нэвтэрнэ
-3. **API Keys** хэсэг рүү орно
-4. **"Create new secret key"** товчийг дарна
-5. Гарч ирсэн key-г хуулж `.env` файлд оруулна
+3. **Settings → API Keys** хэсэг рүү орно
+4. **"Create Key"** товчийг дарна
+5. Гарч ирсэн key-г хуулж `.env` файлын `ANTHROPIC_API_KEY`-д оруулна
+6. **Plans & Billing** хэсэгт урьдчилсан кредит (prepaid credit) нэмнэ — үлдэгдэл 0 бол бот хариулж чадахгүй
 
-> OpenAI key нь background ажлууд (ангилал, FAQ-cluster, постын коммент)-д **заавал** хэрэгтэй. Gemini ашиглавал ч үлдээнэ.
-
-### Gemini API Key авах (хэрэглэгчид өгөх хариултыг Gemini дээр ажиллуулах бол):
-Ботын **хэрэглэгчид өгөх хариултыг** OpenAI-ийн оронд Google Gemini-ээр ажиллуулж болно (background ажлууд OpenAI дээр хэвээр).
-1. **https://aistudio.google.com/apikey** хаягаар орно
-2. Google акаунтаараа нэвтэрч **"Create API key"** дарна
-3. Key-г хуулж `.env` файлын `GEMINI_API_KEY`-д оруулна
-4. Default нь `gemini-2.5-flash` (үнэгүй tier дээр ажиллана, хурдан). Илүү чанартай **Gemini 3.1 Pro** ашиглах бол Google дээрээ **төлбөр (billing) идэвхжүүлээд** дараах 3 тохиргоог нэмнэ:
-   `REPLY_MODEL=gemini-3.1-pro-preview`, `GEMINI_REASONING_EFFORT=low`, `REPLY_MAX_TOKENS=2048`
+> Энэ нэг key нь ботын **бүх** AI дуудлагад хэрэглэгдэнэ: хэрэглэгчид өгөх хариулт (Claude Opus 5.5) болон background ажлууд — ангилал, FAQ-cluster, постын коммент (Claude Haiku 5.5). Өөр AI provider-ийн key шаардлагагүй.
+>
+> Нэмэлт тохиргоо (заавал биш): `REPLY_MODEL=claude-sonnet-5-5` (хямд хувилбар), `REPLY_EFFORT=medium` (илүү гүн бодолт), `REPLY_MAX_TOKENS=2048` (хариултын урт — бодолт ба хариулт хоёулаа энэ дотор багтана).
 
 ---
 
@@ -125,7 +119,7 @@ pip install -r requirements.txt
 
 Хэрвээ алдаа гарвал:
 ```
-pip install Flask Flask-SQLAlchemy Flask-Login requests python-dotenv openai gunicorn
+pip install Flask Flask-SQLAlchemy Flask-Login requests python-dotenv anthropic gunicorn
 ```
 
 ---
