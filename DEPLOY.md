@@ -116,6 +116,7 @@ The `.gitignore` keeps your `.env` and the SQLite DB out of git.
    | `REPLY_EFFORT` | *(optional)* `low` (default, fast chat) / `medium` / `high` — reasoning depth |
    | `REPLY_MAX_TOKENS` | *(optional)* default `2048`; thinking + reply share it, keep headroom |
    | `BACKGROUND_MODEL` | *(optional)* default `claude-haiku-5-5` for classifier / clustering / comments |
+   | `REGISTRATION_FORM_URL` | *(optional)* `https://forms.greensoft.mn/1955/form/5` — lets the bot collect and submit course registrations itself; unset = link + phone only |
    | `FACEBOOK_PAGE_ID` | (from step 2) |
    | `FACEBOOK_ACCESS_TOKEN` | long-lived Page token from step 2 |
    | `VERIFY_TOKEN` | (from step 3) |

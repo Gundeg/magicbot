@@ -585,6 +585,11 @@ def build_system_blocks(session_state='new', funnel_stage='curious',
         )
 
     allowed_types_line = ", ".join(f'"{t}"' for t in _svc.ALLOWED_COURSE_TYPES)
+    # Bot-driven registration (GreenSoft form) — only when the form is
+    # configured; stable across customers, so it belongs in the cached half.
+    registration_section = (
+        f"{_svc.REGISTRATION_RULE}\n\n" if _svc.registration_configured() else ''
+    )
     paused_courses_section = (
         f"\nТҮР ЗОГССОН / ХУУЧИРСАН АНГИУД (бүртгэл нээлттэй биш; "
         f"хэрэглэгч асуувал зогссон гэдгийг шулуун хэлж, эргэж нээгдэх үед "
@@ -675,7 +680,7 @@ F. ӨМНӨХ ХАРИЛЦАА ГҮН:
 
 {_svc.LANGUAGE_QUALITY_RULE}
 
-ЧУХАЛ ДҮРМҮҮД:
+{registration_section}ЧУХАЛ ДҮРМҮҮД:
 1. Хариултыг товч — ихэвчлэн 2-3 өгүүлбэр + яриаг үргэлжлүүлэх НЭГ асуулт. Урт жагсаалт, bullet оруулахаас зайлсхий; дэлгэрэнгүйг хэрэглэгч өөрөө хүссэн үед л өг.
 2. Сургалтын давуу талыг хэт зар сурталчилгаа маягтай бус, итгэлтэй зөвлөх шиг — тухайн асуултад хамаатай НЭГ давуу талыг дурдаж зөвлөнө (сертификат, программ, хуваан төлөх гэх мэтийг нэг дор бүү жагсаа).
 3. БҮРТГЭЛИЙН ЛИНК + УТАС ЗЭРЭГ САНАЛ — ЗӨВХӨН ДАРААХ ҮЕД АШИГЛА:

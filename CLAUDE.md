@@ -136,6 +136,25 @@ when a course has none. The clarify-course rule lives in the ★high `Сурга
   customer returns after a gap (`session_state in ('gap','returning')`), injected as
   "ӨМНӨХ ЯРИАНЫ ХУРААНГУЙ" and shown in the admin conversation side panel.
 
+## Bot-driven registration (GreenSoft form)
+
+`services/_registration.py`. The centre's registration form is a GreenSoft (call24) form —
+`https://forms.greensoft.mn/1955/form/5` — feeding their CRM; Gundeg has no access to the
+sheet behind it. When `REGISTRATION_FORM_URL` is set, the model gets the
+`submit_registration` tool and `REGISTRATION_RULE` (cached stable half): on "бүртгүүлье" it
+says "Би таны бүртгэлийг одоо үүсгэе", collects овог/нэр, утас, имэйл (mandatory — the
+contract and online-lesson access are emailed; the bot explains that), сургалт, ээлж (салбар
+only outside UB), confirms, then calls the tool. `generate_bot_response` turns the call into a
+hidden `[REGISTER:<base64 json>]` marker; `routes/webhook.py:complete_registration` POSTs the
+fields to the form exactly as its widget does (multipart, widget field names from `/formapi`,
+honeypot `formdesc` empty, `_gs_form_token` a few seconds in the past), marks the customer a
+lead with the fields in `notes`, pings Telegram, and sends the model's confirmation only when
+the form answered `status: ok` + `logid` — otherwise `REGISTRATION_FALLBACK_REPLY` (staff will
+finish it). Verified live 2026-11-03 (test entry logid 362). Unset `REGISTRATION_FORM_URL` =
+old behaviour (link + phone). Select option VALUES come from the live definition (labels are
+matched, so the form owner can add options); the "Magic Finance программын сургалт" option
+currently has an EMPTY value on the form itself — tell the form owner.
+
 ## Latent / legacy fields — DO NOT trust without checking
 
 These look real but were retired. Don't read or write them in new code; don't add UI back for them.
@@ -172,7 +191,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 154 tests. They must all pass before any commit.
+Current count: 166 tests. They must all pass before any commit.
 
 **Reply-quality eval (costs money, opt-in):** `python scripts/eval_replies.py --run
 [--persona file.txt]` runs 6 fixed customer scenarios through the real prompt + Claude and

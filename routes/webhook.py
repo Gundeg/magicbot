@@ -17,15 +17,18 @@ from app import app, csrf
 from extensions import db
 from models import FacebookUser, Message
 from services import (PHONE_RE, HANDOFF_CATEGORY_LABELS,
+                      REGISTRATION_FALLBACK_REPLY,
                       check_rate_limit, classify_session, classify_user_topics,
+                      describe_registration,
                       detect_funnel_stage, enqueue_background,
                       extract_handoff, extract_name_from_reply,
-                      first_name_of,
+                      extract_registration, first_name_of,
                       generate_bot_response, get_facebook_user_info,
                       is_in_handoff, refresh_facebook_user_name,
                       refresh_user_summary,
-                      send_facebook_message, send_sender_action, should_handoff,
-                      trigger_handoff,
+                      send_facebook_message, send_sender_action,
+                      send_telegram_notification, should_handoff,
+                      submit_registration_form, trigger_handoff,
                       verify_facebook_signature, FACEBOOK_APP_SECRET,
                       BOT_ECHO_TAG, HUMAN_TAKEOVER_MUTE_MINUTES)
 
@@ -51,6 +54,39 @@ def human_takeover_pause(customer_psid):
     except Exception as e:
         db.session.rollback()
         logger.exception("human_takeover_pause failed psid=%s: %s", customer_psid, e)
+
+
+def complete_registration(fb_user, data, bot_reply):
+    """Submit a bot-collected registration to the configured form, record the
+    customer as a lead with the fields in their notes, and ping Telegram.
+    Returns the reply to send: the model's confirmation when the form accepted
+    the entry, otherwise a reply that promises staff follow-up instead."""
+    ok, info = submit_registration_form(data)
+    summary = describe_registration(data, ok, info)
+    try:
+        phone_match = PHONE_RE.search(data.get('phone') or '')
+        if phone_match:
+            fb_user.phone = phone_match.group(0)
+        full_name = f"{data.get('firstname') or ''} {data.get('lastname') or ''}".strip()
+        if full_name and (fb_user.name or '').strip().lower() in ('', 'unknown'):
+            fb_user.name = full_name
+        fb_user.is_lead = True
+        if fb_user.lead_status in (None, '', 'new', 'contacted'):
+            fb_user.lead_status = 'new'
+        stamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M')
+        fb_user.notes = f"[Бот бүртгэл {stamp}]\n{summary}" + (f"\n\n{fb_user.notes}" if fb_user.notes else '')
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.exception("registration: could not update lead for psid=%s: %s", fb_user.facebook_id, e)
+    try:
+        send_telegram_notification(
+            f"{'📝 Шинэ бүртгэл (бот)' if ok else '⚠️ Бүртгэл — гараар оруулах'}\n"
+            f"👤 {fb_user.name or fb_user.facebook_id}\n{summary}"
+        )
+    except Exception as e:
+        logger.warning("registration: Telegram ping failed: %s", e)
+    return bot_reply if ok else REGISTRATION_FALLBACK_REPLY
 
 
 def process_inbound_reply(fb_user_id, message_text, session_state):
@@ -131,6 +167,14 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
     # before the customer sees anything; the handoff is fired below with the
     # model's category + reason so staff see why.
     bot_response, handoff_detail = extract_handoff(bot_response)
+
+    # Bot-driven registration (submit_registration tool): submit the collected
+    # fields to the centre's form, mirror the customer as a lead, ping staff.
+    # If the form rejects the submission the customer still gets a truthful
+    # reply and staff still get every field to register by hand.
+    bot_response, registration = extract_registration(bot_response)
+    if registration:
+        bot_response = complete_registration(fb_user, registration, bot_response)
 
     # A human may have jumped in while the LLM was generating. We MUST end this
     # session's read transaction first (rollback) before re-reading the mute:

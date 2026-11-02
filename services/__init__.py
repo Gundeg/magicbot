@@ -48,6 +48,14 @@ import netrc  # noqa: E402,F401
 
 logger = logging.getLogger(__name__)
 
+# Bot-driven registration into the centre's GreenSoft form (see _registration).
+from ._registration import (  # noqa: E402
+    REGISTRATION_FALLBACK_REPLY, REGISTRATION_RULE, SUBMIT_REGISTRATION_TOOL,
+    describe as describe_registration, extract_registration,
+    format_registration_marker, is_configured as registration_configured,
+    submit_registration_form,
+)
+
 
 # ===================== BACKGROUND WORK QUEUE =====================
 # Small thread-pool used to push slow side-effects (model classify calls,
@@ -1385,9 +1393,15 @@ def generate_bot_response(user_message, conversation_history,
         }
         # Offer the staff-handoff tool only in NORMAL mode — i.e. exactly when
         # KNOWLEDGE_GAP_HANDOFF_RULE is in the prompt. In advisory / just-
-        # triggered modes the customer is already being routed to staff.
+        # triggered modes the customer is already being routed to staff. The
+        # registration tool is offered whenever the form is configured.
+        tools = []
         if not handoff_pending and not handoff_just_triggered:
-            create_kwargs['tools'] = DEFER_TO_STAFF_TOOL
+            tools.extend(DEFER_TO_STAFF_TOOL)
+        if registration_configured():
+            tools.append(SUBMIT_REGISTRATION_TOOL)
+        if tools:
+            create_kwargs['tools'] = tools
 
         response = client.messages.create(**create_kwargs)
 
@@ -1409,6 +1423,10 @@ def generate_bot_response(user_message, conversation_history,
         # the model to emit a literal marker in its text (which chat models
         # strip). The tool call wins over any preamble text in the response.
         for block in response.content:
+            if block.type == 'tool_use' and block.name == 'submit_registration':
+                args = block.input if isinstance(block.input, dict) else {}
+                reply = (args.get('reply_to_customer') or '').strip() or REGISTRATION_FALLBACK_REPLY
+                return f"{format_registration_marker(args)} {reply}"
             if block.type == 'tool_use' and block.name == 'defer_to_staff':
                 args = block.input if isinstance(block.input, dict) else {}
                 reply = (args.get('reply_to_customer') or '').strip() or _static_handoff_reply()
