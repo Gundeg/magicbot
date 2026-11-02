@@ -229,7 +229,7 @@ def test_webhook_never_submits_the_same_customer_twice(app, db_session, monkeypa
         first = wh.complete_registration(user, CUSTOMER, 'Бүртгэл үүслээ.')
         second = wh.complete_registration(user, CUSTOMER, 'Бүртгэл үүслээ.')
         assert first == 'Бүртгэл үүслээ.'
-        assert second == services.REGISTRATION_ALREADY_DONE_REPLY
+        assert second is None                                # caller re-answers without the tool
         assert len(posts) == 1 and len(pings) == 1          # one form entry, one ping
         assert user.registration_logid == '701' and user.registered_at is not None
         # and the prompt now tells the model not to call the tool again
@@ -259,5 +259,55 @@ def test_webhook_registration_failure_keeps_lead_and_is_truthful(app, db_session
         assert 'гараар' in user.notes
         assert len(pings) == 1 and 'гараар' in pings[0]
     finally:
+        db.session.delete(user)
+        db.session.commit()
+
+
+def test_webhook_answers_the_real_question_after_a_duplicate_call(app, db_session, monkeypatch, configured):
+    """Live transcript: after registering, "юу бэлдэж очих вэ?" got "бүртгэл
+    үүслээ" again because the model re-called the tool. Now the webhook
+    detects the duplicate, re-asks the model WITHOUT the registration tool,
+    and sends that answer — one model call per path, no form POST."""
+    import routes.webhook as wh
+    from datetime import datetime
+    from extensions import db
+    from models import FacebookUser, Message
+
+    sent, calls = [], []
+    monkeypatch.setattr(wh, 'send_facebook_message', lambda psid, text: sent.append(text) or True)
+    monkeypatch.setattr(wh, 'send_sender_action', lambda *a, **k: None)
+    monkeypatch.setattr(wh, 'classify_user_topics', lambda *a, **k: 0)
+    monkeypatch.setattr(wh, 'refresh_user_summary', lambda *a, **k: None)
+    monkeypatch.setattr(wh, 'send_telegram_notification', lambda text: 1)
+
+    def _never_post(*a, **k):
+        raise AssertionError('must not POST a duplicate registration')
+    monkeypatch.setattr(reg.requests, 'post', _never_post)
+
+    tool = SimpleNamespace(type='tool_use', name='submit_registration', id='t1',
+                           input={**CUSTOMER, 'reply_to_customer': 'Таны бүртгэл үүслээ.'})
+
+    def _create(**kw):
+        calls.append(kw)
+        if len(calls) == 1:
+            return _resp(tool, stop_reason='tool_use')          # model re-calls the tool
+        return _resp(SimpleNamespace(type='text', text='Дэвтэр, үзэг авч очиход хангалттай.'))
+    monkeypatch.setattr(services.client.messages, 'create', _create)
+
+    user = FacebookUser(facebook_id='psid-reg-again', name='Сараа', is_lead=True,
+                        phone='99112233', registered_at=datetime.utcnow(), registration_logid='701')
+    db.session.add(user)
+    db.session.flush()
+    db.session.add(Message(facebook_user_id=user.id, sender='user', content='юу бэлдэж очих вэ?'))
+    db.session.commit()
+    try:
+        wh.process_inbound_reply(user.id, 'юу бэлдэж очих вэ?', 'active')
+        assert sent == ['Дэвтэр, үзэг авч очиход хангалттай.']
+        assert len(calls) == 2
+        assert 'submit_registration' not in [t['name'] for t in calls[1].get('tools', [])]
+        assert 'АЛЬ ХЭДИЙН ҮҮССЭН' in calls[1]['system'][1]['text']
+        assert user.registration_logid == '701'                  # untouched
+    finally:
+        Message.query.filter_by(facebook_user_id=user.id).delete()
         db.session.delete(user)
         db.session.commit()

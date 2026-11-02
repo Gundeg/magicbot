@@ -17,7 +17,7 @@ from app import app, csrf
 from extensions import db
 from models import FacebookUser, Message
 from services import (PHONE_RE, HANDOFF_CATEGORY_LABELS,
-                      REGISTRATION_ALREADY_DONE_REPLY, REGISTRATION_DEDUP_HOURS,
+                      REGISTRATION_DEDUP_HOURS,
                       REGISTRATION_FALLBACK_REPLY,
                       check_rate_limit, classify_session, classify_user_topics,
                       describe_registration,
@@ -61,7 +61,9 @@ def complete_registration(fb_user, data, bot_reply):
     """Submit a bot-collected registration to the configured form, record the
     customer as a lead with the fields in their notes, and ping Telegram.
     Returns the reply to send: the model's confirmation when the form accepted
-    the entry, otherwise a reply that promises staff follow-up instead.
+    the entry, a reply that promises staff follow-up when the form rejected
+    it, or None when this customer was already registered (the caller then
+    answers the customer's actual message without the registration tool).
 
     Idempotent per customer: the model only sees text history, not its own
     earlier tool call, so a "баярлалаа" after the confirmation can make it
@@ -74,7 +76,7 @@ def complete_registration(fb_user, data, bot_reply):
             "registration: duplicate submit suppressed for psid=%s (registered %s, logid=%s)",
             fb_user.facebook_id, fb_user.registered_at, fb_user.registration_logid,
         )
-        return REGISTRATION_ALREADY_DONE_REPLY
+        return None
 
     ok, info = submit_registration_form(data)
     summary = describe_registration(data, ok, info)
@@ -194,6 +196,25 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
     bot_response, registration = extract_registration(bot_response)
     if registration:
         bot_response = complete_registration(fb_user, registration, bot_response)
+        if bot_response is None:
+            # Already registered: the customer asked something else and the
+            # model wrapped it in a second registration (seen live — "юу
+            # бэлдэж очих вэ?" got three "бүртгэл үүслээ" replies). Answer the
+            # actual message, registration tool withheld.
+            logger.info("registration: re-answering psid=%s without the tool", sender_id)
+            bot_response = generate_bot_response(
+                message_text, conversation,
+                session_state=session_state,
+                funnel_stage=fb_user.funnel_stage or 'curious',
+                user_first_name=first_name,
+                handoff_pending=handoff_pending,
+                handoff_just_triggered=handoff_just_triggered,
+                ask_name=False, is_lead=True,
+                prior_summary=fb_user.bot_summary or '',
+                registered=True, allow_registration=False,
+            )
+            bot_response, handoff_detail = extract_handoff(bot_response)
+            bot_response, _ = extract_registration(bot_response)
 
     # A human may have jumped in while the LLM was generating. We MUST end this
     # session's read transaction first (rollback) before re-reading the mute:

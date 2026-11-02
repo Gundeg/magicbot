@@ -1350,7 +1350,8 @@ def generate_bot_response(user_message, conversation_history,
                           session_state='new', funnel_stage='curious',
                           user_first_name='', handoff_pending=False,
                           handoff_just_triggered=False, ask_name=False,
-                          is_lead=False, prior_summary='', registered=False):
+                          is_lead=False, prior_summary='', registered=False,
+                          allow_registration=True):
     """Generate the customer reply on REPLY_MODEL (Claude — see the client
     block at the top of this module). `handoff_pending=True` enables
     advisory mode in the system prompt — bot keeps helping but doesn't
@@ -1400,7 +1401,7 @@ def generate_bot_response(user_message, conversation_history,
         tools = []
         if not handoff_pending and not handoff_just_triggered:
             tools.extend(DEFER_TO_STAFF_TOOL)
-        if registration_configured():
+        if registration_configured() and allow_registration:
             tools.append(SUBMIT_REGISTRATION_TOOL)
         if tools:
             create_kwargs['tools'] = tools
