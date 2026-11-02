@@ -93,8 +93,9 @@ def test_defer_tool_use_becomes_handoff_marker(app, db_session, monkeypatch):
     )
     _capture_create(monkeypatch, resp)
     out = services.generate_bot_response('Нэвтрэх нууц үг минь юу вэ?', [])
-    assert out.startswith(services.HANDOFF_MARKER)
-    assert 'Ажилтан тантай эргэж холбогдоно' in out
+    cleaned, detail = services.extract_handoff(out)
+    assert detail == {'category': 'knowledge_gap', 'reason': 'platform login not in knowledge base'}
+    assert cleaned == 'Ажилтан тантай эргэж холбогдоно'
     assert 'Нэг минут' not in out
 
 
@@ -105,8 +106,9 @@ def test_defer_tool_use_without_message_uses_static_reply(app, db_session, monke
         _tool_use('defer_to_staff', {}), stop_reason='tool_use',
     ))
     out = services.generate_bot_response('Нэвтрэх линк?', [])
-    assert out.startswith(services.HANDOFF_MARKER)
-    assert out[len(services.HANDOFF_MARKER):].strip() == services._static_handoff_reply()
+    cleaned, detail = services.extract_handoff(out)
+    assert detail is not None
+    assert cleaned == services._static_handoff_reply()
 
 
 def test_history_is_reshaped_for_messages_api(app, db_session, monkeypatch):
@@ -156,5 +158,5 @@ def test_model_config_invariants():
     # Messages API tool shape, not the OpenAI function-calling wrapper.
     tool = services.DEFER_TO_STAFF_TOOL[0]
     assert tool['name'] == 'defer_to_staff'
-    assert tool['input_schema']['required'] == ['reply_to_customer']
+    assert tool['input_schema']['required'] == ['category', 'reply_to_customer']
     assert 'function' not in tool

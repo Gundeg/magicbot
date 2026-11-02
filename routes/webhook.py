@@ -16,13 +16,14 @@ logger = logging.getLogger(__name__)
 from app import app, csrf
 from extensions import db
 from models import FacebookUser, Message
-from services import (PHONE_RE, bot_response_implies_handoff,
+from services import (PHONE_RE, HANDOFF_CATEGORY_LABELS,
                       check_rate_limit, classify_session, classify_user_topics,
                       detect_funnel_stage, enqueue_background,
-                      extract_handoff_marker, extract_name_from_reply,
+                      extract_handoff, extract_name_from_reply,
                       first_name_of,
                       generate_bot_response, get_facebook_user_info,
                       is_in_handoff, refresh_facebook_user_name,
+                      refresh_user_summary,
                       send_facebook_message, send_sender_action, should_handoff,
                       trigger_handoff,
                       verify_facebook_signature, FACEBOOK_APP_SECRET,
@@ -91,7 +92,14 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
             handoff_pending = True
             handoff_just_triggered = True
 
-    # Last 10 messages only — the tail is all the model needs for context.
+    # Cross-session memory: a customer coming back after a gap gets a fresh
+    # 2-3 line summary of the earlier conversation written onto the user row
+    # (one cheap background-model call), which the prompt then carries.
+    if session_state in ('gap', 'returning'):
+        refresh_user_summary(fb_user)
+
+    # Last 10 messages only — the tail is all the model needs for context
+    # (the prompt's summary block covers what came before).
     recent_desc = (Message.query
                    .filter_by(facebook_user_id=fb_user.id)
                    .order_by(Message.created_at.desc())
@@ -102,19 +110,27 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
         for m in reversed(recent_desc)
     ]
 
+    first_name = first_name_of(fb_user.name)
     bot_response = generate_bot_response(
         message_text,
         conversation,
         session_state=session_state,
         funnel_stage=fb_user.funnel_stage or 'curious',
-        user_first_name=first_name_of(fb_user.name),
+        user_first_name=first_name,
         handoff_pending=handoff_pending,
         handoff_just_triggered=handoff_just_triggered,
+        # Ask for the name only once the customer is a lead (phone left) —
+        # that is when staff need it, and it keeps discovery replies to one
+        # question.
+        ask_name=(not first_name) and bool(fb_user.is_lead),
+        is_lead=bool(fb_user.is_lead),
+        prior_summary=fb_user.bot_summary or '',
     )
 
-    # Knowledge-gap handoff: strip the hidden [HANDOFF] marker before the
-    # customer sees anything; the handoff is fired below.
-    bot_response, knowledge_gap_handoff = extract_handoff_marker(bot_response)
+    # Bot-initiated handoff (defer_to_staff tool): strip the hidden marker
+    # before the customer sees anything; the handoff is fired below with the
+    # model's category + reason so staff see why.
+    bot_response, handoff_detail = extract_handoff(bot_response)
 
     # A human may have jumped in while the LLM was generating. We MUST end this
     # session's read transaction first (rollback) before re-reading the mute:
@@ -140,18 +156,17 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
 
     send_facebook_message(sender_id, bot_response)
 
-    # Implicit handoff: if the bot's own reply deferred to staff, fire the
-    # AdminIssue + Telegram ping (the reply already carries the user message).
-    if not handoff_pending:
-        if knowledge_gap_handoff:
-            trigger_handoff(fb_user, 'bot_knowledge_gap', message_text, send_user_message=False)
-        else:
-            deferral_phrase = bot_response_implies_handoff(bot_response)
-            if deferral_phrase:
-                trigger_handoff(
-                    fb_user, f'bot_deferral:{deferral_phrase}', message_text,
-                    send_user_message=False,
-                )
+    # Bot-initiated handoff: the model called defer_to_staff, so fire the
+    # AdminIssue + Telegram ping (the reply it wrote IS the customer message).
+    # This is the ONLY bot-driven path — the old scan of the bot's reply for
+    # "ажилтан холбогдоно"-style phrases is gone (it paged staff on every lead
+    # and every registration offer).
+    if not handoff_pending and handoff_detail:
+        label = HANDOFF_CATEGORY_LABELS.get(handoff_detail['category'], handoff_detail['category'])
+        reason = f"бот: {label}"
+        if handoff_detail['reason']:
+            reason += f" — {handoff_detail['reason']}"
+        trigger_handoff(fb_user, reason, message_text, send_user_message=False)
 
     # Topic classifier — another model call; we're already off the webhook's
     # critical path, so just run it inline here.

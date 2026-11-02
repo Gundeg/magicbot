@@ -96,18 +96,35 @@ when a course has none. The clarify-course rule lives in the ★high `Сурга
     `output_config.format = {type: json_schema, schema}` (`TOPIC_TAGS_FORMAT` /
     `CLUSTERS_FORMAT`) so the JSON always parses — the replacement for the old
     `response_format=json_object`.
-- **When the bot lacks the info, it hands off instead of inventing.** In normal mode the
-  prompt injects `KNOWLEDGE_GAP_HANDOFF_RULE` and `generate_bot_response` offers the
+- **Handoff is the model's decision, in three categories.** In normal mode the prompt
+  injects `KNOWLEDGE_GAP_HANDOFF_RULE` and `generate_bot_response` offers the
   **`defer_to_staff` tool** (Messages API tool use — reliable, unlike a literal text
   marker, which chat models strip; `tool_choice` stays on the default `auto` because Opus
-  5.5 rejects a forced tool). On a `tool_use` block, `generate_bot_response` re-emits the
-  internal `HANDOFF_MARKER` prefix; the webhook's `extract_handoff_marker` strips it (never
-  shown to the user) and fires the existing `trigger_handoff` (Work Tasks + Telegram). The
-  tool's `reply_to_customer` carries the ETA + "anything else?" message.
-  - It still answers what it CAN (courses/prices/schedule/FAQ); only genuinely missing
-    info → defer. It also defers rather than invent a link/password it lacks.
-  - Fix a recurring handoff by adding a **Snippet** with the answer (per the leverage
-    hierarchy above) — then the bot answers it itself next time.
+  5.5 rejects a forced tool). The tool takes `category` ∈ `knowledge_gap` /
+  `wants_human` / `complaint`, `reply_to_customer` (ETA + "anything else?") and a
+  one-line `reason`. On a `tool_use` block the reply is prefixed with
+  `[HANDOFF:category|reason]` (`format_handoff_marker`); the webhook's `extract_handoff`
+  strips it (never shown to the user) and fires `trigger_handoff` with
+  `бот: <Mongolian label> — <reason>` so Work Tasks + Telegram show WHY.
+  - It is told NOT to defer for anything it can sell or answer: prices, schedule,
+    catalog services (give the link), registration intent (link + phone options), a
+    captured phone number (that is a lead — `is_lead` is passed into the prompt), or
+    objections. Fix a recurring knowledge-gap handoff by adding a **Snippet** with the
+    answer (per the leverage hierarchy above).
+  - **Removed 2026-11-03 — do NOT reintroduce:** the scan of the bot's own reply for
+    phrases like "манай ажилтан удахгүй холбогдоно" (`bot_response_implies_handoff`) and
+    the "customer mentioned a refer business line" trigger. Both paged staff on every
+    lead and every registration offer. Keyword handoff (`should_handoff`) survives only
+    for the admin-managed explicit list ("хүнтэй ярих"), plus frustration words at
+    balanced/aggressive sensitivity.
+- **Customer state + cross-session memory in the prompt.** `process_inbound_reply` passes
+  `is_lead`, `ask_name` and `prior_summary` to `generate_bot_response` →
+  `build_system_prompt`. The name question ("Та өөрийгөө хэн гэдэг…") is asked ONLY once
+  the customer is a lead (phone captured) — before that every discovery reply ended with
+  two questions. `FacebookUser.bot_summary` is a 2-3 line Mongolian summary of the
+  earlier conversation written by `refresh_user_summary` (BACKGROUND_MODEL) when a
+  customer returns after a gap (`session_state in ('gap','returning')`), injected as
+  "ӨМНӨХ ЯРИАНЫ ХУРААНГУЙ" and shown in the admin conversation side panel.
 
 ## Latent / legacy fields — DO NOT trust without checking
 
@@ -145,7 +162,14 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 130 tests. They must all pass before any commit.
+Current count: 152 tests. They must all pass before any commit.
+
+**Reply-quality eval (costs money, opt-in):** `python scripts/eval_replies.py --run
+[--persona file.txt]` runs 6 fixed customer scenarios through the real prompt + Claude and
+scores length / filler particles / registration link / handoff-only-when-needed / no
+price dump. Run it before AND after any persona, snippet or prompt-rule change — paste
+the live persona from the admin UI into a file for `--persona` so you eval what prod
+runs. Without `--run` it only lists the scenarios.
 
 Gotchas the test suite learned the hard way:
 - `db.session` is shared across tests. Mutating User/GeneralSetting between tests requires `db.session.remove()` and/or `expire_all()`.

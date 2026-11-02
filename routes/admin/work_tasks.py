@@ -71,6 +71,26 @@ def dashboard():
     open_issues = AdminIssue.query.filter_by(status='open').count()
     total_messages = Message.query.count()
 
+    # Traffic volume — inbound customer messages, bot replies and distinct
+    # people over the last 7 / 30 days. The first thing to look at when
+    # sizing model cost or judging whether the bot is being used at all.
+    def _volume(since):
+        inbound = (Message.query
+                   .filter(Message.sender == 'user', Message.created_at >= since)
+                   .count())
+        replies = (Message.query
+                   .filter(Message.sender == 'bot', Message.created_at >= since)
+                   .count())
+        people = (db.session.query(db.func.count(db.func.distinct(Message.facebook_user_id)))
+                  .filter(Message.sender == 'user', Message.created_at >= since)
+                  .scalar() or 0)
+        return {'inbound': inbound, 'replies': replies, 'people': people}
+
+    volume = {
+        'week': _volume(now - timedelta(days=7)),
+        'month': _volume(now - timedelta(days=30)),
+    }
+
     stale_threshold = now - timedelta(hours=24)
     aging_open_issues = (AdminIssue.query
                          .filter_by(status='open')
@@ -152,6 +172,7 @@ def dashboard():
                            topic_breakdown=topic_breakdown,
                            business_lines_summary=business_lines_summary,
                            business_lines_counts=business_lines_counts,
+                           volume=volume,
                            health=health)
 
 

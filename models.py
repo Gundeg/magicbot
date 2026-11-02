@@ -49,6 +49,12 @@ class FacebookUser(db.Model):
     # "Ангилах" run process the backlog in timed batches (CLASSIFY_BUDGET_SECONDS)
     # without re-doing the same users on every click.
     last_classified_at = db.Column(db.DateTime)
+    # Cross-session sales memory: a 2-3 line bot-written summary of this
+    # customer's earlier conversation (goal, interest, objections, where it
+    # stood), refreshed when they come back after a gap and injected into the
+    # reply prompt. See services.refresh_user_summary.
+    bot_summary = db.Column(db.Text)
+    bot_summary_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

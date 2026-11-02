@@ -438,14 +438,22 @@ def _format_current_time_block():
 
 def build_system_prompt(session_state='new', funnel_stage='curious',
                         user_first_name='', handoff_pending=False,
-                        handoff_just_triggered=False):
+                        handoff_just_triggered=False, ask_name=False,
+                        is_lead=False, prior_summary=''):
     """Build system prompt with training, FAQ, session-state, funnel,
     and (optionally) handoff-advisory context.
 
     `handoff_just_triggered=True` takes precedence over `handoff_pending`:
     when both are set, the just-triggered rule is injected and the
     advisory rule is skipped (they serve different turns of the handoff
-    flow and conflict on whether the bot may mention staff routing)."""
+    flow and conflict on whether the bot may mention staff routing).
+
+    `ask_name` — ask the (name-less) customer for their name this turn. The
+    webhook sets it only once the customer has left a phone number: that is
+    when staff actually need the name to call back, and it avoids ending
+    every discovery reply with a second question. `is_lead` and
+    `prior_summary` (cross-session memory, see refresh_user_summary) feed the
+    customer-state block."""
     training = _svc.get_training_content()
     persona = _svc.get_bot_persona()
     current_time_block = _format_current_time_block()
@@ -467,17 +475,36 @@ def build_system_prompt(session_state='new', funnel_stage='curious',
             f'"{user_first_name} аа,"). Гэхдээ нэрийг хэт олон бүү давт, '
             "байгалийн ярианд тохируулж хэрэглэ.\n"
         )
-    else:
+    elif ask_name:
         # Standard Access to the FB User Profile API no longer returns the
-        # customer's name from a PSID, so we ask the customer directly. The
+        # customer's name from a PSID, so we ask the customer directly — but
+        # only once they are a lead (phone left), when staff need it. The
         # webhook layer captures the answer on the next turn and persists it.
         name_block = (
-            "ХЭРЭГЛЭГЧИЙН НЭР: ҮЛ МЭДЭГДЭХ. Энэ хэрэглэгчийн нэрийг "
-            "мэдэхгүй байгаа тул эхлээд тэдний асуултанд бүрэн хариулсаны "
-            "ДАРАА хариултынхаа төгсгөлд богино, эелдэгээр "
+            "ХЭРЭГЛЭГЧИЙН НЭР: ҮЛ МЭДЭГДЭХ. Энэ хэрэглэгч утасны дугаараа "
+            "үлдээсэн тул ажилтан залгахад нэр нь хэрэгтэй. Асуултанд нь "
+            "хариулсны ДАРАА хариултынхаа төгсгөлд богино, эелдэгээр "
             '"Та өөрийгөө хэн гэдэг танилцуулна уу?" гэж нэгхэн удаа асуу. '
             "Хэрэв өмнөх ярианд аль хэдийн асуусан байвал дахин БҮҮ асуу.\n"
         )
+    else:
+        name_block = ''
+
+    state_lines = []
+    if is_lead:
+        state_lines.append(
+            "ХЭРЭГЛЭГЧИЙН ТӨЛӨВ: утасны дугаараа аль хэдийн үлдээсэн (lead). "
+            "Дахин утас бүү асуу, ажилтанд бүү шилжүүл — хэрэгтэй бол "
+            "бүртгэлийн линкийг өгөөд 'ажилтан тантай холбогдоно' гэж "
+            "баталгаажуулахад хангалттай."
+        )
+    if prior_summary:
+        state_lines.append(
+            "ӨМНӨХ ЯРИАНЫ ХУРААНГУЙ (ботын санах ой — аль хэдийн мэдэж буй "
+            "зүйлээ дахин бүү асуу, тохиромжтой үед иш тат):\n"
+            f"{prior_summary.strip()}"
+        )
+    user_state_block = ('\n'.join(state_lines) + '\n') if state_lines else ''
 
     session_rule = SESSION_RULES.get(session_state, SESSION_RULES['new'])
     funnel_rule = FUNNEL_RULES.get(funnel_stage, FUNNEL_RULES['curious'])
@@ -568,7 +595,7 @@ def build_system_prompt(session_state='new', funnel_stage='curious',
 ТҮГЭЭМЭЛ АСУУЛТУУД:
 {faq_text}
 
-{name_block}{funnel_rule}
+{name_block}{user_state_block}{funnel_rule}
 
 {_svc.PROFESSIONAL_ACCURACY_RULE}
 
@@ -650,15 +677,15 @@ F. ӨМНӨХ ХАРИЛЦАА ГҮН:
    Хэрэглэгч "одоохондоо утсаа үлдээмээргүй байна" гэвэл шахаж бүү давт. Форм линкийг үзүүлж "хэдийд хүсвэл энэ замаар өөрөө бүртгүүлж болно" гэж тайвшруулна уу.
 
    Дискавери (curious/exploring_courses) шатанд хэзээ утас/линк тавихыг өмнөх FUNNEL RULE тодорхойлсон — давтан энд бүү бич.
-4. Хэрэглэгч утасны дугаар бичсэн бол баярлал илэрхийлж, "Манай ажилтан удахгүй тантай холбогдоно" гэж мэдэгд.
-5. Шийдэх боломжгүй буюу мэдэхгүй асуудал тулгарвал "Энэ асуудлыг манай ажилтан тантай эргэж холбогдож тодруулна" гэж хэлээд Дүрэм 3-ын дагуу хоёр сонголтыг өг.
+4. Хэрэглэгч утасны дугаар бичсэн бол баярлал илэрхийлж, "Манай ажилтан удахгүй тантай холбогдоно" гэж мэдэгд. Энэ бол lead — defer_to_staff ДУУДАХГҮЙ.
+5. Шийдэх боломжгүй буюу мэдэхгүй асуудал тулгарвал defer_to_staff дууд (дээрх АЖИЛТАНД ШИЛЖҮҮЛЭХ дүрэм). Зүгээр л "ажилтан холбогдоно" гэж амлаад орхиж болохгүй — tool дуудаагүй бол ажилтанд мэдэгдэл очихгүй.
 6. Эмодзи цөөн (1-2) хэрэглэж, илүү гар бичмэл маяг бүү аватарла.
 7. Өгүүлбэрүүдийн эхлэлийг сольж бай, "Сургалт..." гэх мэт ижил үгээр дандаа бүү эхэл.
 8. АСУУСАН ЗҮЙЛД НЬ ТӨВЛӨРӨӨД ШУУД ХАРИУЛ: Сургалтаас өөр чиглэлийн асуулт (аудит, ТМЗ/CPA тайлан бэлтгэх, татвар, зөвлөгөө, бүтээгдэхүүн, платформд нэвтрэх г.м.) ирвэл хариултаа сургалт/курсын танилцуулгаар БҮҮ ЭХЭЛ, сургалтаа бүү түлх — хэрэглэгчийн асуусан ЯГ ТЭР үйлчилгээний талаар эхний өгүүлбэрээс шууд хариул. Эдгээрийг дээрх "КОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ" болон "ҮЙЛЧИЛГЭЭНИЙ КАТАЛОГ" хэсгээс ялган таньж, тохирох холбоосыг өг (тайлан/бүртгэл бэлтгэх = ТМЗ/CPA, харин хөндлөнгийн шалгалт = аудит — хоёр өөр үйлчилгээ, хольж болохгүй). Жагсаалтад байхгүй чиглэлд үнэ, мэдээлэл зохиолгүйгээр ажилтантай холбогдохыг санал болго.
 9. БҮТЭЭГДЭХҮҮНИЙ ДҮРЭМ: Бот бүтээгдэхүүн (Magic Finance, Microsoft license, Kaspersky г.м.)-ийн үнэ, санал хэлэхгүй. Худалдан авах, дэмжлэг (ticket), гарын авлага (manual), community, татах (download) гэх мэт асуулт ирэхэд тухайн бүтээгдэхүүний "Холбоосууд" жагсаалтаас хэрэглэгчийн санаатай таарах нэгийг сонгож, тэр линкийг өгөөд "манай ажилтан тантай холбогдож үнэ, нөхцөл нь дэлгэрэнгүй хэлэлцэнэ" гэж нэм. Жагсаалтад тохирох холбоос байхгүй бол үнэ зохиохгүйгээр ажилтантай холбогдох санал тавь.
 10. ҮЙЛЧИЛГЭЭГ ҮГҮЙСГЭХГҮЙ ДҮРЭМ:
    (а) Хэрэглэгчийн асуусан үйлчилгээ дээрх "КОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ" жагсаалтад БАЙВАЛ — тэндхийн тайлбарыг ашиглан 1-2 өгүүлбэрээр баталгаажуул, дэс дарааллын дагуу үргэлжлүүл. ЗААВАЛ утас лавлахаас өмнө сонирхол тодруул.
-   (б) Хэрэглэгчийн асуусан үйлчилгээ жагсаалтад БАЙХГҮЙ бол "бид санал болгохгүй", "манай төвд байхгүй", "энэ үйлчилгээ байхгүй" гэж ХЭЗЭЭ Ч БҮҮ ХЭЛ. Үүний оронд: "Энэ талаар манай мэргэжлийн ажилтан танд дэлгэрэнгүй хариулна — утасны дугаараа үлдээх үү?" гэж эелдгээр хариул.
+   (б) Хэрэглэгчийн асуусан үйлчилгээ жагсаалтад БАЙХГҮЙ бол "бид санал болгохгүй", "манай төвд байхгүй", "энэ үйлчилгээ байхгүй" гэж ХЭЗЭЭ Ч БҮҮ ХЭЛ. Үүний оронд defer_to_staff (knowledge_gap) дууд; reply_to_customer-т "Энэ талаар манай ажилтан танд дэлгэрэнгүй хариулна" гэж хэлээд утасны дугаараа үлдээх сонголтыг эелдгээр санал болго.
    (в) "ТҮР ЗОГССОН" гэж тэмдэглэгдсэн үйлчилгээний хувьд "одоогоор зогссон" гэж шулуун хэл, дахин нээгдэх үед мэдэгдэж болохыг санал болго."""
     return system_prompt
 

@@ -121,6 +121,13 @@ def ensure_schema():
         'established_year': 'established_year INTEGER',
     })
 
+    # Cross-session sales memory (2026-11): bot-written summary of the
+    # customer's earlier conversation, refreshed on return after a gap.
+    add_columns('facebook_user', {
+        'bot_summary': 'bot_summary TEXT',
+        'bot_summary_at': 'bot_summary_at DATETIME',
+    })
+
     # Idempotency key for inbound Facebook messages (dedupe retried deliveries).
     # SQLite can't ADD COLUMN ... UNIQUE, so the column and its unique index are
     # created separately. All existing rows get NULL, and multiple NULLs are

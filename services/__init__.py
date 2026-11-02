@@ -1317,6 +1317,12 @@ def _claude_messages(conversation_history, user_message):
         if not messages and m.get('role') != 'user':
             continue
         messages.append({'role': m['role'], 'content': content})
+    # The webhook persists the inbound row BEFORE the reply runs, so the
+    # last-N window normally ends with this very message. Drop that copy so
+    # the model doesn't see the customer "repeating themselves".
+    if (messages and messages[-1]['role'] == 'user'
+            and messages[-1]['content'] == (user_message or '').strip()):
+        messages.pop()
     messages.append({'role': 'user', 'content': user_message})
     return messages
 
@@ -1324,7 +1330,8 @@ def _claude_messages(conversation_history, user_message):
 def generate_bot_response(user_message, conversation_history,
                           session_state='new', funnel_stage='curious',
                           user_first_name='', handoff_pending=False,
-                          handoff_just_triggered=False):
+                          handoff_just_triggered=False, ask_name=False,
+                          is_lead=False, prior_summary=''):
     """Generate the customer reply on REPLY_MODEL (Claude — see the client
     block at the top of this module). `handoff_pending=True` enables
     advisory mode in the system prompt — bot keeps helping but doesn't
@@ -1332,7 +1339,8 @@ def generate_bot_response(user_message, conversation_history,
     `handoff_just_triggered=True` is set for the SINGLE reply right after
     a fresh handoff fires this turn; it overrides advisory mode so the
     bot can craft a warm, mood-aware acknowledgement that mentions staff
-    routing and the office-hours ETA."""
+    routing and the office-hours ETA. `ask_name` / `is_lead` /
+    `prior_summary` describe the customer (see build_system_prompt)."""
     try:
         create_kwargs = {
             'model': REPLY_MODEL,
@@ -1347,6 +1355,9 @@ def generate_bot_response(user_message, conversation_history,
                 user_first_name=user_first_name,
                 handoff_pending=handoff_pending,
                 handoff_just_triggered=handoff_just_triggered,
+                ask_name=ask_name,
+                is_lead=is_lead,
+                prior_summary=prior_summary,
             ),
             'messages': _claude_messages(conversation_history, user_message),
         }
@@ -1358,16 +1369,29 @@ def generate_bot_response(user_message, conversation_history,
 
         response = client.messages.create(**create_kwargs)
 
-        # If the model chose to defer (it lacks the info), translate that
-        # structured tool call into the internal HANDOFF_MARKER the webhook
-        # detects. This is reliable, unlike asking the model to emit a literal
-        # marker in its text (which chat models strip). The tool call wins
-        # over any preamble text in the same response.
+        usage = getattr(response, 'usage', None)
+        if usage is not None:
+            # One line per reply so Render logs (query `reply usage`) give a
+            # cheap cost/volume picture without a dashboard.
+            logger.info(
+                "reply usage model=%s in=%s out=%s cache_read=%s",
+                REPLY_MODEL, getattr(usage, 'input_tokens', None),
+                getattr(usage, 'output_tokens', None),
+                getattr(usage, 'cache_read_input_tokens', None),
+            )
+
+        # If the model chose to defer (it lacks the info, the customer asked
+        # for a person, or complained), translate that structured tool call
+        # into the internal handoff marker the webhook detects — carrying the
+        # category + reason so staff see WHY. This is reliable, unlike asking
+        # the model to emit a literal marker in its text (which chat models
+        # strip). The tool call wins over any preamble text in the response.
         for block in response.content:
             if block.type == 'tool_use' and block.name == 'defer_to_staff':
                 args = block.input if isinstance(block.input, dict) else {}
                 reply = (args.get('reply_to_customer') or '').strip() or _static_handoff_reply()
-                return f"{HANDOFF_MARKER} {reply}"
+                marker = format_handoff_marker(args.get('category'), args.get('reason'))
+                return f"{marker} {reply}"
 
         text = _response_text(response)
         if text:
@@ -1456,7 +1480,8 @@ LANGUAGE_QUALITY_RULE = (
     "баяртай байна'\n"
     "✗ 'Мэдээллийг өгөх боломжтой' → ✓ 'Мэдээллээ хэлж өгье'\n"
     "Хэт урт, нэр үгийн жагсаалттай өгүүлбэр бүү бич. Богино, шууд, "
-    "найз шиг найрсаг өгүүлбэр илүү тохиромжтой."
+    "дулаахан боловч ЦЭВЭР өгүүлбэр: ярианы сул үг ('шүү', 'шүү дээ', "
+    "'л дээ', 'юм даа', 'шдээ') огт бүү хэрэглэ."
 )
 
 
@@ -1552,25 +1577,29 @@ HANDOFF_JUST_TRIGGERED_RULE = (
 # already understands. ETA + door-open phrasing relies on the ОДООГИЙН ЦАГ +
 # КОМПАНИЙН ХОЛБОО БАРИХ blocks already in the prompt.
 KNOWLEDGE_GAP_HANDOFF_RULE = (
-    "МЭДЭХГҮЙ ЗҮЙЛД ХАРИУЛТ БҮҮ ЗОХИО — АЖИЛТАНД ШИЛЖҮҮЛНЭ:\n"
-    "Хэрэглэгчийн асуултын ТОДОРХОЙ хариулт чиний мэдлэгт байхгүй бол "
-    "(жишээ нь: онлайн сургалтын платформд хэрхэн нэвтрэх, нэвтрэх "
-    "нэр/нууц үг/линк, төлбөр төлсний дараах хандалт, техникийн асуудал, "
-    "бүртгэлийн дараах тодорхой журам г.м.) — таамаг, зохиомол хариулт "
-    "ОГТ БҮҮ ӨГ. Үүний оронд defer_to_staff функцийг дууд.\n"
-    "  • reply_to_customer-т дулаахан, эелдэг мессеж бич: асуултыг товч "
-    "хүлээн зөвшөөр; манай ажилтан тодорхой шийдэж/хэлж өгнө гэж хэл; "
+    "АЖИЛТАНД ШИЛЖҮҮЛЭХ (defer_to_staff) — ЗӨВХӨН ГУРВАН ТОХИОЛДОЛД:\n"
+    "  1) knowledge_gap — хариулт чиний мэдлэгт БАЙХГҮЙ: онлайн сургалтын "
+    "платформд нэвтрэх, нэвтрэх нэр/нууц үг/линк, төлбөр төлсний дараах "
+    "хандалт, техникийн асуудал, бүртгэлийн дараах тодорхой журам г.м. "
+    "Таамаг, зохиомол хариулт ОГТ БҮҮ ӨГ; ЛИНК/URL, нууц үг, үнийг хэзээ ч "
+    "бүү зохио.\n"
+    "  2) wants_human — хэрэглэгч ажилтантай / хүнтэй ярихыг ӨӨРӨӨ хүссэн.\n"
+    "  3) complaint — хэрэглэгч гомдолтой, бухимдсан, үйлчилгээнд сэтгэл "
+    "дундуур.\n"
+    "ШИЛЖҮҮЛЭХГҮЙ, ӨӨРӨӨ ШИЙД: анги, үнэ, хуваарь, FAQ, каталогт байгаа "
+    "үйлчилгээ; бүртгүүлэх хүсэлт (бүртгэлийн линк + утас үлдээх сонголтыг "
+    "өг); хэрэглэгч утасны дугаараа өгсөн (энэ бол lead — 'Баярлалаа, "
+    "ажилтан тантай холбогдоно' гэж баталгаажуулахад хангалттай, шилжүүлэх "
+    "хэрэггүй); 'үнэтэй', 'бодъё' гэх эсэргүүцэл (БОРЛУУЛАЛТЫН ЗАН ҮЙЛ-ийн "
+    "дагуу хариул). Нэг мессежид чадах ба чадахгүй хэсэг хоёул байвал "
+    "чадахаа хариулаад, чадахгүйн талаар л defer_to_staff дууд.\n"
+    "Дуудахдаа reply_to_customer-т дулаахан, эелдэг мессеж бич: асуултыг "
+    "товч хүлээн зөвшөөр; манай ажилтан тодорхой шийдэж/хэлж өгнө гэж хэл; "
     "ХУГАЦААГ мэдэгд (дээрх 'ОДООГИЙН ЦАГ'-ийг ажлын цагтай харьцуул — "
     "ажлын цагийн ДОТОР бол 'удахгүй, ~10–30 минутын дотор', ГАДУУР бол "
-    "'ажилтан маргааш ажлын цагт хариулна'); мөн 'энэ хооронд өөр "
-    "тодруулах зүйл байвал би энд байна' гэж нэм.\n"
-    "  • ЛИНК/URL, нэвтрэх нэр, нууц үг, үнийг ХЭЗЭЭ Ч БҮҮ ЗОХИО. Хэрэв "
-    "өгөх ёстой линк/мэдээлэл дээрх мэдлэгт ТОДОРХОЙ байхгүй бол "
-    "defer_to_staff дууд.\n"
-    "  • Зөвхөн ҮНЭХЭЭР мэдээлэлгүй үед л defer_to_staff дууд. Анги, үнэ, "
-    "хуваарь, FAQ, жагсаалтад буй үйлчилгээг ердийнхөөрөө ӨӨРӨӨ хариул. Нэг "
-    "мессэжид хариулж чадах ба чадахгүй хэсэг хоёул байвал — чадахаа "
-    "хариулаад, чадахгүйн талаар defer_to_staff дууд."
+    "'ажилтан маргааш ажлын цагт хариулна'); мөн 'энэ хооронд өөр асуух "
+    "зүйл байвал би энд байна' гэж нэм. reason-д ажилтанд зориулж юу "
+    "дутуу/хүссэнийг нэг мөрөөр бич."
 )
 
 # Tool the reply model can call (normal mode only) to hand off to a human when
@@ -1582,17 +1611,27 @@ KNOWLEDGE_GAP_HANDOFF_RULE = (
 DEFER_TO_STAFF_TOOL = [{
     "name": "defer_to_staff",
     "description": (
-        "Hand the conversation to a human staff member because you do NOT "
-        "have the information to answer correctly and must not guess — e.g. "
-        "how to log in to the online class platform, a login name / "
-        "password / link, payment-access problems, technical issues, or "
-        "any specific fact, policy, or URL not present in your knowledge. "
-        "Do NOT call this for questions you CAN answer from your knowledge: "
-        "courses, prices, schedule, FAQs, or listed services."
+        "Hand the conversation to a human staff member. Call it ONLY in three "
+        "cases: (1) knowledge_gap — the customer needs a specific fact, link, "
+        "login, password, policy or procedure that is NOT in your knowledge "
+        "(e.g. how to log in to the online class platform, access after "
+        "payment, technical problems); (2) wants_human — the customer "
+        "explicitly asks to talk to a person / staff member; (3) complaint — "
+        "the customer is upset or complains about the service. NEVER call it "
+        "for things you handle yourself: course info, prices, schedule, FAQs, "
+        "listed services (give their link), registration intent (give the "
+        "registration link and offer to leave a phone number), a customer "
+        "leaving their phone number (that is a lead, not a handoff), or "
+        "objections like 'too expensive' / 'let me think about it'."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
+            "category": {
+                "type": "string",
+                "enum": ["knowledge_gap", "wants_human", "complaint"],
+                "description": "Why staff must step in.",
+            },
             "reply_to_customer": {
                 "type": "string",
                 "description": (
@@ -1607,10 +1646,13 @@ DEFER_TO_STAFF_TOOL = [{
             },
             "reason": {
                 "type": "string",
-                "description": "Short note for staff: what info is missing.",
+                "description": (
+                    "One-line note for staff (Mongolian is fine): what exactly "
+                    "is missing or wanted."
+                ),
             },
         },
-        "required": ["reply_to_customer"],
+        "required": ["category", "reply_to_customer"],
     },
 }]
 
@@ -1629,22 +1671,13 @@ def _is_off_hours():
     return end <= ub_hour < start
 
 
-def _matches_refer_business_line(text):
-    """True if the user message clearly names a business line flagged 'refer'."""
-    if not text:
-        return False
-    lower = text.lower()
-    refer_lines = (BusinessLine.query
-                   .filter_by(is_active=True, action='refer')
-                   .all())
-    for line in refer_lines:
-        if line.name and line.name.lower() in lower:
-            return True
-    return False
-
-
 def should_handoff(message_text, fb_user):
-    """Decide whether the bot should escalate to a human."""
+    """Decide, BEFORE the model replies, whether this message is an explicit
+    request for a human (admin-managed keyword list) — or, at balanced /
+    aggressive sensitivity, frustration. Everything else is the model's call
+    via the defer_to_staff tool: it knows what it can answer, keyword
+    matching doesn't. (Mentioning a 'refer' business line used to trigger a
+    handoff here too; the prompt now answers those with the service's link.)"""
     if not message_text:
         return False, ''
     text = message_text.lower()
@@ -1662,9 +1695,6 @@ def should_handoff(message_text, fb_user):
     for kw in explicit_kws:
         if kw in text:
             return True, f"explicit:{kw}"
-
-    if _matches_refer_business_line(message_text):
-        return True, 'business_line_refer'
 
     if sensitivity in ('balanced', 'aggressive'):
         for kw in frustration_kws:
@@ -1755,8 +1785,8 @@ def trigger_handoff(fb_user, reason, user_message, send_user_message=True):
     the take-over timer expires.
 
     Pass `send_user_message=False` when the bot has already sent the
-    customer a deferring reply (see bot_response_implies_handoff) so the
-    user doesn't receive two back-to-back messages.
+    customer a deferring reply (the defer_to_staff tool's reply_to_customer)
+    so the user doesn't receive two back-to-back messages.
     """
     off_hours = _is_off_hours()
 
@@ -1803,40 +1833,126 @@ def trigger_handoff(fb_user, reason, user_message, send_user_message=True):
     return issue
 
 
-# Phrases that indicate the bot is deferring to staff. If the bot's own
-# response contains any of these, treat it as an implicit handoff (mute
-# the bot + create AdminIssue + Telegram ping) WITHOUT sending an extra
-# user-facing message — the bot's deferring reply IS the user message.
-_BOT_DEFERRAL_PHRASES = (
-    'мэргэжлийн ажилтан',
-    'манай ажилтан танд',
-    'манай ажилтан удахгүй',
-    'ажилтан танд эргэж',
-    'ажилтан тантай эргэж',
-    'ажилтантай холбог',
-    'тусгай ажилтан',
-)
+# NOTE (2026-11): the old `bot_response_implies_handoff` phrase scan was
+# removed. It fired a handoff whenever the bot's OWN reply contained "манай
+# ажилтан удахгүй холбогдоно" and similar — exactly what the prompt tells the
+# bot to say after a phone number is captured or when offering the
+# registration link + phone options — so every lead and every registration
+# offer became a Work Tasks entry, a Telegram ping and advisory mode. The
+# defer_to_staff tool (structured, with a category) is the only bot-initiated
+# handoff path now.
 
 
-def bot_response_implies_handoff(bot_response):
-    """Return the matched phrase if the bot's reply means "I am deferring
-    to a human", else None. Used by the webhook to fire a handoff even
-    when the user's message didn't match an explicit keyword (e.g. the
-    customer asked about an unknown service and the bot chose to defer
-    per Rule 10б of the system prompt)."""
-    if not bot_response:
+# ===================== CROSS-SESSION SALES MEMORY =====================
+# The reply prompt only sees the last few messages. When a customer comes
+# back after a gap, a 2-3 line summary of the earlier conversation (goal,
+# situation, course of interest, objections, where things stood) is written
+# by BACKGROUND_MODEL onto FacebookUser.bot_summary and injected into the
+# prompt, so the bot picks up where it left off instead of re-discovering.
+
+USER_SUMMARY_MAX_MESSAGES = 40
+USER_SUMMARY_MIN_MESSAGES = 4
+USER_SUMMARY_MAX_CHARS = 1000
+
+
+def refresh_user_summary(fb_user):
+    """(Re)write fb_user.bot_summary from their recent conversation. Fail-soft:
+    any model/DB error is logged and leaves the previous summary in place.
+    Returns the new summary, or None when nothing was written."""
+    rows = (Message.query
+            .filter_by(facebook_user_id=fb_user.id)
+            .order_by(Message.created_at.desc())
+            .limit(USER_SUMMARY_MAX_MESSAGES)
+            .all())
+    rows = [m for m in rows if (m.content or '').strip()]
+    if len(rows) < USER_SUMMARY_MIN_MESSAGES:
         return None
-    text = bot_response.lower()
-    for phrase in _BOT_DEFERRAL_PHRASES:
-        if phrase in text:
-            return phrase
-    return None
+    transcript = '\n'.join(
+        f"{'Хэрэглэгч' if m.sender == 'user' else 'Бот'}: {m.content.strip()}"
+        for m in reversed(rows)
+    )
+    prompt = (
+        "Доорх бол сургалтын төвийн борлуулалтын ботын нэг харилцагчтай "
+        "хийсэн яриа. Ботод дараагийн удаа санах зориулалттай 2-3 мөр "
+        "ХУРААНГУЙ бич (монгол хэлээр, зөвхөн яриан дахь баримт):\n"
+        "- Зорилго / нөхцөл (ажил, цаг, мэдлэгийн түвшин)\n"
+        "- Сонирхсон анги, үйлчилгээ; дурдсан үнэ\n"
+        "- Эсэргүүцэл, эргэлзээ\n"
+        "- Хаана зогссон: утас өгсөн эсэх, бүртгүүлэх шийдвэр, ажилтанд "
+        "шилжүүлсэн эсэх\n"
+        "Зохиохгүй, 400 тэмдэгтээс хэтрүүлэхгүй, гарчиг, bullet-гүй энгийн "
+        "өгүүлбэрээр.\n\n"
+        f"ЯРИА:\n{transcript}"
+    )
+    try:
+        resp = client.messages.create(
+            model=BACKGROUND_MODEL,
+            max_tokens=512,
+            output_config={'effort': 'low'},
+            system="Чи борлуулалтын ярианы хураангуй бичдэг туслах. Зөвхөн хураангуйг л буцаа.",
+            messages=[{'role': 'user', 'content': prompt}],
+        )
+        summary = _response_text(resp)[:USER_SUMMARY_MAX_CHARS]
+    except Exception as e:
+        logger.warning("refresh_user_summary: model call failed for user %s: %s", fb_user.id, e)
+        return None
+    if not summary:
+        return None
+    try:
+        fb_user.bot_summary = summary
+        fb_user.bot_summary_at = datetime.utcnow()
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.warning("refresh_user_summary: could not save for user %s: %s", fb_user.id, e)
+        return None
+    return summary
 
 
 # Hidden control marker the bot prefixes to a reply when it is deferring to
-# staff because it lacks the information (see KNOWLEDGE_GAP_HANDOFF_RULE). It is
-# a system-only signal and MUST be stripped before the reply reaches the user.
+# staff (see KNOWLEDGE_GAP_HANDOFF_RULE). It is a system-only signal and MUST be
+# stripped before the reply reaches the user. The full form carries the
+# defer_to_staff category + the model's one-line reason for staff:
+#   [HANDOFF:knowledge_gap|платформын нууц үг]
+# The bare `[HANDOFF]` form is still accepted (legacy / marker-only replies).
 HANDOFF_MARKER = '[HANDOFF]'
+HANDOFF_CATEGORIES = ('knowledge_gap', 'wants_human', 'complaint')
+HANDOFF_CATEGORY_LABELS = {
+    'knowledge_gap': 'мэдлэг дутуу',
+    'wants_human': 'ажилтантай ярих хүсэлт',
+    'complaint': 'гомдол',
+}
+_HANDOFF_MARKER_RE = re.compile(r'\[HANDOFF(?::([a-z_]+))?(?:\|([^\]]*))?\]')
+
+
+def format_handoff_marker(category=None, reason=None):
+    """Render the marker generate_bot_response prefixes to a deferring reply.
+    Unknown categories fall back to knowledge_gap; the reason is squeezed to
+    one short line without the characters that would break the marker."""
+    if category not in HANDOFF_CATEGORIES:
+        category = 'knowledge_gap'
+    reason = re.sub(r'[\[\]|\r\n]+', ' ', str(reason or '')).strip()[:120]
+    return f"[HANDOFF:{category}|{reason}]"
+
+
+def extract_handoff(bot_response):
+    """Strip every handoff marker from the bot's reply.
+
+    Returns (cleaned_text, detail): detail is None when no marker was present,
+    else {'category': ..., 'reason': ...} from the first marker. The marker
+    must never be shown to the customer; if the model emitted ONLY the marker,
+    a warm static deferral is substituted so we never send an empty message."""
+    if not bot_response or '[HANDOFF' not in bot_response:
+        return bot_response, None
+    found = _HANDOFF_MARKER_RE.search(bot_response)
+    if not found:
+        return bot_response, None
+    category = found.group(1) if found.group(1) in HANDOFF_CATEGORIES else 'knowledge_gap'
+    reason = (found.group(2) or '').strip()
+    cleaned = _HANDOFF_MARKER_RE.sub('', bot_response).strip()
+    if not cleaned:
+        cleaned = _static_handoff_reply()
+    return cleaned, {'category': category, 'reason': reason}
 
 
 def _static_handoff_reply():
@@ -1853,18 +1969,9 @@ def _static_handoff_reply():
 
 
 def extract_handoff_marker(bot_response):
-    """Strip the knowledge-gap handoff marker from the bot's reply.
-
-    Returns (cleaned_text, had_marker). The marker must never be shown to the
-    customer; strips every occurrence in case the model emitted it more than
-    once. If the model emitted ONLY the marker, substitute a warm static
-    deferral so we don't send an empty message."""
-    if not bot_response or HANDOFF_MARKER not in bot_response:
-        return bot_response, False
-    cleaned = bot_response.replace(HANDOFF_MARKER, '').strip()
-    if not cleaned:
-        cleaned = _static_handoff_reply()
-    return cleaned, True
+    """Boolean flavour of extract_handoff: (cleaned_text, had_marker)."""
+    cleaned, detail = extract_handoff(bot_response)
+    return cleaned, detail is not None
 
 
 # ===================== AUDIT LOG =====================

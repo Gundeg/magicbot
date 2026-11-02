@@ -136,6 +136,11 @@
                 <div class="side-label">Утас</div>
                 <div class="side-value">{{ fb_user.phone or '—' }}</div>
 
+                {% if fb_user.bot_summary %}
+                <div class="side-label">Ботын хураангуй (өмнөх яриа)</div>
+                <div class="side-value small">{{ fb_user.bot_summary }}</div>
+                {% endif %}
+
                 <div class="side-label">Facebook ID</div>
                 <div class="side-value mono-break">
                     {{ fb_user.facebook_id }}
