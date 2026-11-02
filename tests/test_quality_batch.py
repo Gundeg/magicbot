@@ -126,8 +126,32 @@ def test_generate_passes_customer_state_to_prompt(app, db_session, monkeypatch):
     monkeypatch.setattr(services.client.messages, 'create', _create)
     services.generate_bot_response('Сайн уу', [], ask_name=True, is_lead=True,
                                    prior_summary='Хосолсон анги сонирхсон.')
-    assert 'хэн гэдэг' in captured['system']
-    assert 'Хосолсон анги сонирхсон.' in captured['system']
+    stable, volatile = (b['text'] for b in captured['system'])
+    # per-customer state lands in the volatile (uncached) half only
+    assert 'хэн гэдэг' in volatile and 'хэн гэдэг' not in stable
+    assert 'Хосолсон анги сонирхсон.' in volatile and 'Хосолсон анги' not in stable
+
+
+# ----------------------------------------------------------- prompt caching split
+
+def test_stable_half_is_identical_across_customers_and_states(app, db_session):
+    a_stable, a_vol = _prompt.build_system_blocks(session_state='new', funnel_stage='curious')
+    b_stable, b_vol = _prompt.build_system_blocks(
+        session_state='active', funnel_stage='pricing', user_first_name='Бат',
+        handoff_pending=True, is_lead=True, prior_summary='Өмнө нь үнэ асуусан.',
+    )
+    assert a_stable == b_stable                      # cacheable prefix
+    assert a_vol != b_vol
+    # everything that changes per request / per minute is in the volatile half
+    for marker in ('ОДООГИЙН ЦАГ', 'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ', 'ЭНЭ ЯРИАНЫ ТӨЛӨВ'):
+        assert marker not in a_stable and marker in a_vol
+    assert 'ХАНДОФФ ХҮЛЭЭЛТИЙН ГОРИМ' in b_vol and 'ХАНДОФФ ХҮЛЭЭЛТИЙН ГОРИМ' not in b_stable
+    # the persona + catalog + rules stay in the stable half
+    # (exact headings: the volatile handoff rule refers to the sales block by name)
+    for marker in ('ИДЭВХТЭЙ АНГИУДЫН АЛБАН ЁСНЫ ЖАГСААЛТ', 'ЧУХАЛ ДҮРМҮҮД:', 'БОРЛУУЛАЛТЫН ЗАН ҮЙЛ (туршлагатай'):
+        assert marker in a_stable and marker not in a_vol
+    # the joined form is what the string-based callers see
+    assert _prompt.build_system_prompt() == f"{a_stable}\n\n{a_vol}"
 
 
 # ----------------------------------------------------------- cross-session memory

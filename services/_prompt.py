@@ -15,6 +15,7 @@ module object, which gains attributes as __init__.py continues to load;
 by the time any function below runs, services is fully loaded and the
 attribute lookups resolve.
 """
+import re
 from datetime import datetime
 
 from sqlalchemy.orm import joinedload
@@ -58,9 +59,10 @@ SESSION_RULES = {
 FUNNEL_RULES = {
     'curious': (
         'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Сонирхож буй (discovery шат).\n'
-        'Эхний 1-2 өгүүлбэрээр сургалтын үндсэн давуу талыг товч танилцуул '
-        '(100% практик, 4 долоо хоног, сертификат, төгсөгчдөд Magic Finance '
-        'программын үнэгүй license г.м.).\n'
+        'Асуусан зүйлд нь шууд хариулаад, сургалтын давуу талуудаас тухайн '
+        'асуултад хамгийн хамаатай НЭГИЙГ нэг өгүүлбэрээр дурд (100% практик, '
+        '4 долоо хоног, сертификат, Magic Finance программын үнэгүй license — '
+        'бүгдийг нэг дор бүү жагсаа).\n'
         'Дараа нь зайлшгүй 1 НЭЭЛТТЭЙ АСУУЛТ асууж тэдний хэрэгцээг ойлгох '
         'хэрэгтэй. Дараах асуултуудаас тохирохыг сонго, заавал нэгийг л асуу '
         '(нэг хариултанд 2-3 асуулт битгий тулга):\n'
@@ -87,16 +89,18 @@ FUNNEL_RULES = {
         'тодорхой "үнэ хэд?" эсвэл "яаж бүртгүүлэх вэ?" гэж асуусан үед өг.'
     ),
     'pricing': (
-        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Үнэ судалж буй. Дөрвөн ангийн үнэ, PocketZero-оор '
-        '4-6 хуваан хүүгүй төлөх боломж, Magic Finance программын 6 сарын '
-        'үнэгүй ашиглах эрхийг онцолж тайлбарла. Төсөвт нь тохирох '
-        'хувилбарыг санал болго. Хэрэглэгч сонирхлоо илэрхийлбэл БҮРТГЭЛИЙН '
-        'ЛИНК + утас зэрэг хоёр сонголтыг өг.'
+        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Үнэ судалж буй. Сурах хэлбэр нь тодорхой бол '
+        'ТЭР ангийн үнийг хэл; тодорхойгүй бол үнийн хүрээг хэлээд хэлбэрийг '
+        'нэг асуултаар тодруул — дөрвөн ангийн үнийг зэрэг бүү жагсаа. '
+        'PocketZero-оор 4-6 хуваан хүүгүй төлөх боломж, Magic Finance '
+        'программын үнэгүй эрхийг хэрэглэгч үнэд эргэлзсэн эсвэл асуусан үед '
+        'дурд. Төсөвт нь тохирох хувилбарыг санал болго. Хэрэглэгч сонирхлоо '
+        'илэрхийлбэл БҮРТГЭЛИЙН ЛИНК + утас зэрэг хоёр сонголтыг өг.'
     ),
     'ready': (
-        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Бүртгүүлэхэд бэлэн. Богино урамшуулал ("Маш сайн '
-        'сонголт!") хийж, БҮРТГЭЛИЙН ЛИНК-ийг хариултдаа оруул. Эсвэл утасны '
-        'дугаараа үлдээгээрэй гэж нэм — хэрэглэгчид хоёр сонголтыг өг.'
+        'ХЭРЭГЛЭГЧИЙН ҮЕ ШАТ: Бүртгүүлэхэд бэлэн. Богино баталгаажуулалт '
+        '("Зөв шийдвэр.") хийж, БҮРТГЭЛИЙН ЛИНК-ийг хариултдаа оруул. Эсвэл '
+        'утасны дугаараа үлдээгээрэй гэж нэм — хэрэглэгчид хоёр сонголтыг өг.'
     ),
 }
 
@@ -407,10 +411,14 @@ def _format_current_time_block():
     model doesn't have to map the hour itself.
 
     PRECEDENCE NOTE: this block tells the model to greet "per the persona
-    rule" but SESSION_RULES['active'] / ['gap'] (injected later as the "0."
-    item in ЧУХАЛ ДҮРМҮҮД) hard-override and forbid greetings on
-    in-flight sessions. Personas effectively only choose the greeting for
-    'new' / 'returning' sessions."""
+    rule" but SESSION_RULES['active'] / ['gap'] (injected after it under
+    ЭНЭ ЯРИАНЫ ТӨЛӨВ) hard-override and forbid greetings on in-flight
+    sessions. Personas effectively only choose the greeting for 'new' /
+    'returning' sessions.
+
+    CACHING NOTE: the minute in this block changes every request, so it
+    lives in the VOLATILE half of the prompt (see build_system_blocks) —
+    never move it back into the cached stable half."""
     now_utc = datetime.utcnow()
     ub_hour = (now_utc.hour + 8) % 24
     ub_minute = now_utc.minute
@@ -436,12 +444,22 @@ def _format_current_time_block():
     )
 
 
-def build_system_prompt(session_state='new', funnel_stage='curious',
+def build_system_blocks(session_state='new', funnel_stage='curious',
                         user_first_name='', handoff_pending=False,
                         handoff_just_triggered=False, ask_name=False,
                         is_lead=False, prior_summary=''):
-    """Build system prompt with training, FAQ, session-state, funnel,
-    and (optionally) handoff-advisory context.
+    """Build the system prompt as two halves: (stable, volatile).
+
+    STABLE is identical for every customer and every minute — persona,
+    canonical catalog, training text, snippets, team, business lines,
+    services, FAQs and the behavioural rules. generate_bot_response marks it
+    with cache_control so the model reads it from the prompt cache (~20x
+    cheaper and faster than re-processing ~15K tokens of Mongolian per reply).
+    VOLATILE is per request — current time, this customer's name/state/funnel
+    stage, the handoff-mode rule, the session rule — and MUST come after the
+    cache breakpoint: anything volatile earlier in the prefix would invalidate
+    the cache on every call. Edits in the admin UI (persona, snippets, FAQ,
+    catalog) change the stable half, which simply starts a new cache entry.
 
     `handoff_just_triggered=True` takes precedence over `handoff_pending`:
     when both are set, the just-triggered rule is injected and the
@@ -574,9 +592,8 @@ def build_system_prompt(session_state='new', funnel_stage='curious',
         if paused_courses else ''
     )
 
-    system_prompt = f"""{persona}
+    stable = f"""{persona}
 
-{current_time_block}
 ==========================
 ИДЭВХТЭЙ АНГИУДЫН АЛБАН ЁСНЫ ЖАГСААЛТ (CANONICAL — энэ жагсаалтаас л үнэн зөв):
 {courses_text}
@@ -595,11 +612,9 @@ def build_system_prompt(session_state='new', funnel_stage='curious',
 ТҮГЭЭМЭЛ АСУУЛТУУД:
 {faq_text}
 
-{name_block}{user_state_block}{funnel_rule}
-
 {_svc.PROFESSIONAL_ACCURACY_RULE}
 
-{(_svc.HANDOFF_JUST_TRIGGERED_RULE + chr(10) + chr(10)) if handoff_just_triggered else (_svc.HANDOFF_ADVISORY_RULE + chr(10) + chr(10)) if handoff_pending else (_svc.KNOWLEDGE_GAP_HANDOFF_RULE + chr(10) + chr(10))}БОРЛУУЛАЛТЫН ЗАН ҮЙЛ (туршлагатай зөвлөгчийн загвар — найрсаг, тулгахгүй):
+БОРЛУУЛАЛТЫН ЗАН ҮЙЛ (туршлагатай зөвлөгчийн загвар — найрсаг, тулгахгүй):
 
 A. ИДЭВХТЭЙ СОНСОЛТ:
    Хэрэглэгчийн өгсөн гол үг/санааг хариултынхаа эхэнд 1 өгүүлбэрээр буцааж
@@ -661,9 +676,8 @@ F. ӨМНӨХ ХАРИЛЦАА ГҮН:
 {_svc.LANGUAGE_QUALITY_RULE}
 
 ЧУХАЛ ДҮРМҮҮД:
-{session_rule}
-1. Хариултыг товч (3 өгүүлбэрээс ихгүй) бөгөөд тодорхой бичнэ. Урт жагсаалт оруулахаас зайлсхий.
-2. Сургалтын давуу талыг хэт зар сурталчилгаа маягтай бус, итгэлтэй найз шиг зөвлөнө.
+1. Хариултыг товч — ихэвчлэн 2-3 өгүүлбэр + яриаг үргэлжлүүлэх НЭГ асуулт. Урт жагсаалт, bullet оруулахаас зайлсхий; дэлгэрэнгүйг хэрэглэгч өөрөө хүссэн үед л өг.
+2. Сургалтын давуу талыг хэт зар сурталчилгаа маягтай бус, итгэлтэй зөвлөх шиг — тухайн асуултад хамаатай НЭГ давуу талыг дурдаж зөвлөнө (сертификат, программ, хуваан төлөх гэх мэтийг нэг дор бүү жагсаа).
 3. БҮРТГЭЛИЙН ЛИНК + УТАС ЗЭРЭГ САНАЛ — ЗӨВХӨН ДАРААХ ҮЕД АШИГЛА:
    (а) Хэрэглэгч өөрөө "бүртгүүлмээр", "холбогдмоор", "ажилтантай яримаар", "шууд бүртгүүлж болох уу?", "яаж бүртгүүлэх вэ?" гэх мэт тодорхой шилжих хүсэл илэрхийлсэн;
    (б) Хэрэглэгч pricing/ready үе шатанд ороод үнийн дэлгэрэнгүй асуусан;
@@ -679,7 +693,7 @@ F. ӨМНӨХ ХАРИЛЦАА ГҮН:
    Дискавери (curious/exploring_courses) шатанд хэзээ утас/линк тавихыг өмнөх FUNNEL RULE тодорхойлсон — давтан энд бүү бич.
 4. Хэрэглэгч утасны дугаар бичсэн бол баярлал илэрхийлж, "Манай ажилтан удахгүй тантай холбогдоно" гэж мэдэгд. Энэ бол lead — defer_to_staff ДУУДАХГҮЙ.
 5. Шийдэх боломжгүй буюу мэдэхгүй асуудал тулгарвал defer_to_staff дууд (дээрх АЖИЛТАНД ШИЛЖҮҮЛЭХ дүрэм). Зүгээр л "ажилтан холбогдоно" гэж амлаад орхиж болохгүй — tool дуудаагүй бол ажилтанд мэдэгдэл очихгүй.
-6. Эмодзи цөөн (1-2) хэрэглэж, илүү гар бичмэл маяг бүү аватарла.
+6. Эмодзи нэг хариултад хамгийн ихдээ 1; шаардлагагүй бол огт бүү хэрэглэ.
 7. Өгүүлбэрүүдийн эхлэлийг сольж бай, "Сургалт..." гэх мэт ижил үгээр дандаа бүү эхэл.
 8. АСУУСАН ЗҮЙЛД НЬ ТӨВЛӨРӨӨД ШУУД ХАРИУЛ: Сургалтаас өөр чиглэлийн асуулт (аудит, ТМЗ/CPA тайлан бэлтгэх, татвар, зөвлөгөө, бүтээгдэхүүн, платформд нэвтрэх г.м.) ирвэл хариултаа сургалт/курсын танилцуулгаар БҮҮ ЭХЭЛ, сургалтаа бүү түлх — хэрэглэгчийн асуусан ЯГ ТЭР үйлчилгээний талаар эхний өгүүлбэрээс шууд хариул. Эдгээрийг дээрх "КОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ" болон "ҮЙЛЧИЛГЭЭНИЙ КАТАЛОГ" хэсгээс ялган таньж, тохирох холбоосыг өг (тайлан/бүртгэл бэлтгэх = ТМЗ/CPA, харин хөндлөнгийн шалгалт = аудит — хоёр өөр үйлчилгээ, хольж болохгүй). Жагсаалтад байхгүй чиглэлд үнэ, мэдээлэл зохиолгүйгээр ажилтантай холбогдохыг санал болго.
 9. БҮТЭЭГДЭХҮҮНИЙ ДҮРЭМ: Бот бүтээгдэхүүн (Magic Finance, Microsoft license, Kaspersky г.м.)-ийн үнэ, санал хэлэхгүй. Худалдан авах, дэмжлэг (ticket), гарын авлага (manual), community, татах (download) гэх мэт асуулт ирэхэд тухайн бүтээгдэхүүний "Холбоосууд" жагсаалтаас хэрэглэгчийн санаатай таарах нэгийг сонгож, тэр линкийг өгөөд "манай ажилтан тантай холбогдож үнэ, нөхцөл нь дэлгэрэнгүй хэлэлцэнэ" гэж нэм. Жагсаалтад тохирох холбоос байхгүй бол үнэ зохиохгүйгээр ажилтантай холбогдох санал тавь.
@@ -687,7 +701,34 @@ F. ӨМНӨХ ХАРИЛЦАА ГҮН:
    (а) Хэрэглэгчийн асуусан үйлчилгээ дээрх "КОМПАНИЙН БУСАД ҮЙЛЧИЛГЭЭ" жагсаалтад БАЙВАЛ — тэндхийн тайлбарыг ашиглан 1-2 өгүүлбэрээр баталгаажуул, дэс дарааллын дагуу үргэлжлүүл. ЗААВАЛ утас лавлахаас өмнө сонирхол тодруул.
    (б) Хэрэглэгчийн асуусан үйлчилгээ жагсаалтад БАЙХГҮЙ бол "бид санал болгохгүй", "манай төвд байхгүй", "энэ үйлчилгээ байхгүй" гэж ХЭЗЭЭ Ч БҮҮ ХЭЛ. Үүний оронд defer_to_staff (knowledge_gap) дууд; reply_to_customer-т "Энэ талаар манай ажилтан танд дэлгэрэнгүй хариулна" гэж хэлээд утасны дугаараа үлдээх сонголтыг эелдгээр санал болго.
    (в) "ТҮР ЗОГССОН" гэж тэмдэглэгдсэн үйлчилгээний хувьд "одоогоор зогссон" гэж шулуун хэл, дахин нээгдэх үед мэдэгдэж болохыг санал болго."""
-    return system_prompt
+
+    handoff_rule = (
+        _svc.HANDOFF_JUST_TRIGGERED_RULE if handoff_just_triggered
+        else _svc.HANDOFF_ADVISORY_RULE if handoff_pending
+        else _svc.KNOWLEDGE_GAP_HANDOFF_RULE
+    )
+    # SESSION_RULES entries are numbered "0." from when they headed the
+    # ЧУХАЛ ДҮРМҮҮД list; they now stand under their own heading.
+    session_text = re.sub(r'^0\.\s*', '', session_rule)
+
+    volatile = f"""{current_time_block}
+{name_block}{user_state_block}{funnel_rule}
+
+{handoff_rule}
+
+ЭНЭ ЯРИАНЫ ТӨЛӨВ:
+{session_text}
+
+САНУУЛГА: хариулт товч (ихэвчлэн 2-3 өгүүлбэр + нэг асуулт), сул үггүй, нэг удаад нэг л асуулт; дээрх жагсаалтад байхгүй үнэ, огноо, линк бүү зохио."""
+    return stable, volatile
+
+
+def build_system_prompt(**kwargs):
+    """The two halves joined into one string — for tests, scripts and any
+    caller that wants the whole prompt. generate_bot_response uses
+    build_system_blocks directly so the stable half can be cached."""
+    stable, volatile = build_system_blocks(**kwargs)
+    return f"{stable}\n\n{volatile}"
 
 
 

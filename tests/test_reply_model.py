@@ -54,8 +54,14 @@ def test_normal_mode_request_contract(app, db_session, monkeypatch):
     assert captured['model'] == services.REPLY_MODEL
     assert captured['max_tokens'] == services.REPLY_MAX_TOKENS
     assert captured['output_config'] == {'effort': services.REPLY_EFFORT}
-    # The prompt travels in `system`, not as a system-role message.
-    assert isinstance(captured['system'], str) and captured['system']
+    # The prompt travels in `system` as two text blocks — the stable half
+    # marked for prompt caching, the volatile half after it — never as a
+    # system-role message.
+    system = captured['system']
+    assert isinstance(system, list) and len(system) == 2
+    assert system[0]['type'] == 'text' and system[0]['text']
+    assert system[0]['cache_control'] == {'type': 'ephemeral'}
+    assert system[1]['type'] == 'text' and 'cache_control' not in system[1]
     assert all(m['role'] in ('user', 'assistant') for m in captured['messages'])
     assert captured['messages'][-1] == {'role': 'user', 'content': 'Сайн уу'}
     # Never sampling params, never a thinking override, never a forced tool.

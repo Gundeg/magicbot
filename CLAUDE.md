@@ -48,10 +48,20 @@ The last super_admin cannot be demoted or self-demote; the toggle handler enforc
 
 ## System prompt assembly (the bot's "brain")
 
-Built fresh per request in `services/_prompt.py:build_system_prompt`. Sources in order:
-persona → current time block → canonical course list → training_content (legacy, may be empty)
-→ training snippets (★high first) → team members → business lines (answer / refer / paused)
-→ FAQs → session-state rule → funnel rule → behavioral rules.
+Built fresh per request in `services/_prompt.py:build_system_blocks`, as TWO halves that
+`generate_bot_response` sends as two `system` text blocks:
+- **Stable (prompt-cached, `cache_control: ephemeral`):** persona → canonical course list →
+  training_content (legacy) → training snippets (★high first) → team members → business
+  lines (answer / refer / paused) → services catalog → FAQs → professional-accuracy rule →
+  sales playbook → language-quality rule → ЧУХАЛ ДҮРМҮҮД 1-10. Identical for every customer
+  and minute; an admin edit (persona, snippet, FAQ, catalog) just starts a new cache entry.
+- **Volatile (after the breakpoint):** current time block (minute-granular — NEVER move it
+  into the stable half) → name / customer-state (lead, prior summary) → funnel rule →
+  handoff-mode rule → session rule (ЭНЭ ЯРИАНЫ ТӨЛӨВ) → a one-line brevity reminder.
+`build_system_prompt` returns the two joined for tests/scripts. `REPLY_CACHE_TTL` (`5m`
+default / `1h`) picks the cache lifetime; `usage.cache_read_input_tokens` in the `reply
+usage` log line shows hits. Mongolian Cyrillic is ~1 token per character, so the stable
+half alone is ~14K tokens — caching it is the single biggest cost lever.
 
 Registration is per-course: each course's `CourseLink` (description "Сургалтанд сууя,
 бүртгүүлье") is listed under it, and the website (`business_website_url`) is the fallback
@@ -162,7 +172,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 152 tests. They must all pass before any commit.
+Current count: 153 tests. They must all pass before any commit.
 
 **Reply-quality eval (costs money, opt-in):** `python scripts/eval_replies.py --run
 [--persona file.txt]` runs 6 fixed customer scenarios through the real prompt + Claude and

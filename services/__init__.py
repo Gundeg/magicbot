@@ -145,6 +145,15 @@ if REPLY_EFFORT not in _EFFORT_LEVELS:
     )
     REPLY_EFFORT = 'low'
 
+# Prompt-cache lifetime for the stable half of the system prompt: '5m'
+# (default — cheapest when a customer's messages cluster within minutes) or
+# '1h' (write costs 2x but survives quiet hours; worth it only once traffic is
+# steady across the day). See build_system_blocks.
+REPLY_CACHE_TTL = os.environ.get('REPLY_CACHE_TTL', '').strip().lower() or '5m'
+if REPLY_CACHE_TTL not in ('5m', '1h'):
+    logger.warning("REPLY_CACHE_TTL=%r is not '5m' or '1h'; using '5m'.", REPLY_CACHE_TTL)
+    REPLY_CACHE_TTL = '5m'
+
 # Label + billing pointer surfaced in the account-failure Telegram alert so the
 # telemetry points staff at the right console.
 REPLY_PROVIDER_LABEL = 'Claude (Anthropic)'
@@ -1203,6 +1212,7 @@ def get_sound_alerts_enabled():
 from services._prompt import (  # noqa: E402
     SESSION_RULES,
     FUNNEL_RULES,
+    build_system_blocks,
     build_system_prompt,
     _format_training_snippets,
     _format_team_members,
@@ -1342,6 +1352,24 @@ def generate_bot_response(user_message, conversation_history,
     routing and the office-hours ETA. `ask_name` / `is_lead` /
     `prior_summary` describe the customer (see build_system_prompt)."""
     try:
+        stable, volatile = build_system_blocks(
+            session_state=session_state,
+            funnel_stage=funnel_stage,
+            user_first_name=user_first_name,
+            handoff_pending=handoff_pending,
+            handoff_just_triggered=handoff_just_triggered,
+            ask_name=ask_name,
+            is_lead=is_lead,
+            prior_summary=prior_summary,
+        )
+        # Prompt caching: the stable half (persona, catalog, rules — the bulk
+        # of ~15K tokens) is identical for every customer and every minute,
+        # so it is marked as a cache breakpoint; the volatile half (time,
+        # customer state, session rule) follows it. Cache hits show up as
+        # usage.cache_read_input_tokens in the `reply usage` log line.
+        cache_control = {'type': 'ephemeral'}
+        if REPLY_CACHE_TTL == '1h':
+            cache_control['ttl'] = '1h'
         create_kwargs = {
             'model': REPLY_MODEL,
             'max_tokens': REPLY_MAX_TOKENS,
@@ -1349,16 +1377,10 @@ def generate_bot_response(user_message, conversation_history,
             # off); effort is the depth control — see REPLY_EFFORT. We never
             # send sampling params (temperature etc.) — current models 400.
             'output_config': {'effort': REPLY_EFFORT},
-            'system': build_system_prompt(
-                session_state=session_state,
-                funnel_stage=funnel_stage,
-                user_first_name=user_first_name,
-                handoff_pending=handoff_pending,
-                handoff_just_triggered=handoff_just_triggered,
-                ask_name=ask_name,
-                is_lead=is_lead,
-                prior_summary=prior_summary,
-            ),
+            'system': [
+                {'type': 'text', 'text': stable, 'cache_control': cache_control},
+                {'type': 'text', 'text': volatile},
+            ],
             'messages': _claude_messages(conversation_history, user_message),
         }
         # Offer the staff-handoff tool only in NORMAL mode — i.e. exactly when
