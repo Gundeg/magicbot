@@ -17,6 +17,7 @@ from app import app, csrf
 from extensions import db
 from models import FacebookUser, Message
 from services import (PHONE_RE, HANDOFF_CATEGORY_LABELS,
+                      REGISTRATION_ALREADY_DONE_REPLY, REGISTRATION_DEDUP_HOURS,
                       REGISTRATION_FALLBACK_REPLY,
                       check_rate_limit, classify_session, classify_user_topics,
                       describe_registration,
@@ -60,7 +61,21 @@ def complete_registration(fb_user, data, bot_reply):
     """Submit a bot-collected registration to the configured form, record the
     customer as a lead with the fields in their notes, and ping Telegram.
     Returns the reply to send: the model's confirmation when the form accepted
-    the entry, otherwise a reply that promises staff follow-up instead."""
+    the entry, otherwise a reply that promises staff follow-up instead.
+
+    Idempotent per customer: the model only sees text history, not its own
+    earlier tool call, so a "баярлалаа" after the confirmation can make it
+    call submit_registration again (seen live 2026-11-03: one customer, two
+    form entries). A customer registered within REGISTRATION_DEDUP_HOURS is
+    never submitted twice — they get a short "already registered" reply."""
+    now = datetime.utcnow()
+    if fb_user.registered_at and now - fb_user.registered_at < timedelta(hours=REGISTRATION_DEDUP_HOURS):
+        logger.info(
+            "registration: duplicate submit suppressed for psid=%s (registered %s, logid=%s)",
+            fb_user.facebook_id, fb_user.registered_at, fb_user.registration_logid,
+        )
+        return REGISTRATION_ALREADY_DONE_REPLY
+
     ok, info = submit_registration_form(data)
     summary = describe_registration(data, ok, info)
     try:
@@ -73,7 +88,10 @@ def complete_registration(fb_user, data, bot_reply):
         fb_user.is_lead = True
         if fb_user.lead_status in (None, '', 'new', 'contacted'):
             fb_user.lead_status = 'new'
-        stamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M')
+        if ok:
+            fb_user.registered_at = now
+            fb_user.registration_logid = str(info)[:50]
+        stamp = now.strftime('%Y-%m-%d %H:%M')
         fb_user.notes = f"[Бот бүртгэл {stamp}]\n{summary}" + (f"\n\n{fb_user.notes}" if fb_user.notes else '')
         db.session.commit()
     except Exception as e:
@@ -161,6 +179,7 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
         ask_name=(not first_name) and bool(fb_user.is_lead),
         is_lead=bool(fb_user.is_lead),
         prior_summary=fb_user.bot_summary or '',
+        registered=bool(fb_user.registered_at),
     )
 
     # Bot-initiated handoff (defer_to_staff tool): strip the hidden marker

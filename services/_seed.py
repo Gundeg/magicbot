@@ -126,6 +126,9 @@ def ensure_schema():
     add_columns('facebook_user', {
         'bot_summary': 'bot_summary TEXT',
         'bot_summary_at': 'bot_summary_at DATETIME',
+        # Bot-driven registration: accepted-at + form log id (idempotency guard).
+        'registered_at': 'registered_at DATETIME',
+        'registration_logid': 'registration_logid VARCHAR(50)',
     })
 
     # Idempotency key for inbound Facebook messages (dedupe retried deliveries).

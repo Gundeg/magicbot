@@ -207,6 +207,40 @@ def test_webhook_completes_registration(app, db_session, monkeypatch, configured
         db.session.commit()
 
 
+def test_webhook_never_submits_the_same_customer_twice(app, db_session, monkeypatch, configured):
+    """Seen live: the customer's 'баярлалаа' after the confirmation made the
+    model call submit_registration again -> two form entries. The webhook
+    must refuse the second submission and reply 'already registered'."""
+    import routes.webhook as wh
+    from extensions import db
+    from models import FacebookUser
+
+    posts, pings = [], []
+    monkeypatch.setattr(wh, 'send_telegram_notification', lambda text: pings.append(text) or 1)
+
+    def _post(*a, **k):
+        posts.append(1)
+        return _Resp(payload={'status': 'ok', 'logid': 700 + len(posts), 'member_id': 1})
+    monkeypatch.setattr(reg.requests, 'post', _post)
+    user = FacebookUser(facebook_id='psid-reg-twice', name='Сараа')
+    db.session.add(user)
+    db.session.commit()
+    try:
+        first = wh.complete_registration(user, CUSTOMER, 'Бүртгэл үүслээ.')
+        second = wh.complete_registration(user, CUSTOMER, 'Бүртгэл үүслээ.')
+        assert first == 'Бүртгэл үүслээ.'
+        assert second == services.REGISTRATION_ALREADY_DONE_REPLY
+        assert len(posts) == 1 and len(pings) == 1          # one form entry, one ping
+        assert user.registration_logid == '701' and user.registered_at is not None
+        # and the prompt now tells the model not to call the tool again
+        stable, volatile = _prompt.build_system_blocks(registered=True)
+        assert 'АЛЬ ХЭДИЙН ҮҮССЭН' in volatile and 'АЛЬ ХЭДИЙН ҮҮССЭН' not in stable
+        assert 'АЛЬ ХЭДИЙН ҮҮССЭН' not in _prompt.build_system_prompt()
+    finally:
+        db.session.delete(user)
+        db.session.commit()
+
+
 def test_webhook_registration_failure_keeps_lead_and_is_truthful(app, db_session, monkeypatch, configured):
     import routes.webhook as wh
     from extensions import db

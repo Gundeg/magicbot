@@ -447,7 +447,7 @@ def _format_current_time_block():
 def build_system_blocks(session_state='new', funnel_stage='curious',
                         user_first_name='', handoff_pending=False,
                         handoff_just_triggered=False, ask_name=False,
-                        is_lead=False, prior_summary=''):
+                        is_lead=False, prior_summary='', registered=False):
     """Build the system prompt as two halves: (stable, volatile).
 
     STABLE is identical for every customer and every minute — persona,
@@ -509,6 +509,13 @@ def build_system_blocks(session_state='new', funnel_stage='curious',
         name_block = ''
 
     state_lines = []
+    if registered:
+        state_lines.append(
+            "ХЭРЭГЛЭГЧИЙН ТӨЛӨВ: сургалтын бүртгэл АЛЬ ХЭДИЙН ҮҮССЭН. "
+            "submit_registration-ийг ДАХИН БҮҮ ДУУД, мэдээллийг дахин бүү "
+            "цуглуул. Бүртгэлийн тухай асуувал 'бүртгэл үүссэн, гэрээ болон "
+            "хичээлийн эрх имэйлээр очно, ажилтан холбогдоно' гэж хэл."
+        )
     if is_lead:
         state_lines.append(
             "ХЭРЭГЛЭГЧИЙН ТӨЛӨВ: утасны дугаараа аль хэдийн үлдээсэн (lead). "

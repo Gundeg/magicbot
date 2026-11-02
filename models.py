@@ -55,6 +55,12 @@ class FacebookUser(db.Model):
     # reply prompt. See services.refresh_user_summary.
     bot_summary = db.Column(db.Text)
     bot_summary_at = db.Column(db.DateTime)
+    # Bot-driven registration (services/_registration): when the form accepted
+    # the entry and its log id. Also the idempotency guard — the model has no
+    # memory of having called submit_registration, so the webhook refuses a
+    # second submission for the same customer (see complete_registration).
+    registered_at = db.Column(db.DateTime)
+    registration_logid = db.Column(db.String(50))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 # Bot-driven registration into the centre's GreenSoft form (see _registration).
 from ._registration import (  # noqa: E402
+    REGISTRATION_ALREADY_DONE_REPLY, REGISTRATION_DEDUP_HOURS,
     REGISTRATION_FALLBACK_REPLY, REGISTRATION_RULE, SUBMIT_REGISTRATION_TOOL,
     describe as describe_registration, extract_registration,
     format_registration_marker, is_configured as registration_configured,
@@ -1349,7 +1350,7 @@ def generate_bot_response(user_message, conversation_history,
                           session_state='new', funnel_stage='curious',
                           user_first_name='', handoff_pending=False,
                           handoff_just_triggered=False, ask_name=False,
-                          is_lead=False, prior_summary=''):
+                          is_lead=False, prior_summary='', registered=False):
     """Generate the customer reply on REPLY_MODEL (Claude — see the client
     block at the top of this module). `handoff_pending=True` enables
     advisory mode in the system prompt — bot keeps helping but doesn't
@@ -1369,6 +1370,7 @@ def generate_bot_response(user_message, conversation_history,
             ask_name=ask_name,
             is_lead=is_lead,
             prior_summary=prior_summary,
+            registered=registered,
         )
         # Prompt caching: the stable half (persona, catalog, rules — the bulk
         # of ~15K tokens) is identical for every customer and every minute,
