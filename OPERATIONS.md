@@ -18,18 +18,21 @@ python scripts/diagnose.py
 
 It is read-only (sends no message, writes nothing) and checks, in order:
 
-1. **Env vars** present, and which provider customer replies actually run on.
+1. **Env vars** present, and which Claude models the deployment runs on (plus
+   a note for stale OpenAI / Gemini vars that can be deleted).
 2. **Facebook token** — reachable, *and* that it is a **Page** token, by asking
    `me` and asserting the id equals `FACEBOOK_PAGE_ID`. A User token reads the
    Page by id perfectly well, so only the `me` comparison catches the trap in §4.
 3. **Page webhook subscription** — `messages` (fatal if missing: Facebook
    delivers nothing) and `message_echoes` (human-takeover mute only).
 4. **The reply model, live** — a real one-line completion with the deployed
-   `REPLY_MODEL` / `REPLY_MAX_TOKENS` / `GEMINI_REASONING_EFFORT`. Separates
-   *retired preview model* (404) from *quota* (429), *bad key* (401) and the
-   empty-reply thinking trap, and prints the exact billing page to open.
-5. **Background provider** — `OPENAI_API_KEY` is required even on a Gemini
-   deployment (classifier, clustering, page comments).
+   `REPLY_MODEL` / `REPLY_EFFORT` / `REPLY_MAX_TOKENS`. Separates *retired
+   model* (404) from *credit exhausted* (400 "credit balance is too low"),
+   *bad key* (401), *rate limit* (429) and the empty-reply thinking trap, and
+   prints the exact console page to open.
+5. **Background model** — `BACKGROUND_MODEL` (default `claude-haiku-5-5`) is
+   reachable on the same `ANTHROPIC_API_KEY` (classifier, clustering, page
+   comments).
 6. **Traffic** — how long ago the last INBOUND and last OUTBOUND message was.
    This is the fastest split there is: an inbound row from minutes ago with no
    outbound after it means delivery is fine and the break is in the reply/send

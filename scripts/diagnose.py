@@ -65,24 +65,21 @@ def check_env():
     report(OK if page_id else WARN, 'FACEBOOK_PAGE_ID', page_id or '<unset>',
            '' if page_id else 'Unset means the Page-vs-User token check below cannot run.')
     for name, required in (('FACEBOOK_APP_SECRET', True), ('VERIFY_TOKEN', True),
-                           ('OPENAI_API_KEY', True), ('SECRET_KEY', True)):
+                           ('ANTHROPIC_API_KEY', True), ('SECRET_KEY', True)):
         val = os.environ.get(name, '')
         report(OK if val else (FAIL if required else WARN), name, mask(val))
-    gem = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY') or ''
-    provider = 'Gemini' if gem else 'OpenAI'
-    model = os.environ.get('REPLY_MODEL', '').strip() or (
-        'gemini-2.5-flash' if gem else 'gpt-5.3-chat-latest')
-    report(INFO, f'Customer replies run on: {provider}',
-           f"REPLY_MODEL={model}\n"
-           f"GEMINI_REASONING_EFFORT={os.environ.get('GEMINI_REASONING_EFFORT', 'none (default)')}\n"
-           f"REPLY_MAX_TOKENS={os.environ.get('REPLY_MAX_TOKENS', '500 (default)')}")
-    if gem and 'flash' not in model.lower():
-        effort = os.environ.get('GEMINI_REASONING_EFFORT', 'none').strip().lower()
-        if effort in ('', 'none'):
-            report(WARN, 'Gemini Pro/3.x with thinking unbounded',
-                   "Pro/3.x reject 'none' and cannot disable thinking.",
-                   "Set GEMINI_REASONING_EFFORT=low and REPLY_MAX_TOKENS=2048.")
-    return fb_token, page_id, gem, model
+    reply_model = os.environ.get('REPLY_MODEL', '').strip() or 'claude-opus-5-5'
+    bg_model = os.environ.get('BACKGROUND_MODEL', '').strip() or 'claude-haiku-5-5'
+    report(INFO, 'Every model call runs on Claude (Anthropic)',
+           f"REPLY_MODEL={reply_model}\n"
+           f"REPLY_EFFORT={os.environ.get('REPLY_EFFORT', 'low (default)')}\n"
+           f"REPLY_MAX_TOKENS={os.environ.get('REPLY_MAX_TOKENS', '2048 (default)')}\n"
+           f"BACKGROUND_MODEL={bg_model}")
+    for stale in ('OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GEMINI_REASONING_EFFORT'):
+        if os.environ.get(stale):
+            report(INFO, f'{stale} is set but unused since the Claude migration (2026-11-02)',
+                   '', 'Safe to delete from the Render environment.')
+    return fb_token, page_id, reply_model, bg_model
 
 
 # ------------------------------------------- 2. FB token: valid AND a Page token
@@ -149,77 +146,69 @@ def check_subscriptions(fb_token):
            'Human-takeover auto-mute is inert without it (not an outage cause).')
 
 
-# --------------------------------------------- 4. reply provider, live call
-def check_reply_provider(gem_key, model):
+# --------------------------------------------- 4. reply model, live call
+def check_reply_provider(model):
     section('4. Customer-reply model (live call)')
-    from openai import OpenAI
-    if gem_key:
-        base = (os.environ.get('GEMINI_BASE_URL')
-                or 'https://generativelanguage.googleapis.com/v1beta/openai/').strip()
-        client, token_param, label = OpenAI(api_key=gem_key, base_url=base), 'max_tokens', 'Gemini'
-    else:
-        key = os.environ.get('OPENAI_API_KEY', '')
-        if not key:
-            report(FAIL, 'No reply provider key at all', 'OPENAI_API_KEY and GEMINI_API_KEY both unset.')
-            return
-        client, token_param, label = OpenAI(api_key=key), 'max_completion_tokens', 'OpenAI'
+    key = os.environ.get('ANTHROPIC_API_KEY', '')
+    if not key:
+        report(FAIL, 'ANTHROPIC_API_KEY unset — every reply is the canned apology',
+               '', 'Set it on the magicbot service (console.anthropic.com → API Keys).')
+        return
+    import anthropic
     try:
-        max_tokens = int(os.environ.get('REPLY_MAX_TOKENS', '500') or '500')
+        max_tokens = int(os.environ.get('REPLY_MAX_TOKENS', '2048') or '2048')
     except ValueError:
-        max_tokens = 500
-    kwargs = {'model': model, 'messages': [{'role': 'user', 'content': 'Сайн байна уу?'}],
-              token_param: max_tokens}
-    if gem_key:
-        effort = os.environ.get('GEMINI_REASONING_EFFORT', 'none').strip().lower()
-        if effort in ('low', 'medium', 'high') or (effort == 'none' and 'flash' in model.lower()):
-            kwargs['reasoning_effort'] = effort
+        max_tokens = 2048
+    effort = os.environ.get('REPLY_EFFORT', '').strip().lower() or 'low'
+    client = anthropic.Anthropic(api_key=key, max_retries=0, timeout=60.0)
     try:
-        resp = client.chat.completions.create(**kwargs)
+        resp = client.messages.create(
+            model=model, max_tokens=max_tokens, output_config={'effort': effort},
+            messages=[{'role': 'user', 'content': 'Сайн байна уу?'}],
+        )
     except Exception as e:
         text = str(e)
-        fix = ('Google AI Studio (aistudio.google.com) → API keys / Billing'
-               if gem_key else 'platform.openai.com → Billing')
-        if 'not found' in text.lower() or '404' in text:
-            fix = (f"Model {model!r} is gone or not enabled on this key — a *preview* model "
-                   f"can be retired without warning. Set REPLY_MODEL to a current model "
-                   f"(e.g. gemini-2.5-flash) and redeploy.")
-        elif '429' in text or 'quota' in text.lower() or 'exhaust' in text.lower():
-            fix = f"Quota/rate limit on the {label} key — top up or raise the limit at {fix}"
-        elif '401' in text or 'api key' in text.lower() or 'unauthor' in text.lower():
-            fix = f"Key invalid/revoked — reissue it at {fix}"
-        report(FAIL, f'{label} call failed — customers get the canned apology',
-               text[:500], fix)
+        low = text.lower()
+        fix = 'console.anthropic.com → Plans & Billing / API Keys'
+        if isinstance(e, anthropic.NotFoundError) or 'not_found' in low:
+            fix = (f"Model {model!r} is gone or not enabled on this key. Set REPLY_MODEL to a "
+                   f"current model (claude-opus-5-5 / claude-sonnet-5-5) and redeploy.")
+        elif 'credit balance' in low:
+            fix = 'Prepaid credit exhausted — top up at console.anthropic.com → Plans & Billing.'
+        elif isinstance(e, anthropic.AuthenticationError) or '401' in text:
+            fix = 'Key invalid/revoked — reissue it at console.anthropic.com → API Keys.'
+        elif isinstance(e, anthropic.RateLimitError) or '429' in text:
+            fix = 'Rate limited (transient, self-heals) — retry in a minute.'
+        report(FAIL, 'Claude call failed — customers get the canned apology', text[:500], fix)
         return
-    content = (resp.choices[0].message.content or '') if resp.choices else ''
-    finish = resp.choices[0].finish_reason if resp.choices else '?'
-    if not content.strip():
-        report(FAIL, f'{label} returned an EMPTY reply',
-               f"finish_reason={finish} — the classic thinking-ate-the-budget failure.",
-               'Set GEMINI_REASONING_EFFORT=low and REPLY_MAX_TOKENS=2048 (Pro/3.x), '
-               'or switch REPLY_MODEL to gemini-2.5-flash with effort none.')
+    content = ''.join(b.text for b in resp.content if b.type == 'text').strip()
+    if not content:
+        report(FAIL, 'Claude returned an EMPTY reply',
+               f"stop_reason={resp.stop_reason} — thinking ate the whole max_tokens budget.",
+               'Raise REPLY_MAX_TOKENS (default 2048) or lower REPLY_EFFORT.')
         return
-    report(OK, f'{label} {model} replied', f"{content.strip()[:120]}  (finish_reason={finish})")
+    report(OK, f'Claude {model} replied',
+           f"{content[:120]}  (stop_reason={resp.stop_reason}, "
+           f"in={resp.usage.input_tokens} out={resp.usage.output_tokens})")
 
 
-# ------------------------------- 5. background jobs always run on OpenAI
-def check_background_provider(gem_key):
-    if not gem_key:
-        return  # already covered by check 4
-    section('5. Background jobs (always OpenAI gpt-4o-mini)')
-    key = os.environ.get('OPENAI_API_KEY', '')
+# ------------------------- 5. background jobs run on BACKGROUND_MODEL (Haiku)
+def check_background_provider(bg_model):
+    section('5. Background jobs (classifier / clustering / page comments)')
+    key = os.environ.get('ANTHROPIC_API_KEY', '')
     if not key:
-        report(FAIL, 'OPENAI_API_KEY unset on a Gemini deployment',
-               'Topic classifier, FAQ clustering and page comments all break.',
-               'Set OPENAI_API_KEY as well — it is required on every deployment.')
-        return
-    from openai import OpenAI
+        return  # already fatal in check 4
+    import anthropic
     try:
-        OpenAI(api_key=key).chat.completions.create(
-            model='gpt-4o-mini', messages=[{'role': 'user', 'content': 'ping'}], max_tokens=5)
-        report(OK, 'OpenAI gpt-4o-mini reachable')
+        anthropic.Anthropic(api_key=key, max_retries=0, timeout=60.0).messages.create(
+            model=bg_model, max_tokens=16, output_config={'effort': 'low'},
+            messages=[{'role': 'user', 'content': 'ping'}],
+        )
+        report(OK, f'Claude {bg_model} reachable')
     except Exception as e:
-        report(WARN, 'OpenAI background provider failing', str(e)[:300],
-               'Customer replies still work (Gemini); classification/clustering do not.')
+        report(WARN, f'Background model {bg_model} failing', str(e)[:300],
+               'Customer replies may still work; classification / clustering / comments do '
+               'not. Check the BACKGROUND_MODEL spelling and the key.')
 
 
 # -------------------------- 6. is Facebook actually delivering to this app?
@@ -271,12 +260,12 @@ def check_traffic():
 
 def main():
     print('Magic Bot — production diagnosis\n' + '=' * 64)
-    fb_token, page_id, gem_key, model = check_env()
+    fb_token, page_id, reply_model, bg_model = check_env()
     token_ok = check_fb_token(fb_token, page_id)
     if token_ok:
         check_subscriptions(fb_token)
-    check_reply_provider(gem_key, model)
-    check_background_provider(gem_key)
+    check_reply_provider(reply_model)
+    check_background_provider(bg_model)
     check_traffic()
 
     section('Verdict')
