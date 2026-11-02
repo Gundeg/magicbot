@@ -51,9 +51,14 @@ The last super_admin cannot be demoted or self-demote; the toggle handler enforc
 Built fresh per request in `services/_prompt.py:build_system_blocks`, as TWO halves that
 `generate_bot_response` sends as two `system` text blocks:
 - **Stable (prompt-cached, `cache_control: ephemeral`):** persona → canonical course list →
-  training_content (legacy) → training snippets (★high first) → team members → business
-  lines (answer / refer / paused) → services catalog → FAQs → professional-accuracy rule →
-  sales playbook → language-quality rule → ЧУХАЛ ДҮРМҮҮД 1-10. Identical for every customer
+  company identity + contact (КОМПАНИЙН ТАНИЛЦУУЛГА: `center_name`, `center_description`,
+  head office address/phone, website, email, office hours) → ЕРӨНХИЙ МЭДЭЭЛЭЛ
+  (`training_content`: locations, branches, business lines — the group spans audit, tax
+  consulting, cloud and the training centre in UB, Darkhan and Erdenet, so the bot must know
+  all of it) → training snippets (★high first) → team members → business lines (answer /
+  refer / paused, each with its own address/phone/email) → services catalog → FAQs →
+  professional-accuracy rule → sales playbook → language-quality rule → registration rule
+  (when configured) → ЧУХАЛ ДҮРМҮҮД 1-10. Identical for every customer
   and minute; an admin edit (persona, snippet, FAQ, catalog) just starts a new cache entry.
 - **Volatile (after the breakpoint):** current time block (minute-granular — NEVER move it
   into the stable half) → name / customer-state (lead, prior summary) → funnel rule →
@@ -124,9 +129,10 @@ when a course has none. The clarify-course rule lives in the ★high `Сурга
   - **Removed 2026-11-03 — do NOT reintroduce:** the scan of the bot's own reply for
     phrases like "манай ажилтан удахгүй холбогдоно" (`bot_response_implies_handoff`) and
     the "customer mentioned a refer business line" trigger. Both paged staff on every
-    lead and every registration offer. Keyword handoff (`should_handoff`) survives only
-    for the admin-managed explicit list ("хүнтэй ярих"), plus frustration words at
-    balanced/aggressive sensitivity.
+    lead and every registration offer. The keyword pre-scan (`should_handoff`,
+    `HandoffKeyword`, `handoff_sensitivity`) followed on 2026-11-04 — it paged staff on
+    ordinary sentences ("ажилтан хэдэн цагт ирдэг вэ") and pre-empted the model.
+    `handoff_just_triggered` plumbing remains but nothing sets it any more.
 - **Customer state + cross-session memory in the prompt.** `process_inbound_reply` passes
   `is_lead`, `ask_name` and `prior_summary` to `generate_bot_response` →
   `build_system_prompt`. The name question ("Та өөрийгөө хэн гэдэг…") is asked ONLY once
@@ -163,8 +169,10 @@ These look real but were retired. Don't read or write them in new code; don't ad
 |---|---|
 | `GeneralSetting.center_phone` | Removed in v2 cleanup. Use `main_office_phone`. |
 | `GeneralSetting.center_address` | Removed in v2 cleanup. Use `main_office_address`. |
-| `GeneralSetting.mute_duration_hours` | UI removed; `trigger_handoff` no longer reads it. Bot mutes on `take_over_chat` OR an untagged Messenger echo (human-agent reply — see "Human-takeover auto-mute"). |
-| `GeneralSetting.training_content` | UI removed; prompt builder still reads for backward compat. Won't be set going forward. |
+| `GeneralSetting.mute_duration_hours` | UI and getter removed (2026-11-04). Bot mutes on `take_over_chat` OR an untagged Messenger echo (human-agent reply — see "Human-takeover auto-mute"). |
+| `GeneralSetting.training_content` | **Live again (2026-11-04)** as Бизнесийн удирдлага → Ерөнхий мэдээлэл (locations, branches, history, business lines). Read by `get_training_content` — the DB row wins, an empty row omits the prompt section (no placeholder); `TRAINING_CONTENT` env is the fallback for a never-saved deployment. |
+| `GeneralSetting.training_comment` / `celebration_comment` / `default_comment` / `handoff_message` / `bot_welcome` | Dropped from the Bot Settings form 2026-11-04 — were saved but never read (auto-comments, handoff replies and greetings are model-written). Old rows inert. |
+| `GeneralSetting.handoff_sensitivity` + `HandoffKeyword` table | Keyword handoff retired 2026-11-04 (`should_handoff`, the Handover tab, `/admin/handoff-keywords`, the seeder — all gone). Handoff is the model's `defer_to_staff` decision only. Table kept, unread. |
 | `GeneralSetting.google_form_url` | Removed 2026-07-07 (getter, env var, admin input, prompt block all deleted). Registration is per-course (`CourseLink`) with `business_website_url` as fallback; the clarify-course rule lives in the `Сургалтад бүртгүүлэх асуултын чиглэл` snippet. Any stale DB row is inert. |
 
 When removing a UI for a setting: drop the form input, but leave the underlying setter/getter as a one-release no-op in case rollback is needed.
@@ -191,7 +199,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 168 tests. They must all pass before any commit.
+Current count: 167 tests. They must all pass before any commit.
 
 **Reply-quality eval (costs money, opt-in):** `python scripts/eval_replies.py --run
 [--persona file.txt]` runs 6 fixed customer scenarios through the real prompt + Claude and
@@ -220,7 +228,7 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 | Ажлын даалгавар | `/admin/work-tasks` (default tab: `hot_prospects`) |
 | Мессежийн түүх | `/admin/logs` |
 | Бизнесийн удирдлага | `/business-management/general` (admin+) |
-| Ботын удирдлага | `/bot-management/settings` (admin+) |
+| Ботын удирдлага | `/bot-management/training` (admin+; tabs: AI сургалт · FAQ · Ботын тохиргоо) |
 | Гарын авлага | `/admin/train-ai-guide` (staff+) |
 | Систем | `/admin/admins` (admin+) |
 

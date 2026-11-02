@@ -14,7 +14,6 @@ import re
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
-from pathlib import Path
 from threading import Lock
 
 import anthropic
@@ -30,7 +29,7 @@ from sqlalchemy.orm import joinedload
 from extensions import db
 from models import (
     AdminIssue, AuditEntry, BusinessLine, ChatQuestionCluster, Course,
-    FacebookUser, FAQ, GeneralSetting, HandoffKeyword, Message, PagePost,
+    FacebookUser, FAQ, GeneralSetting, Message, PagePost,
     Product, ProductLink, TeamMember, TrainingSnippet, User,
 )
 
@@ -272,18 +271,12 @@ HUMAN_TAKEOVER_MUTE_MINUTES = int(
 )
 
 
-# Training content fallback chain: env → file → tiny default. The DB row in
-# GeneralSetting('training_content') takes precedence at runtime; see
-# get_training_content().
-TRAINING_PATH = Path(__file__).parent / 'pasted_content.txt'
-_env_training = os.environ.get('TRAINING_CONTENT', '').strip()
-if _env_training:
-    TRAINING_CONTENT = _env_training
-else:
-    try:
-        TRAINING_CONTENT = TRAINING_PATH.read_text(encoding='utf-8')
-    except FileNotFoundError:
-        TRAINING_CONTENT = "Манай сургалтын төв нь 2007 оноос хойш үйл ажиллагаа явуулж байгаа."
+# Company general-information fallback for deployments whose admin has not
+# saved Бизнесийн удирдлага → Ерөнхий мэдээлэл yet (the DB row wins — see
+# get_training_content()). No built-in placeholder sentence: an unset value
+# simply leaves the section out of the prompt. (The old file fallback read
+# services/pasted_content.txt, which never existed — dropped 2026-11-04.)
+TRAINING_CONTENT = os.environ.get('TRAINING_CONTENT', '').strip()
 
 _DEFAULT_PERSONA = (
     "Та Мэжик Санхүүгийн Группын Facebook чат туслах. Сэтгэл судлалын "
@@ -1090,8 +1083,15 @@ def get_setting(key, default=''):
 
 
 def get_training_content():
-    """Bot's training corpus. Priority: DB row -> env var -> file -> tiny default."""
-    return get_setting('training_content', TRAINING_CONTENT)
+    """Free-text company information (Бизнесийн удирдлага → Ерөнхий мэдээлэл:
+    locations, branches, history, business lines). The admin's DB row wins —
+    an empty row means "nothing", the prompt section is then omitted; the
+    TRAINING_CONTENT env var is only the fallback for a deployment whose
+    admin never saved the field."""
+    row = GeneralSetting.query.filter_by(key='training_content').first()
+    if row is not None:
+        return (row.value or '').strip()
+    return TRAINING_CONTENT.strip()
 
 
 def get_bot_persona():
@@ -1122,17 +1122,6 @@ ALLOWED_COURSE_TYPES = ('100% Online', 'Hybrid', 'Online with Teacher', 'Classro
 SELF_PACED_COURSE_TYPE = '100% Online'
 
 
-def get_handoff_sensitivity():
-    """conservative | balanced | aggressive — read from settings, default conservative.
-
-    NOTE: prior to the refactor this function's body had been accidentally
-    pasted inside `trigger_handoff`, causing every handoff to crash with
-    `NameError: get_handoff_sensitivity`. Restored to a real, callable function.
-    """
-    value = (get_setting('handoff_sensitivity', 'conservative') or '').strip().lower()
-    return value if value in ('conservative', 'balanced', 'aggressive') else 'conservative'
-
-
 CLASSIFICATION_LOOKBACK_DEFAULT_DAYS = 30
 CLASSIFICATION_LOOKBACK_MAX_DAYS = 30
 
@@ -1152,21 +1141,6 @@ def get_classification_lookback_days():
     except ValueError:
         return CLASSIFICATION_LOOKBACK_DEFAULT_DAYS
     return max(1, min(days, CLASSIFICATION_LOOKBACK_MAX_DAYS))
-
-
-def get_mute_duration_hours():
-    """How long the bot stays silent after a handoff is triggered.
-
-    Default is 0 (no auto-mute): bot enters advisory mode after handoff
-    and continues helping the customer. Staff manually takes over via
-    the admin "Take Over" button when ready. Set this to >0 only if you
-    want the bot to also fall silent automatically on every handoff."""
-    raw = (get_setting('mute_duration_hours', '0') or '0').strip()
-    try:
-        hours = int(raw)
-    except ValueError:
-        hours = 0
-    return max(0, min(hours, 168))  # clamp 0..7 days
 
 
 def is_in_handoff(fb_user):
@@ -1718,51 +1692,6 @@ def _is_off_hours():
     return end <= ub_hour < start
 
 
-def should_handoff(message_text, fb_user):
-    """Decide, BEFORE the model replies, whether this message is an explicit
-    request for a human (admin-managed keyword list) — or, at balanced /
-    aggressive sensitivity, frustration. Everything else is the model's call
-    via the defer_to_staff tool: it knows what it can answer, keyword
-    matching doesn't. (Mentioning a 'refer' business line used to trigger a
-    handoff here too; the prompt now answers those with the service's link.)"""
-    if not message_text:
-        return False, ''
-    text = message_text.lower()
-    sensitivity = get_handoff_sensitivity()
-
-    explicit_kws = [
-        k.keyword.lower() for k in
-        HandoffKeyword.query.filter_by(keyword_type='explicit', is_active=True).all()
-    ]
-    frustration_kws = [
-        k.keyword.lower() for k in
-        HandoffKeyword.query.filter_by(keyword_type='frustration', is_active=True).all()
-    ]
-
-    for kw in explicit_kws:
-        if kw in text:
-            return True, f"explicit:{kw}"
-
-    if sensitivity in ('balanced', 'aggressive'):
-        for kw in frustration_kws:
-            if kw in text:
-                return True, f"frustration:{kw}"
-
-    if sensitivity == 'aggressive':
-        cutoff = datetime.utcnow() - timedelta(hours=1)
-        recent = (Message.query
-                  .filter_by(facebook_user_id=fb_user.id, sender='user')
-                  .filter(Message.created_at >= cutoff)
-                  .order_by(Message.created_at.desc())
-                  .limit(5)
-                  .all())
-        same = [m for m in recent if (m.content or '').strip().lower() == text.strip()]
-        if len(same) >= 2:
-            return True, 'repeated_question'
-
-    return False, ''
-
-
 def send_telegram_notification(text):
     """Send a Telegram message to every configured chat ID. Silent no-op if
     TELEGRAM_BOT_TOKEN is not set or no chat IDs are configured."""
@@ -2059,7 +1988,6 @@ from services._seed import (  # noqa: E402
     seed_products,
     seed_discovery_phrasing_snippets,
     seed_default_magic_links,
-    seed_handoff_keywords,
     seed_courses_and_faqs,
 )
 

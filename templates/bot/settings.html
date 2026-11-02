@@ -11,31 +11,27 @@
 <div class="alert alert-light border d-flex gap-2 align-items-start py-2 mb-3 fs-85">
     <i class="bi bi-sliders mt-1 flex-shrink-0 text-brand"></i>
     <div>
-        Ботын зан төлвийг тохируулах хэсэг: хүн рүү дамжуулах эмзэг байдал, ажлын цаг,
-        Telegram мэдэгдэл, Facebook Page сэтгэгдлийн загвар гэх мэт.
+        Ботын ажиллах орчны тохиргоо: ажлын цаг, Telegram мэдэгдэл, халуун харилцагчийн шат.
+        Ботын <strong>дүр, мэдлэг, хариултын өнгө аяс</strong>-ыг "AI сургалт" хэсгээс тохируулна.
     </div>
 </div>
 
 <form id="botSettingsForm" autocomplete="off">
-    {# ── Handoff ───────────────────────────────────────────────── #}
+    {# ── Handoff: no knobs — explain how it works ─────────────── #}
     <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-people"></i> Хүн рүү дамжуулах</div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label class="form-label" for="handoff_sensitivity">Илрүүлэх мэдрэмж</label>
-                <select class="form-select" id="handoff_sensitivity" name="handoff_sensitivity">
-                    <option value="conservative" {% if settings.get('handoff_sensitivity', 'conservative') == 'conservative' %}selected{% endif %}>
-                        Болгоомжтой — зөвхөн "ажилтантай ярим" гэх мэт
-                    </option>
-                    <option value="balanced" {% if settings.get('handoff_sensitivity') == 'balanced' %}selected{% endif %}>
-                        Дунд зэрэг — гомдол, шүүмжлэлийг мөн оруулна
-                    </option>
-                    <option value="aggressive" {% if settings.get('handoff_sensitivity') == 'aggressive' %}selected{% endif %}>
-                        Идэвхтэй — давтан асуух, ойлгомжгүй гэх мэт бүгдийг
-                    </option>
-                </select>
-                <div class="form-text">Амралт эсвэл ажилтан цөөн үед "Идэвхтэй" болгож болно.</div>
-            </div>
+        <div class="card-header"><i class="bi bi-people"></i> Ажилтанд шилжүүлэх (handoff)</div>
+        <div class="card-body fs-85">
+            <p class="mb-2">
+                Бот зөвхөн гурван тохиолдолд ажилтанд шилжүүлнэ:
+                <strong>мэдлэгт нь байхгүй зүйл</strong> (нэвтрэх эрх, нууц үг, тусгай журам),
+                <strong>ажилтантай ярих хүсэлт</strong>, <strong>гомдол</strong>.
+                Үнэ, хуваарь, бүртгэл, утас үлдээх зэргийг өөрөө шийднэ.
+            </p>
+            <p class="mb-0 text-muted">
+                Шилжүүлэг бүр <a href="{{ url_for('work_tasks') }}">Ажлын даалгавар</a> дээр шалтгаантайгаа
+                ("бот: мэдлэг дутуу — …") харагдаж, Telegram-д мэдэгдэнэ. Нэг асуулт байнга шилжүүлэгдэж байвал
+                хариултыг нь "AI сургалт" → Snippet болгон нэмээрэй — дараагийн удаа бот өөрөө хариулна.
+            </p>
         </div>
     </div>
 
@@ -54,13 +50,13 @@
                         <i class="bi bi-send"></i> Туршиж үзэх
                     </button>
                 </div>
-                <div class="form-text">Таслалаар тусгаарлана. Туршихаас өмнө хадгална уу.</div>
+                <div class="form-text">Таслалаар тусгаарлана. Туршихаас өмнө хадгална уу. Шилжүүлэг, шинэ бүртгэл, API-ийн саатал энд мэдэгдэнэ.</div>
             </div>
             <div class="form-check">
                 <input type="checkbox" class="form-check-input" id="sound_alerts_enabled" name="sound_alerts_enabled"
                        {% if (settings.get('sound_alerts_enabled', 'on') or '').lower() in ('on', 'true', '1', 'yes') %}checked{% endif %}>
                 <label class="form-check-label" for="sound_alerts_enabled">
-                    Админ хуудсан дээр дуун дохио өгөх (шинэ handoff гарвал)
+                    Админ хуудсан дээр дуун дохио өгөх (шинэ шилжүүлэг гарвал)
                 </label>
             </div>
         </div>
@@ -68,11 +64,11 @@
 
     {# ── Working hours + funnel ────────────────────────────────── #}
     <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-clock"></i> Ажлын цаг ба воронк</div>
+        <div class="card-header"><i class="bi bi-clock"></i> Ажлын цаг ба халуун харилцагч</div>
         <div class="card-body">
             <p class="text-muted small mb-3">
-                Off-hours (шөнийн) handoff үед Telegram-д 🌙 [OFF-HOURS] тэмдэглэгдэнэ.
-                Цагийг Улаанбаатарын цагаар (UTC+8).
+                Бот ажлын цагийн дотор "ажилтан 10-30 минутын дотор холбогдоно", гадуур "маргааш ажлын цагт" гэж
+                хэлнэ; шөнийн шилжүүлэг Telegram-д 🌙 [OFF-HOURS] тэмдэгтэй ирнэ. Улаанбаатарын цагаар (UTC+8).
             </p>
             <div class="row g-3 mb-3">
                 <div class="col-md-6">
@@ -91,45 +87,7 @@
                 <input type="text" class="form-control" id="hot_prospect_stages" name="hot_prospect_stages"
                        value="{{ settings.get('hot_prospect_stages', 'pricing,ready') }}"
                        placeholder="pricing,ready">
-                <div class="form-text">Таслалаар тусгаарлана. Анхдагч: pricing,ready</div>
-            </div>
-        </div>
-    </div>
-
-    {# ── Auto-comment ──────────────────────────────────────────── #}
-    <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-chat-square-text"></i> Facebook Page-ын сэтгэгдлүүд</div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label class="form-label" for="training_comment">Сургалтын постонд</label>
-                <textarea class="form-control" id="training_comment" name="training_comment" rows="2">{{ settings.get('training_comment', '') }}</textarea>
-            </div>
-            <div class="mb-3">
-                <label class="form-label" for="celebration_comment">Баяр хүргэх постонд</label>
-                <textarea class="form-control" id="celebration_comment" name="celebration_comment" rows="2">{{ settings.get('celebration_comment', '') }}</textarea>
-            </div>
-            <div>
-                <label class="form-label" for="default_comment">Бусад пост (анхдагч)</label>
-                <textarea class="form-control" id="default_comment" name="default_comment" rows="2">{{ settings.get('default_comment', '') }}</textarea>
-            </div>
-        </div>
-    </div>
-
-    {# ── Legacy fallback messages ──────────────────────────────── #}
-    <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-chat-left-quote"></i> Тогтмол хариултууд (legacy)</div>
-        <div class="card-body">
-            <p class="text-muted small mb-3">
-                Эдгээр талбарууд хуучин код ашигладаг тогтмол текст. Шинэ ботын зан төлвийг
-                "AI сургалт" хэсгээс тохируулна.
-            </p>
-            <div class="mb-3">
-                <label class="form-label" for="handoff_message">Handoff үед явах мессеж</label>
-                <textarea class="form-control" id="handoff_message" name="handoff_message" rows="2">{{ settings.get('handoff_message', '') }}</textarea>
-            </div>
-            <div>
-                <label class="form-label" for="bot_welcome">Ботын мэндчилгээ</label>
-                <textarea class="form-control" id="bot_welcome" name="bot_welcome" rows="2">{{ settings.get('bot_welcome', '') }}</textarea>
+                <div class="form-text">Утас үлдээгээгүй ч эдгээр шатанд хүрсэн харилцагч самбарын "халуун" тоонд орно. Анхдагч: pricing,ready</div>
             </div>
         </div>
     </div>
@@ -180,11 +138,7 @@
     form.addEventListener('submit', function (e) {
         e.preventDefault();
         const data = {};
-        // Most fields are simple key/value pairs.
-        ['handoff_sensitivity','telegram_chat_ids',
-         'office_hours_start','office_hours_end','hot_prospect_stages',
-         'training_comment','celebration_comment','default_comment',
-         'handoff_message','bot_welcome'].forEach(k => {
+        ['telegram_chat_ids', 'office_hours_start', 'office_hours_end', 'hot_prospect_stages'].forEach(k => {
             const el = document.getElementById(k);
             if (el) data[k] = el.value;
         });

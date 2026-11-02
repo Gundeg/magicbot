@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 from extensions import db
 from models import (BusinessLine, ChatQuestionCluster, Course, FAQ,
-                    GeneralSetting, HandoffKeyword, Product, ProductLink,
+                    GeneralSetting, Product, ProductLink,
                     Service, ServiceLink, TrainingSnippet)
 
 import services as _svc
@@ -554,29 +554,6 @@ def seed_products():
     logger.info("Seeded %s starter products under '%s'.", len(starters), program_line.name)
 
 
-_DEFAULT_HANDOFF_KEYWORDS_EXPLICIT = [
-    # Cyrillic
-    'ажилтан', 'оператор', 'менежер', 'админтай', 'жинхэнэ хүн',
-    'хүнтэй', 'хүн рүү', 'хүн руу', 'хүний хариу', 'хүнээр',
-    'хүнтэй яр', 'хүнтэй ярь', 'хүнтэй холб',
-    # Latin transliterations users commonly type from a phone without
-    # the Mongolian keyboard layout. Substrings work because the matcher
-    # does `if keyword in lower(message_text)`.
-    'azhiltan', 'azhilten', 'operator', 'menejer', 'admintai',
-    'hun-tei', 'huntei', 'hun ruu', 'hun-ruu', 'hunii hariu',
-    'huntei yar', 'huntei chatla', 'huntei chin chatla',
-    # English equivalents
-    'live agent', 'real agent', 'real person', 'human agent',
-    'speak to human', 'talk to human', 'talk to a person',
-    'operator please', 'real human',
-]
-_DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION = [
-    'болохгүй байна', 'ойлгохгүй', 'ойлгомжгүй', 'муухай', 'үнэхээр муу',
-    'гомдол', 'буруу хариу', 'хариулж чадахгүй', 'юу яриад байгаа',
-    'хэрэггүй бот', 'утгагүй', 'ойлгосонгүй',
-]
-
-
 def seed_discovery_phrasing_snippets():
     """Seed TrainingSnippet rows that map common customer phrasings (in
     Cyrillic and Latin transliteration) to the right service / product
@@ -967,32 +944,6 @@ def seed_default_magic_links():
 
     db.session.commit()
     return '\n'.join(log)
-
-
-def seed_handoff_keywords():
-    """Ensure the default handoff keywords exist. Upsert by keyword text:
-    missing defaults are added with is_active=True; existing rows (whether
-    admin-customized or already-seeded) are left untouched. Lets us add
-    new defaults in code without resetting any admin tweaks on prod."""
-    inserted = 0
-    existing_keywords = {
-        k.lower() for k in db.session.query(HandoffKeyword.keyword).all()
-        for k in (k[0],)
-        if k
-    }
-    for kw in _DEFAULT_HANDOFF_KEYWORDS_EXPLICIT:
-        if kw.lower() not in existing_keywords:
-            db.session.add(HandoffKeyword(keyword=kw.lower(), keyword_type='explicit', is_active=True))
-            existing_keywords.add(kw.lower())
-            inserted += 1
-    for kw in _DEFAULT_HANDOFF_KEYWORDS_FRUSTRATION:
-        if kw.lower() not in existing_keywords:
-            db.session.add(HandoffKeyword(keyword=kw.lower(), keyword_type='frustration', is_active=True))
-            existing_keywords.add(kw.lower())
-            inserted += 1
-    if inserted:
-        db.session.commit()
-        logger.info("Seeded %s new default handoff keyword(s).", inserted)
 
 
 def seed_courses_and_faqs():

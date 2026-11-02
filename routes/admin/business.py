@@ -69,6 +69,9 @@ def _parse_links_payload(raw_links):
 BUSINESS_GENERAL_KEYS = (
     'center_name',
     'center_description',
+    # Free-text company information the bot reads (locations, branches,
+    # history, business lines) — editable again since 2026-11-04.
+    'training_content',
     'center_email',
     'main_office_address',
     'main_office_phone',

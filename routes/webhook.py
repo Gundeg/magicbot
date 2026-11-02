@@ -28,7 +28,7 @@ from services import (PHONE_RE, HANDOFF_CATEGORY_LABELS,
                       is_in_handoff, refresh_facebook_user_name,
                       refresh_user_summary,
                       send_facebook_message, send_sender_action,
-                      send_telegram_notification, should_handoff,
+                      send_telegram_notification,
                       submit_registration_form, trigger_handoff,
                       verify_facebook_signature, FACEBOOK_APP_SECRET,
                       BOT_ECHO_TAG, HUMAN_TAKEOVER_MUTE_MINUTES)
@@ -135,18 +135,10 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
     send_sender_action(sender_id, 'typing_on')
 
     handoff_pending = is_in_handoff(fb_user)
+    # Handoff is the model's decision (defer_to_staff, three categories). The
+    # keyword pre-scan that used to run here was retired 2026-11-04 — it
+    # paged staff on ordinary sentences and pre-empted the model's judgment.
     handoff_just_triggered = False
-    # Skip the keyword-handoff check if already in advisory mode.
-    if not handoff_pending:
-        handoff, reason = should_handoff(message_text, fb_user)
-        if handoff:
-            # Fire the AdminIssue + Telegram ping but DON'T send the static
-            # user message — let the LLM craft a warm, mood-aware ack. The
-            # HANDOFF_JUST_TRIGGERED prompt rule overrides advisory mode for
-            # this one turn so the bot can still mention staff routing.
-            trigger_handoff(fb_user, reason, message_text, send_user_message=False)
-            handoff_pending = True
-            handoff_just_triggered = True
 
     # Cross-session memory: a customer coming back after a gap gets a fresh
     # 2-3 line summary of the earlier conversation written onto the user row

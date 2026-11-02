@@ -241,7 +241,7 @@ def init_db():
     the oldest one so management routes remain usable.
     """
     from services import (advance_recurring_courses, ensure_schema,
-                          seed_courses_and_faqs, seed_handoff_keywords,
+                          seed_courses_and_faqs,
                           seed_products)
 
     with app.app_context():
@@ -249,7 +249,6 @@ def init_db():
         ensure_schema()
         _run_pending_migrations()
         seed_courses_and_faqs()
-        seed_handoff_keywords()
         seed_products()
         advance_recurring_courses()
 

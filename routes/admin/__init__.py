@@ -10,7 +10,7 @@ Submodule mapping (aligns with the new IA we're migrating to):
   - auth       — login / logout
   - work_tasks — dashboard, inbox, leads, issues, logs, conversation, ops APIs
   - business   — business_lines, courses, services, software, products, team
-  - bot        — training, training_snippets, handoff_keywords, faq
+  - bot        — training, training_snippets, faq, settings
   - system     — settings, audit_log, docs, admin user management
 """
 

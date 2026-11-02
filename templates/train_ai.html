@@ -433,16 +433,12 @@
         <p class="text-muted"><code>Ботын удирдлага → Ботын тохиргоо</code> зам.</p>
 
         <h5>Хүн рүү дамжуулах (Handoff)</h5>
-        <table class="table table-bordered">
-            <tbody>
-                <tr><td class="field-name">handoff_sensitivity</td>
-                    <td>
-                        <strong>conservative</strong> (анхдагч) — зөвхөн "ажилтантай" гэх мэт.<br>
-                        <strong>balanced</strong> — нэмж гомдол / шүүмжлэлийг оруулна.<br>
-                        <strong>aggressive</strong> — давтан асуух, ойлгомжгүй гэх мэт бүгдийг.
-                    </td></tr>
-            </tbody>
-        </table>
+        <p>
+            Тохиргоо шаардлагагүй: бот зөвхөн <strong>мэдлэгт нь байхгүй зүйл</strong>, <strong>ажилтантай ярих
+            хүсэлт</strong>, <strong>гомдол</strong> гэсэн 3 тохиолдолд ажилтанд шилжүүлнэ; үнэ, хуваарь, бүртгэл,
+            утас үлдээхийг өөрөө шийднэ. Шалтгаан нь Ажлын даалгавар болон Telegram дээр "бот: мэдлэг дутуу — …"
+            гэж харагдана. Давтагдаж буй "мэдлэг дутуу" шилжүүлгийг <em>Snippet</em> нэмж арилгана (3-р хэсэг).
+        </p>
 
         <h5>Telegram мэдэгдэл</h5>
         <table class="table table-bordered">
@@ -464,27 +460,10 @@
             </tbody>
         </table>
 
-        <h5>Facebook Page-ын сэтгэгдлүүд</h5>
-        <table class="table table-bordered">
-            <tbody>
-                <tr><td class="field-name">training_comment</td><td>Сургалтын пост дээр автоматаар бичигдэх сэтгэгдэл</td></tr>
-                <tr><td class="field-name">celebration_comment</td><td>Баяр хүргэх пост дээр автоматаар бичигдэх сэтгэгдэл</td></tr>
-                <tr><td class="field-name">default_comment</td><td>Бусад пост дээр (анхдагч)</td></tr>
-            </tbody>
-        </table>
-        <div class="warn-bg">
-            <strong>Анхааруулга:</strong> Энэ нь зөвхөн <code>ENABLE_POLLING=true</code> үед ажиллана.
-        </div>
-
-        <h5>Хуучин тогтмол хариултууд (legacy)</h5>
-        <table class="table table-bordered">
-            <tbody>
-                <tr><td class="field-name">handoff_message</td>
-                    <td>Handoff болоход хэрэглэгчид харагдах текст. Жнь "Танд эргэж холбогдоно".</td></tr>
-                <tr><td class="field-name">bot_welcome</td>
-                    <td>Чатны эхний мэндчилгээ. Жнь "Сайн уу! Magic Financial Group-ын туслах байна".</td></tr>
-            </tbody>
-        </table>
+        <p class="text-muted small">
+            2026-11-04: "Facebook Page-ын сэтгэгдлүүд" болон "Хуучин тогтмол хариултууд" талбарууд хасагдсан —
+            постын автомат коммент, handoff-ийн хариу, мэндчилгээг бот өөрөө (persona + дүрмээр) бичдэг.
+        </p>
     </section>
 
     {# ==================== 7. BUSINESS MANAGEMENT ==================== #}

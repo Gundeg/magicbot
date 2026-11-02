@@ -32,7 +32,6 @@
             / <a href="{{ url_for('business_management_employees') }}">Ажилтнууд</a>.
             Нэгжийн нэр дээр дарж тухайн нэгжийн сургалт/үйлчилгээ/бүтээгдэхүүнийг шууд удирдана.</li>
         <li><strong>Ботын удирдлага</strong> — <a href="{{ url_for('bot_management_training') }}">AI сургалт</a>
-            / <a href="{{ url_for('bot_management_handover') }}">Handover түлхүүр үгс</a>
             / <a href="{{ url_for('bot_management_faqs') }}">FAQ (+ чатнаас гарсан асуултууд)</a>
             / <a href="{{ url_for('bot_management_settings') }}">Ботын тохиргоо</a>.</li>
         <li><strong>Шинэ боломж:</strong> Course / Service / Product бүрд олон линк (description / URL / note)
@@ -182,11 +181,12 @@
         тохиромжтой. Дэлгэрэнгүйг
         <a href="{{ url_for('train_ai_guide') }}#ai-lint">AI Сургалт (заавар) 3.3 хэсэг</a>-ээс үзнэ үү.</li>
 </ul>
-<h5>6.2 Дамжуулах түлхүүр үгс <small class="text-muted">(<code>/bot-management/handover</code>)</small></h5>
+<h5>6.2 Ажилтанд шилжүүлэх (handoff)</h5>
 <p>
-    Хэрэглэгчийн мессеж тодорхой үгстэй таарвал шууд handoff гаргадаг. <em>Explicit</em> — "ажилтантай ярьмаар",
-    "huntei" гэх мэт. <em>Frustration</em> — "болохгүй байна", "ойлгохгүй" гэх мэт. Латин үсгээр бичсэн
-    хувилбарууд (huntei, operator, menejer) бас орсон байгаа.
+    Шилжүүлэх эсэхийг бот өөрөө шийднэ (<code>defer_to_staff</code>): зөвхөн мэдлэгт нь байхгүй зүйл, ажилтантай
+    ярих хүсэлт, гомдол гэсэн гурван тохиолдолд. Үнэ, хуваарь, бүртгэл, утас үлдээх зэргийг өөрөө шийднэ.
+    Ажлын даалгавар дээр шалтгаан нь "бот: мэдлэг дутуу — …" гэж харагдана. Хуучин түлхүүр үгийн систем
+    2026-11-04-нд хасагдсан (энгийн өгүүлбэрт ч ажилтныг дууддаг байсан).
 </p>
 <h5>6.3 FAQ <small class="text-muted">(<code>/bot-management/faqs</code>)</small></h5>
 <ul>
@@ -369,7 +369,7 @@
         <tr><td><code>chat_question_cluster</code></td><td>LLM-grouped themes from real user messages — populated by services.cluster_chat_questions() weekly or manually. <code>promoted_to_faq_id</code> tracks which clusters were turned into curated FAQ</td></tr>
         <tr><td><code>admin_issue</code></td><td>Handoff queue (issue_type='handoff') and other unresolved items. Drives advisory mode while status='open'</td></tr>
         <tr><td><code>page_post</code></td><td>FB Page posts the bot has already auto-commented on</td></tr>
-        <tr><td><code>general_setting</code></td><td>Key/value bucket for runtime-editable settings (handoff_sensitivity, telegram_chat_ids, mute_duration_hours, business_website_url, etc.)</td></tr>
+        <tr><td><code>general_setting</code></td><td>Key/value bucket for runtime-editable settings (office_hours_start/end, telegram_chat_ids, hot_prospect_stages, business_website_url, training_content, bot_persona, etc.)</td></tr>
         <tr><td><code>team_member</code></td><td>Staff directory included in the system prompt</td></tr>
         <tr><td><code>training_snippet</code></td><td>Additive per-topic notes, priority high/normal, optional category. Discovery-phrasing snippets seeded via /admin/api/seed-discovery-snippets</td></tr>
         <tr><td><code>audit_entry</code></td><td>Append-only log of every admin action</td></tr>
@@ -429,7 +429,7 @@
 <p><strong>Asynchronous half</strong> — <code>process_inbound_reply()</code> (background thread, own app context + DB session):</p>
 <ol>
     <li>Re-check mute; send <code>mark_seen</code> + <code>typing_on</code> sender actions (responsive feel).</li>
-    <li><code>is_in_handoff()</code> → <code>handoff_pending</code>; keyword <code>should_handoff()</code> → <code>trigger_handoff(send_user_message=False)</code> on match.</li>
+    <li><code>is_in_handoff()</code> → <code>handoff_pending</code> (advisory mode while a staff issue is open). No keyword pre-scan — handoff is the model's decision (section 6).</li>
     <li>Build prompt, call <code>REPLY_MODEL</code> through the Claude Messages API: prompt in <code>system</code>, last 10 messages reshaped (no empty turns, first turn must be <code>user</code>), <code>output_config.effort=REPLY_EFFORT</code>, <code>max_tokens=REPLY_MAX_TOKENS</code> (2048 — thinking and the reply share it). No sampling params, no <code>thinking</code> override.</li>
     <li>Strip the internal <code>[HANDOFF:category|reason]</code> marker the <code>defer_to_staff</code> tool call becomes (categories: knowledge_gap / wants_human / complaint).</li>
     <li><strong>Pre-send mute re-check</strong>: <code>db.session.rollback()</code> (drop the stale WAL snapshot) then re-read <code>bot_muted_until</code> — if a human took over mid-generation, suppress the reply.</li>
@@ -467,17 +467,10 @@
         Work Tasks page with a duration (default 4h). Bot is silent so staff can chat directly via
         Facebook Page Inbox.</li>
 </ol>
-<p>Sensitivity tiers (<code>handoff_sensitivity</code> setting):</p>
-<ul>
-    <li><strong>conservative</strong> (default) — explicit stem matches only (ажилтан / оператор / менежер / хүнтэй / huntei / human / etc.). Everything else is the model's decision via the <code>defer_to_staff</code> tool.</li>
-    <li><strong>balanced</strong> — adds frustration phrases (болохгүй байна / ойлгомжгүй / гомдол / etc.).</li>
-    <li><strong>aggressive</strong> — adds repeated-question detection (same message 3× in 1h).</li>
-</ul>
 <p>
-    Stems are deliberately short to defeat Mongolian agglutinative suffixes: <code>'ажилтан'</code> catches
-    <em>ажилтантай / ажилтанд / ажилтны / ажилтнаас</em>, etc. Latin transliterations are seeded
-    (huntei, operator, menejer, azhiltan) so customers typing without the Mongolian keyboard still trigger
-    handoff.
+    There is no keyword matcher any more (retired 2026-11-04): the <code>HandoffKeyword</code> table and the
+    <code>handoff_sensitivity</code> setting are inert. The model's <code>defer_to_staff</code> tool is the only
+    bot-initiated path.
 </p>
 <p>
     <code>trigger_handoff(send_user_message=False)</code> exists for the model-initiated path so a bot

@@ -380,6 +380,15 @@ def _format_company_contact_block():
     so the bot's user-facing claim stays consistent with the handoff
     routing decision."""
     parts = []
+    head_office = []
+    address = _svc.get_main_office_address()
+    if address:
+        head_office.append(f"хаяг: {address}")
+    phone = _svc.get_main_office_phone()
+    if phone:
+        head_office.append(f"утас: {phone}")
+    if head_office:
+        parts.append("Төв оффис — " + "; ".join(head_office))
     website = _svc.get_business_website_url()
     if website:
         parts.append(f"Албан ёсны вэбсайт: {website}")
@@ -396,9 +405,22 @@ def _format_company_contact_block():
         )
     except (ValueError, TypeError):
         pass
-    if not parts:
+    # Company identity (Бизнесийн удирдлага → Ерөнхий): name + introduction.
+    # The group spans audit, tax consulting, cloud and the training centre
+    # across several locations, so the bot must know who "we" are — these
+    # were saved by the admin UI but never reached the prompt before 2026-11.
+    name = (_svc.get_setting('center_name', '') or '').strip()
+    description = (_svc.get_setting('center_description', '') or '').strip()
+    if not (parts or name or description):
         return ''
-    return "КОМПАНИЙН ХОЛБОО БАРИХ:\n" + "\n".join(f"  • {p}" for p in parts) + "\n"
+    out = "КОМПАНИЙН ТАНИЛЦУУЛГА БА ХОЛБОО БАРИХ:\n"
+    if name:
+        out += f"Компани: {name}\n"
+    if description:
+        out += f"{description}\n"
+    if parts:
+        out += "\n".join(f"  • {p}" for p in parts) + "\n"
+    return out
 
 
 def _format_current_time_block():
@@ -593,6 +615,14 @@ def build_system_blocks(session_state='new', funnel_stage='curious',
             f"{services_text}\n"
         )
 
+    # Free-text company information (Бизнесийн удирдлага → Ерөнхий мэдээлэл):
+    # locations, branches, history, what each business line does. Rendered
+    # only when the admin wrote something.
+    general_section = (
+        f"ЕРӨНХИЙ МЭДЭЭЛЭЛ (админы оруулсан — байршил, салбар, түүх, бизнесийн чиглэлүүд):\n"
+        f"{training.strip()}\n\n"
+        if (training or '').strip() else ''
+    )
     allowed_types_line = ", ".join(f'"{t}"' for t in _svc.ALLOWED_COURSE_TYPES)
     # Bot-driven registration (GreenSoft form) — only when the form is
     # configured; stable across customers, so it belongs in the cached half.
@@ -620,9 +650,7 @@ def build_system_blocks(session_state='new', funnel_stage='curious',
 - Анги тус бүрд [#NNNN] гэсэн дугаар бий бол хариултдаа дурдвал админд хяналт тавихад тус болно (хэрэглэгчид заавал биш).
 ==========================
 
-{contact_block}СУРГАЛТЫН ТӨВИЙН ЕРӨНХИЙ МЭДЭЭЛЭЛ:
-{training}
-{snippets_section}{team_section}{biz_section}{services_section}
+{contact_block}{general_section}{snippets_section}{team_section}{biz_section}{services_section}
 ТҮГЭЭМЭЛ АСУУЛТУУД:
 {faq_text}
 
@@ -667,7 +695,7 @@ C. ЭСРЭГ ХЭЛЛЭГ (objection handling) — ХЭРЭГЛЭГЧ ИЛЭР�
      заана.
 
 D. НИЙГМИЙН БАТАЛГАА (social proof) — БУУ ЗОХИО:
-   Зөвхөн дээрх "СУРГАЛТЫН ТӨВИЙН ЕРӨНХИЙ МЭДЭЭЛЭЛ" блок, "НЭМЭЛТ
+   Зөвхөн дээрх "КОМПАНИЙН ТАНИЛЦУУЛГА", "ЕРӨНХИЙ МЭДЭЭЛЭЛ" блок, "НЭМЭЛТ
    ТАЙЛБАР, ТОДРУУЛГА" snippet-ууд, эсвэл "ТҮГЭЭМЭЛ АСУУЛТУУД" хэсэгт бий
    нь тодорхой тоо, төгсөгчийн түүх, бодит баримтыг иш тат. Дээрх блокт
    байхгүй бол ҮЛ ЗОХИО — "олон төгсөгч ажиллаж байна" гэх мэт ерөнхий

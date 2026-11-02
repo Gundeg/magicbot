@@ -11,15 +11,16 @@
 <div class="alert alert-light border d-flex gap-2 align-items-start py-2 mb-3 fs-85">
     <i class="bi bi-building mt-1 flex-shrink-0 text-brand"></i>
     <div>
-        Энэ хэсэгт компанийн нийтлэг мэдээлэл хадгална: нэр, утас, хаяг, имэйл, вэбсайт,
-        ерөнхий танилцуулга. Бизнесийн нэгж өөрийн утас/хаяг/имэйлгүй бол энд хадгалсан
-        утгууд ботын хариултанд автоматаар орлох болно.
+        <strong>Бот энэ хуудсан дээрх бүх зүйлийг уншина.</strong> Компанийн нэр, танилцуулга, ерөнхий
+        мэдээлэл (байршил, салбар, түүх, бизнесийн чиглэлүүд), холбоо барих. Бизнесийн нэгж тус бүрийн
+        өөрийн хаяг, утас, тайлбарыг "Бизнесийн нэгжүүд" хэсэгт тус тусад нь оруулна; нэгж өөрийн утас,
+        хаяггүй бол энд байгаа үндсэн утас, хаяг ашиглагдана.
     </div>
 </div>
 
 <div class="card mb-3">
     <div class="card-header">
-        <i class="bi bi-info-circle"></i> Компанийн ерөнхий мэдээлэл
+        <i class="bi bi-info-circle"></i> Компанийн танилцуулга
     </div>
     <div class="card-body">
         <form id="generalForm" class="row g-3" autocomplete="off">
@@ -28,46 +29,57 @@
                 <input type="text" class="form-control" id="center_name" name="center_name"
                        value="{{ settings.center_name or '' }}"
                        placeholder="Magic Financial Group">
+                <div class="form-text">Бот өөрийгөө энэ нэрээр танилцуулна.</div>
             </div>
             <div class="col-md-6">
                 <label class="form-label" for="business_website_url">Бизнесийн вэбсайт</label>
                 <input type="url" class="form-control" id="business_website_url" name="business_website_url"
                        value="{{ settings.business_website_url or '' }}"
                        placeholder="https://magicgroup.mn">
-                <div class="form-text">Манай гол вэбсайт. Бот энэ линкийг "вэбсайт", "сайт" асуултанд иш татна.</div>
+                <div class="form-text">"Вэбсайт", "сайт" гэж асуухад бот энэ линкийг өгнө.</div>
             </div>
 
-            <div class="col-md-6">
+            <div class="col-md-12">
+                <label class="form-label" for="center_description">Компанийн товч танилцуулга</label>
+                <textarea class="form-control" id="center_description" name="center_description"
+                          rows="3" placeholder="Magic Financial Group нь ... оноос хойш аудит, татварын зөвлөгөө, клоуд шийдэл, нягтлангийн сургалтын чиглэлээр ...">{{ settings.center_description or '' }}</textarea>
+                <div class="form-text">
+                    2-4 өгүүлбэр: хэзээ үүссэн, юу хийдэг, ямар компаниудаас бүрддэг. "Та хэн бэ?", "Magic Group гэж юу вэ?" гэсэн асуултанд бот үүнийг ашиглана.
+                </div>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label" for="training_content">Ерөнхий мэдээлэл — байршил, салбар, бизнесийн чиглэлүүд</label>
+                <textarea class="form-control" id="training_content" name="training_content"
+                          rows="10" placeholder="БАЙРШЛУУД:&#10;- УБ Товер 1502 — Аудит, ТМЗ, төв оффис&#10;- УБ Товер Плас 509 — Клоуд&#10;- Мэжик чойс сургалтын танхим — ...&#10;- Дархан салбар — ...&#10;- Эрдэнэт салбар — ...&#10;&#10;СУРГАЛТЫН ХӨТӨЛБӨР: ...">{{ settings.training_content or '' }}</textarea>
+                <div class="form-text">
+                    Чөлөөт текст, бот системийн зааврынхаа нэг хэсэг болгон бүхэлд нь уншина. Энд: байршил бүрийн
+                    хаяг, тэнд ямар үйлчилгээ байдаг, салбарууд, түүх, сургалтын хөтөлбөрийн ерөнхий тайлбар.
+                    Үнэ, хуваарь, линк зэрэг <em>бүтэцтэй</em> мэдээллийг энд биш, "Бизнесийн нэгжүүд" дотор
+                    тухайн сургалт/үйлчилгээ/бүтээгдэхүүн дээр оруулна — бот тэдгээрийг л үнэн гэж үзнэ.
+                </div>
+            </div>
+
+            <div class="col-md-4">
                 <label class="form-label" for="main_office_phone">Үндсэн утас</label>
                 <input type="text" class="form-control" id="main_office_phone" name="main_office_phone"
                        value="{{ settings.main_office_phone or '' }}"
-                       placeholder="7288-7288">
-                <div class="form-text">Бизнесийн нэгж өөрийн утасгүй бол энэ дугаар ашиглагдана.</div>
+                       placeholder="7712-6060">
+                <div class="form-text">Нэгж өөрийн утасгүй бол энэ дугаар.</div>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
                 <label class="form-label" for="center_email">Үндсэн имэйл</label>
                 <input type="email" class="form-control" id="center_email" name="center_email"
                        value="{{ settings.center_email or '' }}"
                        placeholder="contact@magicgroup.mn">
-                <div class="form-text">Бизнесийн нэгж өөрийн имэйлгүй бол энэ имэйл ашиглагдана.</div>
+                <div class="form-text">Нэгж өөрийн имэйлгүй бол энэ имэйл.</div>
             </div>
-
-            <div class="col-md-12">
-                <label class="form-label" for="main_office_address">Үндсэн хаяг</label>
+            <div class="col-md-4">
+                <label class="form-label" for="main_office_address">Төв оффисын хаяг</label>
                 <input type="text" class="form-control" id="main_office_address" name="main_office_address"
                        value="{{ settings.main_office_address or '' }}"
-                       placeholder="БЗД 13-р хороолол, UB Tower, 15 давхар 1502">
-                <div class="form-text">Бизнесийн нэгж өөрийн хаяггүй бол энэ хаяг ашиглагдана.</div>
-            </div>
-
-            <div class="col-md-12">
-                <label class="form-label" for="center_description">Компанийн ерөнхий танилцуулга</label>
-                <textarea class="form-control" id="center_description" name="center_description"
-                          rows="4" placeholder="Магиc Financial Group нь ... оноос хойш ...">{{ settings.center_description or '' }}</textarea>
-                <div class="form-text">
-                    Компанийн товч танилцуулга — үүсгэн байгуулагдсан он, гол үйл ажиллагаа, охин компаниуд гэх мэт.
-                    Бот үүнийг "та хэн бэ?", "Magic Group гэж юу вэ?" гэх асуултанд иш татна.
-                </div>
+                       placeholder="БЗД, UB Tower, 15 давхар 1502">
+                <div class="form-text">Нэгж өөрийн хаяггүй бол энэ хаяг.</div>
             </div>
 
             <div class="col-12 text-end">

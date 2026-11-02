@@ -12,7 +12,7 @@ from flask_login import current_user, login_required
 from app import app
 from auth import admin_required, super_admin_required
 from extensions import db
-from models import (ChatQuestionCluster, FAQ, GeneralSetting, HandoffKeyword,
+from models import (ChatQuestionCluster, FAQ, GeneralSetting,
                     TrainingSnippet)
 from services import (BOT_PERSONA, build_system_prompt,
                       cluster_chat_questions, get_setting, lint_training_data,
@@ -22,18 +22,16 @@ from services import (BOT_PERSONA, build_system_prompt,
 # Settings keys that belong on the Bot Settings tab. The other half of the
 # old Settings page (center_*, main_office_*, business_website_url) lives on
 # Business Management > General Information.
+# 2026-11-04 cleanup: training_comment / celebration_comment / default_comment
+# (auto-comments are model-written), handoff_message / bot_welcome (replies are
+# model-written) and handoff_sensitivity (keyword handoff retired) were saved
+# but never read — dropped from the form. Old rows stay inert in the DB.
 BOT_SETTINGS_KEYS = (
-    'training_comment',
-    'celebration_comment',
-    'default_comment',
-    'handoff_sensitivity',
     'office_hours_start',
     'office_hours_end',
     'telegram_chat_ids',
     'sound_alerts_enabled',
     'hot_prospect_stages',
-    'handoff_message',
-    'bot_welcome',
 )
 
 
@@ -43,10 +41,9 @@ BOT_SETTINGS_KEYS = (
 @login_required
 @admin_required
 def bot_management():
-    # Lands on Bot Settings tab — admins tune handoff sensitivity /
-    # Telegram alerts / office hours more often than they retrain the
-    # persona, so the most-touched tab is the most useful default.
-    return redirect(url_for('bot_management_settings'))
+    # Lands on AI training — the persona + snippets are what shape the
+    # bot day to day; settings (office hours, Telegram) rarely change.
+    return redirect(url_for('bot_management_training'))
 
 
 @app.route('/bot-management/training')
@@ -72,21 +69,6 @@ def bot_management_training():
         persona_value=get_setting('bot_persona', ''),
         persona_fallback=BOT_PERSONA,
         snippets=snippets,
-    )
-
-
-@app.route('/bot-management/handover')
-@login_required
-@admin_required
-def bot_management_handover():
-    keywords = HandoffKeyword.query.order_by(
-        HandoffKeyword.keyword_type.asc(),
-        HandoffKeyword.keyword.asc(),
-    ).all()
-    return render_template(
-        'handoff_keywords.html',
-        active_tab='handover',
-        keywords=keywords,
     )
 
 
@@ -396,55 +378,3 @@ def training_preview():
 def training_lint():
     """Run the heuristic consistency check and return findings."""
     return jsonify({'findings': lint_training_data()})
-
-
-# ===================== HANDOFF KEYWORDS =====================
-
-@app.route('/admin/handoff-keywords', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def handoff_keywords():
-    if request.method == 'POST':
-        data = request.get_json() or {}
-        action = data.get('action')
-
-        if action in ('add', 'edit'):
-            if action == 'add':
-                kw = HandoffKeyword()
-                db.session.add(kw)
-            else:
-                kw = db.session.get(HandoffKeyword, data.get('id'))
-                if not kw:
-                    return jsonify({'success': False}), 404
-            kw.keyword = (data.get('keyword') or '').strip().lower()
-            kw.keyword_type = 'frustration' if data.get('keyword_type') == 'frustration' else 'explicit'
-            kw.note = (data.get('note') or '').strip() or None
-            if not kw.keyword:
-                db.session.rollback()
-                return jsonify({'success': False, 'error': 'Keyword шаардлагатай.'}), 400
-            db.session.commit()
-            return jsonify({'success': True, 'id': kw.id})
-
-        if action == 'toggle':
-            kw = db.session.get(HandoffKeyword, data.get('id'))
-            if not kw:
-                return jsonify({'success': False}), 404
-            kw.is_active = not kw.is_active
-            db.session.commit()
-            return jsonify({'success': True, 'is_active': kw.is_active})
-
-        if action == 'delete':
-            kw = db.session.get(HandoffKeyword, data.get('id'))
-            if not kw:
-                return jsonify({'success': False}), 404
-            db.session.delete(kw)
-            db.session.commit()
-            return jsonify({'success': True})
-
-        return jsonify({'success': False, 'error': 'unknown action'}), 400
-
-    keywords = HandoffKeyword.query.order_by(
-        HandoffKeyword.keyword_type.asc(),
-        HandoffKeyword.keyword.asc(),
-    ).all()
-    return render_template('handoff_keywords.html', keywords=keywords)

@@ -311,6 +311,9 @@ class ServiceLink(db.Model):
     )
 
 
+# LEGACY (2026-11-04): the keyword-handoff matcher and its admin tab were
+# retired — handoff is the reply model's decision (defer_to_staff). The table
+# is kept so existing rows survive; no code reads it any more.
 class HandoffKeyword(db.Model):
     """Keyword/phrase that triggers a human handoff. Replaces the hardcoded
     HANDOFF_KEYWORDS_EXPLICIT and HANDOFF_KEYWORDS_FRUSTRATION lists."""

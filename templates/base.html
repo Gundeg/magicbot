@@ -428,8 +428,8 @@
                    href="{{ url_for('business_management_general') }}">
                     <i class="bi bi-building"></i> Бизнесийн удирдлага
                 </a>
-                <a class="nav-link {% if request.endpoint in ('bot_management', 'bot_management_training', 'bot_management_handover', 'bot_management_faqs', 'bot_management_settings', 'training', 'handoff_keywords', 'faq', 'settings') %}active{% endif %}"
-                   href="{{ url_for('bot_management_settings') }}">
+                <a class="nav-link {% if request.endpoint in ('bot_management', 'bot_management_training', 'bot_management_faqs', 'bot_management_settings', 'training', 'faq', 'settings') %}active{% endif %}"
+                   href="{{ url_for('bot_management_training') }}">
                     <i class="bi bi-robot"></i> Ботын удирдлага
                 </a>
                 {% endif %}
