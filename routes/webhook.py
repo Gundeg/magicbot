@@ -68,6 +68,26 @@ def human_takeover_pause(customer_psid):
 
 STAFF_ATTACHMENT_PLACEHOLDER = '[хавсралт]'
 
+# What the bot (and the admin history) sees for a customer message with no
+# text. The model can't see the file itself, so it is told what arrived.
+_ATTACHMENT_LABELS = {
+    'image': 'Зураг', 'video': 'Видео', 'audio': 'Дуут мессеж',
+    'file': 'Файл', 'location': 'Байршил',
+}
+
+
+def describe_inbound_message(msg):
+    """The customer's text, or a placeholder like "[Зураг илгээсэн]" for a
+    photo / sticker / file / voice message that carries no text."""
+    text = (msg.get('text') or '').strip()
+    if text:
+        return msg.get('text')
+    if msg.get('sticker_id'):
+        return '[Стикер илгээсэн]'
+    kinds = [a.get('type') for a in (msg.get('attachments') or []) if isinstance(a, dict)]
+    label = _ATTACHMENT_LABELS.get(kinds[0], 'Хавсралт') if kinds else 'Хавсралт'
+    return f'[{label} илгээсэн]'
+
 
 def store_staff_reply(customer_psid, text, mid):
     """Save a reply a staff member typed in the Page inbox as a Message with
@@ -465,7 +485,12 @@ def webhook():
                             store_staff_reply(recipient_id, msg.get('text'), msg.get('mid'))
                         continue
 
-                    message_text = msg.get('text')
+                    # A photo / sticker / file has no text: store and answer a
+                    # Mongolian placeholder ("[Зураг илгээсэн]") instead of None,
+                    # which the NOT NULL content column rejected — the customer
+                    # used to get no reply at all.
+                    has_text = bool((msg.get('text') or '').strip())
+                    message_text = describe_inbound_message(msg)
                     mid = msg.get('mid')
 
                     # Resolve (or create) the sender up front so we can dedupe
@@ -515,10 +540,19 @@ def webhook():
                         db.session.commit()
                     except IntegrityError:
                         db.session.rollback()
-                        logger.info(
-                            "Duplicate Facebook delivery dropped: mid=%s sender=%s",
-                            mid, sender_id,
-                        )
+                        # Only a row already holding this mid is a Facebook
+                        # retry; any other integrity error is a real failure
+                        # (it hid the attachment-only bug as a "duplicate").
+                        if mid and Message.query.filter_by(mid=mid).first():
+                            logger.info(
+                                "Duplicate Facebook delivery dropped: mid=%s sender=%s",
+                                mid, sender_id,
+                            )
+                        else:
+                            logger.exception(
+                                "Inbound message could not be saved: mid=%s sender=%s",
+                                mid, sender_id,
+                            )
                         continue
 
                     # Per-sender flood / cost guard. Retries are already deduped
@@ -536,7 +570,7 @@ def webhook():
                     # asks customers directly. If the previous bot turn was
                     # that ask, treat THIS message as the name reply. Silent
                     # on ambiguous input — better blank than wrong.
-                    if (fb_user.name or '').strip().lower() in ('', 'unknown'):
+                    if has_text and (fb_user.name or '').strip().lower() in ('', 'unknown'):
                         prior_bot = (Message.query
                                      .filter_by(facebook_user_id=fb_user.id, sender='bot')
                                      .order_by(Message.created_at.desc())
