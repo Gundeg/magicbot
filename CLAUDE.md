@@ -258,7 +258,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 271 tests. They must all pass before any commit.
+Current count: 274 tests. They must all pass before any commit.
 
 **Reply-quality eval (costs money, opt-in):** `python scripts/eval_replies.py --run
 [--persona file.txt]` runs 6 fixed customer scenarios through the real prompt + Claude and
@@ -313,6 +313,17 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
   dropped users with their reason and a **Сэргээх** (restore → `status='new'`)
   button. `update_lead_status` enforces the required note only when
   `status == 'dropped'`.
+
+## Worker-timeout diagnostic (2026-11-16)
+
+Intermittent `[CRITICAL] WORKER TIMEOUT` → `SIGKILL! Perhaps out of memory?` one second later
+(4× on 2026-11-16, some before that day's deploys; no "database is locked" logged; one was an
+echo for a customer NOT in the DB, i.e. no write at all). Cause NOT found yet. `gunicorn.conf.py`
+(auto-loaded from the working directory) arms `faulthandler.dump_traceback_later` per request and
+cancels it when the request ends: a request stuck past `REQUEST_STACK_DUMP_SECONDS` (45) writes
+every thread's stack to stderr. After the next timeout, search the Render logs for
+`most recent call first` and fix the frame it shows — don't guess. Boot log proof the file loaded:
+`Request stack-dump watchdog on (45s) pid=…` once per worker.
 
 ## Telemetry shortcuts — first place to look when user says "bot is broken"
 
