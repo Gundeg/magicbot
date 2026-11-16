@@ -133,6 +133,12 @@ def ensure_schema():
         # the atomic claim that stops two processes both stepping in.
         'last_staff_reply_at': 'last_staff_reply_at DATETIME',
         'bot_step_in_at': 'bot_step_in_at DATETIME',
+        # Гүйцэтгэл page (2026-11-16): when the customer became a lead.
+        'lead_at': 'lead_at DATETIME',
+    })
+    # Гүйцэтгэл page: 'step_in' / 'nudge' marker on bot messages.
+    add_columns('message', {
+        'kind': 'kind VARCHAR(20)',
     })
 
     # Idempotency key for inbound Facebook messages (dedupe retried deliveries).

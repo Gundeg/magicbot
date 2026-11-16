@@ -334,6 +334,7 @@ def work_tasks():
             if not user:
                 return jsonify({'success': False}), 404
             user.is_lead = True
+            user.lead_at = user.lead_at or datetime.utcnow()
             user.lead_status = 'new'
             db.session.commit()
             log_admin_action(

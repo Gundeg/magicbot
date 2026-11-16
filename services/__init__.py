@@ -2110,6 +2110,7 @@ def nudge_pending_leads():
             facebook_user_id=user.id,
             sender='bot',
             content=msg,
+            kind='nudge',   # a follow-up, not a reply — Гүйцэтгэл must not count it
         ))
         user.last_nudge_at = now
         db.session.commit()

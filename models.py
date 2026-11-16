@@ -68,6 +68,10 @@ class FacebookUser(db.Model):
     # that keeps two worker processes from both answering.
     last_staff_reply_at = db.Column(db.DateTime)
     bot_step_in_at = db.Column(db.DateTime)
+    # When this customer first became a lead (phone captured, bot registration
+    # or Hot-Prospect promote) — the Гүйцэтгэл page's "Шинэ лид" count.
+    # Recorded from 2026-11-16; older leads have NULL.
+    lead_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -78,8 +82,12 @@ class Message(db.Model):
     facebook_user_id = db.Column(
         db.Integer, db.ForeignKey('facebook_user.id'), nullable=False, index=True
     )
-    sender = db.Column(db.String(20), nullable=False)  # 'user' or 'bot'
+    sender = db.Column(db.String(20), nullable=False)  # 'user' | 'bot' | 'staff' (Page-inbox reply)
     content = db.Column(db.Text, nullable=False)
+    # What a bot message is, when it is not an ordinary reply: 'step_in' (the
+    # bot answered after staff left the customer waiting) or 'nudge' (a
+    # follow-up, not a reply). NULL = ordinary reply. Read by Гүйцэтгэл.
+    kind = db.Column(db.String(20))
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     # Facebook's per-message id. Set on inbound 'user' rows and used as an
     # idempotency key: Facebook delivers "at least once" and retries the same

@@ -123,6 +123,7 @@ def complete_registration(fb_user, data, bot_reply):
         if full_name and (fb_user.name or '').strip().lower() in ('', 'unknown'):
             fb_user.name = full_name
         fb_user.is_lead = True
+        fb_user.lead_at = fb_user.lead_at or now
         if fb_user.lead_status in (None, '', 'new', 'contacted'):
             fb_user.lead_status = 'new'
         if ok:
@@ -264,7 +265,8 @@ def process_inbound_reply(fb_user_id, message_text, session_state, waited_minute
         )
         return
 
-    bot_msg = Message(facebook_user_id=fb_user.id, sender='bot', content=bot_response)
+    bot_msg = Message(facebook_user_id=fb_user.id, sender='bot', content=bot_response,
+                      kind='step_in' if waited_minutes else None)
     db.session.add(bot_msg)
     db.session.commit()
 
@@ -552,6 +554,7 @@ def webhook():
                     if phone_match and not fb_user.is_lead:
                         fb_user.phone = phone_match.group(0)
                         fb_user.is_lead = True
+                        fb_user.lead_at = fb_user.lead_at or datetime.utcnow()
                         # A freshly-captured lead starts at 'new' (Шинэ). Staff
                         # move it to 'contacted' (Холбогдсон) only once they've
                         # actually reached out — see the mark_contacted action.
