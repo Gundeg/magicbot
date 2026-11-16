@@ -371,6 +371,14 @@ if _run_background_loops and os.environ.get('ENABLE_TOKEN_CHECK', 'true').lower(
     from services import token_health_task
     Thread(target=token_health_task, args=(app,), daemon=True).start()
 
+# Bot-schedule step-in: in staff hours, answer a customer staff left waiting.
+# Not env-gated — the admin switch (Ботын тохиргоо → Ботын ажлын цаг) governs
+# it, and each step-in is claimed atomically, so running in every process is
+# safe. One cheap query a minute when nobody is waiting.
+if _run_background_loops:
+    from routes.webhook import step_in_task
+    Thread(target=step_in_task, args=(app,), daemon=True).start()
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

@@ -129,6 +129,10 @@ def ensure_schema():
         # Bot-driven registration: accepted-at + form log id (idempotency guard).
         'registered_at': 'registered_at DATETIME',
         'registration_logid': 'registration_logid VARCHAR(50)',
+        # Bot schedule step-in (2026-11-16): last staff Page-inbox reply, and
+        # the atomic claim that stops two processes both stepping in.
+        'last_staff_reply_at': 'last_staff_reply_at DATETIME',
+        'bot_step_in_at': 'bot_step_in_at DATETIME',
     })
 
     # Idempotency key for inbound Facebook messages (dedupe retried deliveries).

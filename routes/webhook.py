@@ -6,9 +6,11 @@ FACEBOOK_APP_SECRET (see services.verify_facebook_signature).
 """
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 
 from flask import jsonify, request
+from sqlalchemy import func, or_, update
 from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,7 @@ from models import FacebookUser, Message
 from services import (PHONE_RE, HANDOFF_CATEGORY_LABELS,
                       REGISTRATION_DEDUP_HOURS,
                       REGISTRATION_FALLBACK_REPLY,
+                      bot_should_reply, get_bot_schedule,
                       check_rate_limit, classify_session, classify_user_topics,
                       describe_registration,
                       detect_funnel_stage, enqueue_background,
@@ -36,17 +39,19 @@ from services import (PHONE_RE, HANDOFF_CATEGORY_LABELS,
 
 def human_takeover_pause(customer_psid):
     """Pause the bot for a customer after a human agent replies to them in the
-    Page inbox. Idempotent and best-effort: a missing user or DB hiccup must
-    not break webhook processing (we still return 200 to Facebook)."""
+    Page inbox, and stamp when staff replied (the step-in sweep must never
+    answer over a staff reply, however long the mute window is). Idempotent
+    and best-effort: a missing user or DB hiccup must not break webhook
+    processing (we still return 200 to Facebook)."""
     if not customer_psid:
         return
     try:
         fb_user = FacebookUser.query.filter_by(facebook_id=customer_psid).first()
         if not fb_user:
             return
-        fb_user.bot_muted_until = (
-            datetime.utcnow() + timedelta(minutes=HUMAN_TAKEOVER_MUTE_MINUTES)
-        )
+        now = datetime.utcnow()
+        fb_user.bot_muted_until = now + timedelta(minutes=HUMAN_TAKEOVER_MUTE_MINUTES)
+        fb_user.last_staff_reply_at = now
         db.session.commit()
         logger.info(
             "Human takeover: bot paused %s min for psid=%s",
@@ -109,7 +114,7 @@ def complete_registration(fb_user, data, bot_reply):
     return bot_reply if ok else REGISTRATION_FALLBACK_REPLY
 
 
-def process_inbound_reply(fb_user_id, message_text, session_state):
+def process_inbound_reply(fb_user_id, message_text, session_state, waited_minutes=0):
     """Slow half of inbound handling, run in a background thread so the webhook
     can ACK Facebook in <1s (a fast 200 is what stops FB retrying the delivery
     on cold starts / slow model hops). Builds the prompt, calls Claude, sends
@@ -119,6 +124,8 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
 
     The fast half (dedupe, persist inbound, rate limit, funnel/name/phone
     capture, mute gate) already ran synchronously in webhook() before enqueue.
+    step_in_sweep also calls this, with `waited_minutes`, when staff left a
+    customer unanswered during staff hours.
     """
     fb_user = db.session.get(FacebookUser, fb_user_id)
     if fb_user is None:
@@ -174,6 +181,7 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
         is_lead=bool(fb_user.is_lead),
         prior_summary=fb_user.bot_summary or '',
         registered=bool(fb_user.registered_at),
+        waited_minutes=waited_minutes,
     )
 
     # Bot-initiated handoff (defer_to_staff tool): strip the hidden marker
@@ -247,6 +255,100 @@ def process_inbound_reply(fb_user_id, message_text, session_state):
     # Topic classifier — another model call; we're already off the webhook's
     # critical path, so just run it inline here.
     classify_user_topics(fb_user.id)
+
+
+# ===================== STEP-IN SAFETY NET =====================
+# In staff hours the bot stays quiet (see the schedule gate in webhook()). If
+# staff leave a customer unanswered for the configured minutes, the bot
+# answers (Ботын тохиргоо → Ботын ажлын цаг). Production runs the background
+# loops in BOTH gunicorn processes (WORKER_ROLE=worker on the web service), so
+# each step-in is claimed with an atomic UPDATE before the model is called.
+
+# A customer who has not written for N + this many minutes has moved on — a
+# reply that late would land out of context, so the sweep lets it rest.
+STEP_IN_ACTIVE_WINDOW_MINUTES = 60
+STEP_IN_SWEEP_SECONDS = 60
+
+
+def _claim_step_in(fb_user_id, waiting_since, now):
+    """Claim the step-in for this customer's current wait. Exactly one caller
+    gets True per wait, however many processes sweep at the same moment. The
+    customer's updated_at is left alone (a step-in is not a staff touch)."""
+    result = db.session.execute(
+        update(FacebookUser)
+        .where(FacebookUser.id == fb_user_id,
+               or_(FacebookUser.bot_step_in_at.is_(None),
+                   FacebookUser.bot_step_in_at < waiting_since))
+        .values(bot_step_in_at=now, updated_at=FacebookUser.updated_at)
+    )
+    db.session.commit()
+    return result.rowcount == 1
+
+
+def step_in_sweep(now=None):
+    """Answer customers staff left waiting; returns the ids stepped in for.
+
+    Only in 'schedule' mode with step-in on. A customer qualifies when they
+    wrote within the last N + STEP_IN_ACTIVE_WINDOW_MINUTES (still around),
+    their first message since the last bot reply or staff reply is at least N
+    minutes old, and the bot is not muted for them (a staff takeover). The
+    wait counts from that FIRST unanswered message, so a customer who keeps
+    writing does not push the step-in back."""
+    schedule = get_bot_schedule()
+    step_in = schedule['step_in']
+    if schedule['mode'] != 'schedule' or not step_in['enabled']:
+        return []
+    now = now or datetime.utcnow()
+    wait = timedelta(minutes=step_in['minutes'])
+    active_since = now - wait - timedelta(minutes=STEP_IN_ACTIVE_WINDOW_MINUTES)
+
+    candidate_ids = [uid for (uid,) in (db.session.query(Message.facebook_user_id)
+                                        .filter(Message.sender == 'user',
+                                                Message.created_at >= active_since)
+                                        .distinct().all())]
+    stepped = []
+    for uid in candidate_ids:
+        fb_user = db.session.get(FacebookUser, uid)
+        if fb_user is None or (fb_user.bot_muted_until and fb_user.bot_muted_until > now):
+            continue
+        last_bot_at = (db.session.query(func.max(Message.created_at))
+                       .filter(Message.facebook_user_id == uid, Message.sender == 'bot')
+                       .scalar())
+        answered_at = max(filter(None, (last_bot_at, fb_user.last_staff_reply_at)), default=None)
+        unanswered = Message.query.filter(Message.facebook_user_id == uid, Message.sender == 'user')
+        if answered_at:
+            unanswered = unanswered.filter(Message.created_at > answered_at)
+        first = unanswered.order_by(Message.created_at.asc()).first()
+        if first is None or first.created_at > now - wait:
+            continue
+        waiting_since = first.created_at
+        latest_text = unanswered.order_by(Message.created_at.desc()).first().content
+        prev = (Message.query
+                .filter(Message.facebook_user_id == uid, Message.created_at < waiting_since)
+                .order_by(Message.created_at.desc()).first())
+        session_state = classify_session(prev.created_at if prev else None)
+        if not _claim_step_in(uid, waiting_since, now):
+            continue
+        waited = int((now - waiting_since).total_seconds() // 60)
+        logger.info("Step-in: user_id=%s waited %s min with no staff reply", uid, waited)
+        process_inbound_reply(uid, latest_text, session_state, waited_minutes=waited)
+        stepped.append(uid)
+    return stepped
+
+
+def step_in_task(app):
+    """Background loop: step_in_sweep every STEP_IN_SWEEP_SECONDS. Started with
+    the other loops in app.py; logs and survives any error."""
+    logger.info("Step-in sweeper started (pid=%s)", os.getpid())
+    while True:
+        time.sleep(STEP_IN_SWEEP_SECONDS)
+        try:
+            with app.app_context():
+                stepped = step_in_sweep()
+                if stepped:
+                    logger.info("Step-in: answered %s waiting customer(s)", len(stepped))
+        except Exception:
+            logger.exception("step_in_sweep failed")
 
 
 @csrf.exempt
@@ -427,6 +529,14 @@ def webhook():
                         # Mute window expired; reset and continue normally.
                         fb_user.bot_muted_until = None
                         db.session.commit()
+
+                    # Bot schedule: during staff hours (or with the bot
+                    # switched off) staff answer in the Page inbox, so no bot
+                    # reply. Topic tags stay current for Work Tasks, and
+                    # step_in_sweep answers a customer staff leave waiting.
+                    if not bot_should_reply():
+                        enqueue_background(classify_user_topics, fb_user.id)
+                        continue
 
                     # Hand the slow work (Claude reply + send + handoff pings +
                     # topic classify) to a background worker and ACK Facebook

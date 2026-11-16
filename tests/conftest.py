@@ -88,3 +88,22 @@ def _clear_setting_cache(app):
     yield
     if has_request_context():
         g.pop('_setting_cache', None)
+
+
+@pytest.fixture(autouse=True)
+def _bot_always_on(app, monkeypatch):
+    """The production default follows staff hours (the bot is quiet Mon–Fri
+    09–13, 14–18), which would make every webhook test depend on the wall
+    clock. Tests default to 'always_on'; schedule tests save an explicit
+    `bot_schedule` row and freeze services._schedule._utcnow."""
+    from services import _schedule
+    monkeypatch.setitem(_schedule.DEFAULT_SCHEDULE, 'mode', 'always_on')
+    yield
+    from extensions import db
+    from models import GeneralSetting
+    try:
+        db.session.rollback()
+        GeneralSetting.query.filter_by(key=_schedule.SCHEDULE_KEY).delete()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()

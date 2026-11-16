@@ -61,6 +61,13 @@ class FacebookUser(db.Model):
     # second submission for the same customer (see complete_registration).
     registered_at = db.Column(db.DateTime)
     registration_logid = db.Column(db.String(50))
+    # Bot schedule step-in (services/_schedule, routes/webhook.step_in_sweep):
+    # when a staff member last replied in the Page inbox (stamped from the
+    # untagged echo — staff replies are not stored as messages), and when the
+    # bot last stepped in for this customer. The latter is the atomic claim
+    # that keeps two worker processes from both answering.
+    last_staff_reply_at = db.Column(db.DateTime)
+    bot_step_in_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
