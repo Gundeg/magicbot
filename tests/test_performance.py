@@ -380,3 +380,79 @@ def test_empty_window_has_no_crash(app, db_session):
     assert r['team']['waits'] == 0 and r['team']['staff_pct'] is None
     assert r['bot']['median_reply_seconds'] is None
     assert r['questions'] == [] and r['heatmap']['max'] == 0
+
+
+# ------------------------------------------------- Task 3: the page
+
+def _login_as(client, username, role):
+    from extensions import db
+    from models import User
+    from werkzeug.security import generate_password_hash
+    User.query.filter_by(username=username).delete()
+    db.session.commit()
+    user = User(username=username, password=generate_password_hash('x'),
+                email=f'{username}@example.com', role=role)
+    db.session.add(user)
+    db.session.commit()
+    with client.session_transaction() as sess:
+        sess['_user_id'] = str(user.id)
+        sess['_fresh'] = True
+    return user
+
+
+def _drop_user(user):
+    from extensions import db
+    from models import User
+    User.query.filter_by(id=user.id).delete()
+    db.session.commit()
+
+
+def test_admin_sees_all_sections(client, app, db_session):
+    admin = _login_as(client, 'pytest-perf-admin', 'admin')
+    resp = client.get('/admin/performance')
+    html = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    for heading in ('Бот', 'Ажилтны баг', 'Ажилтан тус бүр',
+                    'мэдэхгүй байсан асуултууд', 'Хэзээ их бичдэг'):
+        assert heading in html, heading
+    _drop_user(admin)
+
+
+def test_days_param_falls_back_to_7(client, app, db_session):
+    admin = _login_as(client, 'pytest-perf-days', 'admin')
+    html = client.get('/admin/performance?days=99').get_data(as_text=True)
+    assert 'data-days="7" aria-current="page"' in html
+    html = client.get('/admin/performance?days=30').get_data(as_text=True)
+    assert 'data-days="30" aria-current="page"' in html
+    _drop_user(admin)
+
+
+def test_registration_staff_refused(client, app, db_session):
+    staff = _login_as(client, 'pytest-perf-regstaff', 'registration_staff')
+    assert client.get('/admin/performance').status_code != 200
+    assert '/admin/performance' not in client.get('/admin/dashboard').get_data(as_text=True)
+    _drop_user(staff)
+
+
+def test_admin_sidebar_has_link(client, app, db_session):
+    admin = _login_as(client, 'pytest-perf-sidebar', 'super_admin')
+    assert '/admin/performance' in client.get('/admin/dashboard').get_data(as_text=True)
+    _drop_user(admin)
+
+
+def test_snippet_button_links_to_training_prefill(client, fresh):
+    admin = _login_as(client, 'pytest-perf-snippet', 'admin')
+    u = fresh('psid-perf-snippet')
+    _issue(u, '[бот: мэдлэг дутуу — Платформын нэвтрэлт] Яаж нэвтрэх вэ?', datetime.utcnow())
+    html = client.get('/admin/performance').get_data(as_text=True)
+    assert 'Платформын нэвтрэлт' in html
+    assert '/bot-management/training?snippet_title=' in html
+    _drop_user(admin)
+
+
+def test_training_page_has_prefill_hook(client, app, db_session):
+    admin = _login_as(client, 'pytest-perf-training', 'admin')
+    html = client.get('/bot-management/training').get_data(as_text=True)
+    assert "get('snippet_title')" in html
+    assert "addEventListener('load'" in html
+    _drop_user(admin)

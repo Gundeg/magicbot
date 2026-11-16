@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+
+{% block title %}Гүйцэтгэл - Magic Bot Admin{% endblock %}
+
+{% block page_title %}Гүйцэтгэл{% endblock %}
+
+{% macro duration(seconds) -%}
+    {%- if seconds is none -%}—
+    {%- elif seconds < 90 -%}{{ seconds }} сек
+    {%- else -%}{{ (seconds / 60) | round | int }} мин{%- endif -%}
+{%- endmacro %}
+
+{% macro minutes(value) -%}
+    {%- if value is none -%}—{%- else -%}{{ value }} мин{%- endif -%}
+{%- endmacro %}
+
+{% block extra_css %}
+<style>
+    .zone-label {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #888; margin: 18px 0 10px;
+    }
+    .zone-label .zone-rule { flex: 1; height: 1px; background: #e1e7e7; }
+    .kpi {
+        background: white; border-radius: 10px; padding: 14px 16px;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.08); height: 100%;
+    }
+    .kpi .kpi-value { font-size: 1.5rem; font-weight: 700; color: var(--brand); line-height: 1.1; }
+    .kpi .kpi-label { font-size: 0.78rem; color: #666; margin-top: 4px; }
+    .kpi .kpi-hint  { font-size: 0.7rem; color: #999; }
+    .bucket-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: #f1f3f5; }
+    .bucket-bar span { display: block; height: 100%; }
+    .b-staff { background: var(--brand); }
+    .b-step  { background: #e6a700; }
+    .b-bot   { background: #7fb8b8; }
+    .b-none  { background: #dc3545; }
+    .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+    .heat { border-collapse: separate; border-spacing: 2px; font-size: 0.68rem; }
+    .heat td, .heat th { text-align: center; padding: 0; }
+    .heat td.cell { width: 26px; height: 22px; border-radius: 3px; color: #1a1a2e; }
+    .heat td.cell.staff { outline: 2px solid #e6a700; outline-offset: -2px; }
+    .heat th { color: #888; font-weight: 600; padding: 0 4px; }
+    .q-reason { font-weight: 600; }
+    .q-sample { color: #666; font-size: 0.82rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set bot = report.bot %}
+{% set team = report.team %}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+    <div class="text-muted small">
+        Сүүлийн {{ report.days }} хоног · {{ (report.since + ub_offset).strftime('%Y-%m-%d %H:%M') }}-аас хойш (Улаанбаатарын цагаар)
+    </div>
+    <div class="btn-group" role="group" aria-label="Хугацаа">
+        {% for d in periods %}
+        <a class="btn btn-sm {{ 'btn-primary' if d == report.days else 'btn-outline-secondary' }}"
+           href="{{ url_for('performance', days=d) }}"
+           data-days="{{ d }}"{% if d == report.days %} aria-current="page"{% endif %}>{{ d }} хоног</a>
+        {% endfor %}
+    </div>
+</div>
+
+{# ── 1. Бот ─────────────────────────────────────────────────────────── #}
+<div class="zone-label"><i class="bi bi-robot text-brand"></i><span>Бот</span><span class="zone-rule"></span></div>
+<div class="row g-3">
+    <div class="col-6 col-lg-2"><div class="kpi">
+        <div class="kpi-value">{{ bot.people }}</div>
+        <div class="kpi-label">Хариулсан харилцагч</div>
+        <div class="kpi-hint">{{ bot.replies }} хариулт</div>
+    </div></div>
+    <div class="col-6 col-lg-2"><div class="kpi">
+        <div class="kpi-value">{{ duration(bot.median_reply_seconds) }}</div>
+        <div class="kpi-label">Хариултын дундаж хугацаа</div>
+        <div class="kpi-hint">медиан</div>
+    </div></div>
+    <div class="col-6 col-lg-2"><div class="kpi">
+        <div class="kpi-value">{{ bot.new_leads }}</div>
+        <div class="kpi-label">Шинэ лид</div>
+        <div class="kpi-hint">
+            {% if bot.leads_since %}{{ (bot.leads_since + ub_offset).strftime('%Y-%m-%d') }}-оос бүртгэж байна{% else %}2026-11-16-оос бүртгэж эхэлсэн{% endif %}
+        </div>
+    </div></div>
+    <div class="col-6 col-lg-2"><div class="kpi">
+        <div class="kpi-value">{{ bot.registrations }}</div>
+        <div class="kpi-label">Ботоор бүртгүүлсэн</div>
+    </div></div>
+    <div class="col-6 col-lg-2"><div class="kpi">
+        <div class="kpi-value">{{ bot.step_ins }}</div>
+        <div class="kpi-label">Ажилтны оронд хариулсан</div>
+        <div class="kpi-hint">ажилтан хугацаандаа хариулаагүй</div>
+    </div></div>
+    <div class="col-6 col-lg-2"><div class="kpi">
+        <div class="kpi-value">{{ bot.handoffs.values() | sum }}</div>
+        <div class="kpi-label">Ажилтанд шилжүүлсэн</div>
+        <div class="kpi-hint">
+            {% for label, n in bot.handoffs.items() if n %}{{ label }} {{ n }}{% if not loop.last %} · {% endif %}{% else %}байхгүй{% endfor %}
+        </div>
+    </div></div>
+</div>
+
+{# ── 2. Ажилтны баг ─────────────────────────────────────────────────── #}
+<div class="zone-label"><i class="bi bi-people text-brand"></i><span>Ажилтны баг (Page inbox, ажлын цагт)</span><span class="zone-rule"></span></div>
+<div class="card"><div class="card-body">
+    {% if team.tracking_since is none or team.waits == 0 %}
+        <div class="text-muted">
+            Ажилтны хариуны мэдээлэл хуримтлагдаж байна — ажилтны inbox-ын хариуг 2026-11-16-наас хадгалж эхэлсэн,
+            ажлын цагт ирсэн яриа энэ хугацаанд алга.
+        </div>
+    {% else %}
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-lg-3"><div class="kpi">
+                <div class="kpi-value">{{ team.staff_pct }}%</div>
+                <div class="kpi-label">Ажилтан хариулсан</div>
+                <div class="kpi-hint">{{ team.staff }} / {{ team.waits }} яриа</div>
+            </div></div>
+            <div class="col-6 col-lg-3"><div class="kpi">
+                <div class="kpi-value">{{ minutes(team.median_staff_minutes) }}</div>
+                <div class="kpi-label">Анхны хариуны дундаж хугацаа</div>
+                <div class="kpi-hint">медиан</div>
+            </div></div>
+            <div class="col-6 col-lg-3"><div class="kpi">
+                <div class="kpi-value {{ 'text-danger' if team.long_waits else '' }}">{{ team.long_waits }}</div>
+                <div class="kpi-label">{{ team.threshold_minutes }}+ минут хүлээсэн</div>
+                <div class="kpi-hint">хариугүй үлдсэнийг оруулаад</div>
+            </div></div>
+            <div class="col-6 col-lg-3"><div class="kpi">
+                <div class="kpi-value">{{ team.unanswered }}</div>
+                <div class="kpi-label">Хариугүй үлдсэн</div>
+            </div></div>
+        </div>
+        <div class="bucket-bar mb-2" role="img"
+             aria-label="Ажилтан {{ team.staff }}, бот орсон {{ team.step_in }}, бот {{ team.bot }}, хариугүй {{ team.unanswered }}">
+            {% for cls, n in [('b-staff', team.staff), ('b-step', team.step_in), ('b-bot', team.bot), ('b-none', team.unanswered)] if n %}
+            <span class="{{ cls }}" style="width: {{ (100 * n / team.waits) | round(1) }}%"></span>
+            {% endfor %}
+        </div>
+        <div class="small text-muted">
+            <span class="legend-dot b-staff"></span>Ажилтан {{ team.staff }}
+            <span class="legend-dot b-step ms-3"></span>Бот ажилтны оронд {{ team.step_in }}
+            <span class="legend-dot b-bot ms-3"></span>Бот (жишээ нь "Үргэлж ажиллана" горим) {{ team.bot }}
+            <span class="legend-dot b-none ms-3"></span>Хариугүй {{ team.unanswered }}
+        </div>
+    {% endif %}
+</div></div>
+
+{# ── 3. Ажилтан тус бүр ────────────────────────────────────────────── #}
+<div class="zone-label"><i class="bi bi-person-badge text-brand"></i><span>Ажилтан тус бүр (админ самбар дахь үйлдэл)</span><span class="zone-rule"></span></div>
+<div class="card"><div class="card-body p-0">
+    <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead class="small text-muted">
+                <tr>
+                    <th class="ps-3">Ажилтан</th><th class="text-end">Шийдсэн handoff</th>
+                    <th class="text-end">Дундаж шийдэх хугацаа</th><th class="text-end">Хариуцсан</th>
+                    <th class="text-end">Холбогдсон</th><th class="text-end">Бүртгүүлсэн</th>
+                    <th class="text-end pe-3">Орхисон</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for row in report.staff %}
+                <tr>
+                    <td class="ps-3">{{ row.username }} <span class="text-muted small">{{ row.role }}</span></td>
+                    <td class="text-end">{{ row.resolved }}</td>
+                    <td class="text-end">{{ minutes(row.avg_resolution_minutes) }}</td>
+                    <td class="text-end">{{ row.takeovers }}</td>
+                    <td class="text-end">{{ row.contacted }}</td>
+                    <td class="text-end">{{ row.converted }}</td>
+                    <td class="text-end pe-3">{{ row.dropped }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="small text-muted px-3 py-2 border-top">
+        Facebook inbox-оос хэн хариулсныг Facebook мэдээлдэггүй тул inbox-ын хариуны хурдыг зөвхөн багаар (дээр) харуулна.
+    </div>
+</div></div>
+
+{# ── 4. Ботын мэдэхгүй байсан асуултууд ───────────────────────────── #}
+<div class="zone-label"><i class="bi bi-question-circle text-brand"></i><span>Ботын мэдэхгүй байсан асуултууд</span><span class="zone-rule"></span></div>
+<div class="card"><div class="card-body">
+    {% if report.questions %}
+        <p class="small text-muted mb-3">
+            Бот хариулж чадалгүй ажилтанд шилжүүлсэн асуултууд. Хариултыг Snippet болгон нэмбэл дараагийн удаа бот өөрөө хариулна.
+        </p>
+        <div class="list-group list-group-flush">
+        {% for q in report.questions %}
+            <div class="list-group-item px-0 d-flex flex-wrap gap-2 justify-content-between align-items-start">
+                <div class="me-auto">
+                    <div class="q-reason">{{ q.reason }} <span class="badge bg-secondary">{{ q.count }}×</span></div>
+                    <div class="q-sample">"{{ q.sample }}" · {{ q.last_seen_ub.strftime('%m-%d %H:%M') }}
+                        · <a href="{{ url_for('conversation', user_id=q.user_id) }}">яриа</a></div>
+                </div>
+                <a class="btn btn-sm btn-outline-primary"
+                   href="{{ url_for('bot_management_training', snippet_title=q.reason, snippet_body='Асуулт: ' ~ q.sample ~ '\nХариулт: ') }}">
+                    <i class="bi bi-plus-circle"></i> Snippet болгох
+                </a>
+            </div>
+        {% endfor %}
+        </div>
+    {% else %}
+        <div class="text-muted">Энэ хугацаанд бот мэдэхгүй гэж шилжүүлсэн асуулт алга.</div>
+    {% endif %}
+</div></div>
+
+{# ── 5. Хэзээ их бичдэг вэ ─────────────────────────────────────────── #}
+<div class="zone-label"><i class="bi bi-calendar3 text-brand"></i><span>Хэзээ их бичдэг вэ</span><span class="zone-rule"></span></div>
+<div class="card mb-4"><div class="card-body">
+    <div class="table-responsive">
+        <table class="heat" aria-label="Гараг, цагаар ирсэн мессежийн тоо">
+            <tr><th></th>{% for h in range(24) %}<th>{{ '%02d' % h }}</th>{% endfor %}</tr>
+            {% for d in range(7) %}
+            <tr>
+                <th class="text-start">{{ day_names[d] }}</th>
+                {% for h in range(24) %}
+                {% set n = report.heatmap.grid[d][h] %}
+                {% set alpha = (0.08 + 0.85 * n / report.heatmap.max) if (n and report.heatmap.max) else 0.03 %}
+                <td class="cell {{ 'staff' if (d, h) in report.heatmap.staff_cells else '' }}"
+                    style="background: rgba(0, 80, 80, {{ '%.2f' % alpha }}); {{ 'color: white;' if alpha > 0.55 else '' }}"
+                    title="{{ day_names[d] }} {{ '%02d' % h }}:00 — {{ n }} мессеж">{{ n if n else '' }}</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    <div class="small text-muted mt-2">
+        Хэрэглэгчийн мессежийн тоо, Улаанбаатарын цагаар. <span style="outline: 2px solid #e6a700; padding: 0 4px;">Шар хүрээтэй</span>
+        нүд нь одоогийн ажилтны цаг — хамгийн их бичдэг цагт ажилтан хүрэлцэж байгаа эсэхийг эндээс харна.
+    </div>
+</div></div>
+{% endblock %}

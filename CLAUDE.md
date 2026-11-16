@@ -173,6 +173,25 @@ the weekend. `mode`: `schedule` | `always_on` (holidays) | `off`.
 - **Tests** default to `always_on` (autouse fixture in `conftest.py`) so no test depends on the
   wall clock; schedule tests save a row and freeze `services._schedule._utcnow`.
 
+## Гүйцэтгэл — performance page (2026-11-16)
+
+`/admin/performance` (admin + super_admin; registration staff must never see colleagues'
+numbers), computed by `services/_performance.py:performance_report(days)`. Definitions that
+the numbers depend on — change them only together with `tests/test_performance.py`:
+- A **wait** starts at a customer message whose previous message (nudges ignored) isn't the
+  customer's; its response is the next staff message or bot message with `kind != 'nudge'`.
+  A wait begun before the window is never counted.
+- **Team** numbers cover waits that start in staff hours (today's schedule) and after the first
+  stored `staff` message; buckets staff / step-in / bot / unanswered sum to the waits.
+- `Message.kind` marks bot messages that aren't ordinary replies (`'step_in'`, `'nudge'`);
+  `FacebookUser.lead_at` is stamped once at the three lead paths (phone capture, bot
+  registration, Hot-Prospect promote) — recorded only from 2026-11-16.
+- Per-staff numbers come from the audit log (`AuditEntry.actor_id`) and the matching detail
+  strings ("Work Tasks-аас шийдсэн", "→ resolved/contacted/converted/dropped") — renaming
+  those strings in `work_tasks.py` silently zeroes the page.
+- "Snippet болгох" links to `bot_management_training?snippet_title=&snippet_body=`; the
+  training page opens the pre-filled modal on `window` load.
+
 ## Bot-driven registration (GreenSoft form)
 
 `services/_registration.py`. The centre's registration form is a GreenSoft (call24) form —
@@ -233,7 +252,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 230 tests. They must all pass before any commit.
+Current count: 255 tests. They must all pass before any commit.
 
 **Reply-quality eval (costs money, opt-in):** `python scripts/eval_replies.py --run
 [--persona file.txt]` runs 6 fixed customer scenarios through the real prompt + Claude and
@@ -259,6 +278,7 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 | Sidebar | Route |
 |---|---|
 | Хяналтын самбар | `/admin/dashboard` |
+| Гүйцэтгэл | `/admin/performance?days=7\|30` (admin+ only — per-staff numbers) |
 | Ажлын даалгавар | `/admin/work-tasks` (default tab: `hot_prospects`) |
 | Мессежийн түүх | `/admin/logs` |
 | Бизнесийн удирдлага | `/business-management/general` (admin+) |

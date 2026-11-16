@@ -358,6 +358,21 @@ document.getElementById('addSnippetBtn').addEventListener('click', () => {
     document.getElementById('snippetModalTitle').textContent = 'Нэмэлт тайлбар нэмэх';
 });
 
+// Гүйцэтгэл → "Snippet болгох" lands here with ?snippet_title=&snippet_body=
+// and opens the add-snippet modal pre-filled. bootstrap.bundle loads AFTER
+// page content (base.html), so only touch bootstrap.* once the window loads.
+window.addEventListener('load', () => {
+    const params = new URLSearchParams(window.location.search);
+    const title = params.get('snippet_title');
+    if (!title) return;
+    document.getElementById('snippetForm').reset();
+    document.getElementById('snippetId').value = '';
+    document.getElementById('snippetTitle').value = title;
+    document.getElementById('snippetBody').value = params.get('snippet_body') || '';
+    document.getElementById('snippetModalTitle').textContent = 'Нэмэлт тайлбар нэмэх';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('snippetModal')).show();
+});
+
 document.getElementById('saveSnippetBtn').addEventListener('click', () => {
     const id = document.getElementById('snippetId').value;
     const payload = {

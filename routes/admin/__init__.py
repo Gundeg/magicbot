@@ -19,3 +19,4 @@ from . import work_tasks   # noqa: F401
 from . import business     # noqa: F401
 from . import bot          # noqa: F401
 from . import system       # noqa: F401
+from . import performance  # noqa: F401  — /admin/performance (Гүйцэтгэл)

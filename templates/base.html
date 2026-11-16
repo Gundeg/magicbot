@@ -394,12 +394,22 @@
                  navigate by job-to-be-done rather than by storage table.
                  ────────────────────────────────────────────────────────── #}
 
+            {# Бизнес & бот, Систем болон Гүйцэтгэл нь зөвхөн админ+ эрхтэй
+               хэрэглэгчдэд харагдана. Бүртгэлийн ажилтанд зөвхөн "Гарын
+               авлага" нь "Бизнес & бот" хэсэгт харагдаж, бусад нь нуугдана. #}
+            {% set is_admin = current_user.is_authenticated and current_user.role in ('admin', 'super_admin') %}
+
             {# ── ZONE 1 — Daily Operations: what an admin touches every day #}
             <div class="nav-section">Өдөр тутмын ажил</div>
             <nav class="nav flex-column">
                 <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
                     <i class="bi bi-speedometer2"></i> Хяналтын самбар
                 </a>
+                {% if is_admin %}
+                <a class="nav-link {% if request.endpoint == 'performance' %}active{% endif %}" href="{{ url_for('performance') }}">
+                    <i class="bi bi-bar-chart-line"></i> Гүйцэтгэл
+                </a>
+                {% endif %}
                 <a class="nav-link {% if request.endpoint in ('work_tasks', 'inbox', 'leads', 'issues') %}active{% endif %}" href="{{ url_for('work_tasks') }}">
                     <i class="bi bi-list-check"></i> Ажлын даалгавар
                 </a>
@@ -415,11 +425,6 @@
                system/.../_tabs.html). Sidebar shows a single entry per
                section, the active state lights up whenever the admin is
                on ANY page belonging to that section. #}
-
-            {# Бизнес & бот болон Систем хэсгүүд нь зөвхөн админ+ эрхтэй
-               хэрэглэгчдэд харагдана. Бүртгэлийн ажилтанд зөвхөн "Гарын
-               авлага" нь "Бизнес & бот" хэсэгт харагдаж, бусад нь нуугдана. #}
-            {% set is_admin = current_user.is_authenticated and current_user.role in ('admin', 'super_admin') %}
 
             <div class="nav-section">Бизнес & бот</div>
             <nav class="nav flex-column">
