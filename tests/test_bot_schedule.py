@@ -149,3 +149,42 @@ def test_bot_status_flags():
     assert sch.bot_status(at(MON, 10), schedule(mode='off'))['replying'] is False
     assert sch.bot_status(at(MON, 10), schedule(mode='always_on'))['replying'] is True
     assert sch.bot_status(at(MON, 10), schedule())['label']
+
+
+# ---------------------------------------------------------------------------
+# Office hours everywhere read the schedule (Task 2)
+# ---------------------------------------------------------------------------
+
+def _freeze_ub(monkeypatch, day, hh, mm=0):
+    """Freeze the clock at a given Ulaanbaatar wall time (UTC+8)."""
+    monkeypatch.setattr(sch, '_utcnow', lambda: at(day, hh, mm) - sch.UB_OFFSET)
+
+
+def test_off_hours_follows_schedule(app, db_session, monkeypatch):
+    import services
+    _freeze_ub(monkeypatch, MON, 10)
+    assert services._is_off_hours() is False
+    _freeze_ub(monkeypatch, MON, 13, 30)
+    assert services._is_off_hours() is True
+
+
+def test_off_hours_handoff_reply_names_next_staff_time(app, db_session, monkeypatch):
+    import services
+    _freeze_ub(monkeypatch, MON, 19)
+    reply = services._static_handoff_reply()
+    assert 'маргааш 09:00 цагаас' in reply
+    assert '{' not in reply
+
+
+def test_prompt_lists_staff_hours(app, db_session):
+    import services
+    prompt = services.build_system_prompt()
+    assert sch.describe_staff_hours(schedule()) in prompt
+
+
+def test_waited_line_only_on_step_in(app, db_session):
+    import services
+    _, volatile = services.build_system_blocks(waited_minutes=15)
+    assert '15 минут' in volatile
+    _, volatile = services.build_system_blocks()
+    assert 'минут хүлээсэн' not in volatile

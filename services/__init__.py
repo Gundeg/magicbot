@@ -56,6 +56,13 @@ from ._registration import (  # noqa: E402
     submit_registration_form,
 )
 
+# Bot working schedule: staff hours, the bot's on/off decision and the
+# step-in safety net all come from one setting (see _schedule).
+from ._schedule import (  # noqa: E402
+    bot_should_reply, describe_next_staff_time, describe_staff_hours,
+    get_bot_schedule, staff_on_duty, ub_now,
+)
+
 
 # ===================== BACKGROUND WORK QUEUE =====================
 # Small thread-pool used to push slow side-effects (model classify calls,
@@ -1338,7 +1345,7 @@ def generate_bot_response(user_message, conversation_history,
                           user_first_name='', handoff_pending=False,
                           handoff_just_triggered=False, ask_name=False,
                           is_lead=False, prior_summary='', registered=False,
-                          allow_registration=True):
+                          allow_registration=True, waited_minutes=0):
     """Generate the customer reply on REPLY_MODEL (Claude — see the client
     block at the top of this module). `handoff_pending=True` enables
     advisory mode in the system prompt — bot keeps helping but doesn't
@@ -1347,7 +1354,9 @@ def generate_bot_response(user_message, conversation_history,
     a fresh handoff fires this turn; it overrides advisory mode so the
     bot can craft a warm, mood-aware acknowledgement that mentions staff
     routing and the office-hours ETA. `ask_name` / `is_lead` /
-    `prior_summary` describe the customer (see build_system_prompt)."""
+    `prior_summary` describe the customer (see build_system_prompt).
+    `waited_minutes > 0` marks a step-in reply: staff left the customer
+    unanswered that long, so the bot apologises briefly for the wait."""
     try:
         stable, volatile = build_system_blocks(
             session_state=session_state,
@@ -1359,6 +1368,7 @@ def generate_bot_response(user_message, conversation_history,
             is_lead=is_lead,
             prior_summary=prior_summary,
             registered=registered,
+            waited_minutes=waited_minutes,
         )
         # Prompt caching: the stable half (persona, catalog, rules — the bulk
         # of ~15K tokens) is identical for every customer and every minute,
@@ -1482,10 +1492,16 @@ HANDOFF_USER_REPLY = (
     "ажилтан ирэхэд тантай шууд холбогдоно."
 )
 HANDOFF_USER_REPLY_OFF_HOURS = (
-    "Таны мессежийг хүлээж авлаа 🌙 Одоогоор ажлын цаг ({start}:00 – {end}:00) "
-    "дууссан тул ажилтан маргааш ажлын цагт хариулна. Та энэ хооронд асуулт "
-    "асууж, надтай үргэлжлүүлэн ярилцаж болно."
+    "Таны мессежийг хүлээж авлаа 🌙 Одоогоор ажлын цаг биш тул манай ажилтан "
+    "{when} тантай холбогдоно. Та энэ хооронд асуулт асууж, надтай "
+    "үргэлжлүүлэн ярилцаж болно."
 )
+
+
+def _off_hours_handoff_reply():
+    """The off-hours handoff text, naming when staff are next on duty
+    ('маргааш 09:00 цагаас') from the bot schedule."""
+    return HANDOFF_USER_REPLY_OFF_HOURS.format(when=describe_next_staff_time() or 'ажлын цагт')
 
 # Injected into the system prompt when the user is in a handoff window
 # (bot_muted_until > now). Tells the bot to keep helping the customer
@@ -1692,17 +1708,11 @@ DEFER_TO_STAFF_TOOL = [{
 
 
 def _is_off_hours():
-    """Return True when current UTC hour falls in the night quiet window.
-    Office hours stored as 'office_hours_start' and 'office_hours_end' (int, default 8–22)."""
-    try:
-        start = int(get_setting('office_hours_start', '8') or '8')
-        end = int(get_setting('office_hours_end', '22') or '22')
-    except ValueError:
-        start, end = 8, 22
-    ub_hour = (datetime.utcnow().hour + 8) % 24
-    if start <= end:
-        return not (start <= ub_hour < end)
-    return end <= ub_hour < start
+    """True when staff are not on duty right now, per the bot schedule (Ботын
+    тохиргоо → Ботын ажлын цаг). Drives the 🌙 [OFF-HOURS] tag and the
+    off-hours handoff wording. Replaced the office_hours_start/_end pair
+    (2026-11-16) so the bot's hours and its promises can't disagree."""
+    return not staff_on_duty(get_bot_schedule(), ub_now())
 
 
 def send_telegram_notification(text):
@@ -1792,12 +1802,7 @@ def trigger_handoff(fb_user, reason, user_message, send_user_message=True):
 
     if send_user_message:
         if off_hours:
-            try:
-                oh_start = int(get_setting('office_hours_start', '8') or '8')
-                oh_end = int(get_setting('office_hours_end', '22') or '22')
-            except ValueError:
-                oh_start, oh_end = 8, 22
-            user_reply = HANDOFF_USER_REPLY_OFF_HOURS.format(start=oh_start, end=oh_end)
+            user_reply = _off_hours_handoff_reply()
         else:
             user_reply = HANDOFF_USER_REPLY
         send_facebook_message(fb_user.facebook_id, user_reply)
@@ -1948,12 +1953,7 @@ def _static_handoff_reply():
     """Warm, ETA-aware fallback used only if the model emits the marker with no
     message of its own — so the customer never receives an empty reply."""
     if _is_off_hours():
-        try:
-            start = int(get_setting('office_hours_start', '8') or '8')
-            end = int(get_setting('office_hours_end', '22') or '22')
-        except ValueError:
-            start, end = 8, 22
-        return HANDOFF_USER_REPLY_OFF_HOURS.format(start=start, end=end)
+        return _off_hours_handoff_reply()
     return HANDOFF_USER_REPLY
 
 

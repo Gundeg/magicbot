@@ -375,10 +375,9 @@ def _format_company_contact_block():
     to defer to staff. Each field renders only when the admin has set
     it (no placeholder text the LLM might quote verbatim).
 
-    Office hours are stored as `office_hours_start` / `office_hours_end`
-    (int 0–23) in GeneralSetting; the same values drive _is_off_hours()
-    so the bot's user-facing claim stays consistent with the handoff
-    routing decision."""
+    Office hours come from the bot schedule (services/_schedule.py) — the
+    same setting that drives _is_off_hours() and when the bot itself
+    replies, so the bot's user-facing claim stays consistent with both."""
     parts = []
     head_office = []
     address = _svc.get_main_office_address()
@@ -395,16 +394,11 @@ def _format_company_contact_block():
     email = _svc.get_setting('center_email', '')
     if email:
         parts.append(f"Имэйл хаяг: {email}")
-    try:
-        oh_start = int(_svc.get_setting('office_hours_start', '8') or '8')
-        oh_end = int(_svc.get_setting('office_hours_end', '22') or '22')
-        parts.append(
-            f"Ажлын цаг (Улаанбаатарын цагаар): {oh_start:02d}:00–{oh_end:02d}:00. "
-            f"Энэ цагийн гадуур мессеж бичсэн хэрэглэгчид 'маргааш ажлын цагт "
-            f"хариулна' гэж зөөлөн мэдэгдэж болно."
-        )
-    except (ValueError, TypeError):
-        pass
+    parts.append(
+        f"Ажлын цаг (Улаанбаатарын цагаар): "
+        f"{_svc.describe_staff_hours(_svc.get_bot_schedule())}. Энэ цагийн "
+        f"гадуур бичсэн хэрэглэгчид ажилтан хэзээ хариулахыг зөөлөн хэлж болно."
+    )
     # Company identity (Бизнесийн удирдлага → Ерөнхий): name + introduction.
     # The group spans audit, tax consulting, cloud and the training centre
     # across several locations, so the bot must know who "we" are — these
@@ -469,7 +463,8 @@ def _format_current_time_block():
 def build_system_blocks(session_state='new', funnel_stage='curious',
                         user_first_name='', handoff_pending=False,
                         handoff_just_triggered=False, ask_name=False,
-                        is_lead=False, prior_summary='', registered=False):
+                        is_lead=False, prior_summary='', registered=False,
+                        waited_minutes=0):
     """Build the system prompt as two halves: (stable, volatile).
 
     STABLE is identical for every customer and every minute — persona,
@@ -493,7 +488,9 @@ def build_system_blocks(session_state='new', funnel_stage='curious',
     when staff actually need the name to call back, and it avoids ending
     every discovery reply with a second question. `is_lead` and
     `prior_summary` (cross-session memory, see refresh_user_summary) feed the
-    customer-state block."""
+    customer-state block. `waited_minutes > 0` (a step-in reply after staff
+    left the customer unanswered) adds a one-line apologise-for-the-wait
+    instruction to the volatile half."""
     training = _svc.get_training_content()
     persona = _svc.get_bot_persona()
     current_time_block = _format_current_time_block()
@@ -753,8 +750,14 @@ F. ӨМНӨХ ХАРИЛЦАА ГҮН:
     # ЧУХАЛ ДҮРМҮҮД list; they now stand under their own heading.
     session_text = re.sub(r'^0\.\s*', '', session_rule)
 
+    waited_block = (
+        f"АНХААР: Энэ хэрэглэгч ажилтны хариуг {waited_minutes} минут хүлээсэн. "
+        f"Хүлээлгэсэнд нэг өгүүлбэрээр товч уучлал гуйгаад асуултад нь шууд хариул.\n"
+        if waited_minutes else ''
+    )
+
     volatile = f"""{current_time_block}
-{name_block}{user_state_block}{funnel_rule}
+{waited_block}{name_block}{user_state_block}{funnel_rule}
 
 {handoff_rule}
 
