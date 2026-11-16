@@ -62,26 +62,92 @@
         </div>
     </div>
 
-    {# ── Working hours + funnel ────────────────────────────────── #}
-    <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-clock"></i> Ажлын цаг ба халуун харилцагч</div>
+    {# ── Bot working schedule (staff hours; the bot covers the rest) ── #}
+    <div class="card mb-3" id="scheduleCard">
+        <div class="card-header"><i class="bi bi-calendar-week"></i> Ботын ажлын цаг</div>
         <div class="card-body">
+            <div class="alert {{ 'alert-success' if schedule_status.replying else 'alert-secondary' }} py-2 fs-85 mb-3">
+                <i class="bi {{ 'bi-robot' if schedule_status.replying else 'bi-person-workspace' }}"></i>
+                <strong>Одоо:</strong> {{ schedule_status.label }}
+            </div>
             <p class="text-muted small mb-3">
-                Бот ажлын цагийн дотор "ажилтан 10-30 минутын дотор холбогдоно", гадуур "маргааш ажлын цагт" гэж
-                хэлнэ; шөнийн шилжүүлэг Telegram-д 🌙 [OFF-HOURS] тэмдэгтэй ирнэ. Улаанбаатарын цагаар (UTC+8).
+                Ажилтан ажиллаж буй цагт бот хариулахгүй — хэрэглэгчид ажилтан Facebook inbox-оос хариулна.
+                Бусад цагт (орой, шөнө, цайны цаг, амралтын өдөр) бот хариулна. Бот хэрэглэгчид "ажилтан хэзээ
+                хариулах"-ыг энэ хуваариас хэлнэ. Улаанбаатарын цагаар (UTC+8).
             </p>
-            <div class="row g-3 mb-3">
-                <div class="col-md-6">
-                    <label class="form-label" for="office_hours_start">Ажлын цаг эхлэх</label>
-                    <input type="number" min="0" max="23" class="form-control" id="office_hours_start"
-                           name="office_hours_start" value="{{ settings.get('office_hours_start', '8') }}">
+
+            <label class="form-label d-block">Ажиллах горим</label>
+            <div class="mb-3">
+                {% for value, label, hint in [
+                    ('schedule', 'Хуваарийн дагуу', 'ажилтны цагт бот чимээгүй'),
+                    ('always_on', 'Үргэлж ажиллана', 'жишээ нь баярын өдөр'),
+                    ('off', 'Унтраах', 'бот огт хариулахгүй')] %}
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="schedule_mode" id="mode_{{ value }}"
+                           value="{{ value }}" {% if schedule.mode == value %}checked{% endif %}>
+                    <label class="form-check-label" for="mode_{{ value }}">{{ label }}
+                        <span class="text-muted small">({{ hint }})</span></label>
                 </div>
-                <div class="col-md-6">
-                    <label class="form-label" for="office_hours_end">Ажлын цаг дуусах</label>
-                    <input type="number" min="0" max="23" class="form-control" id="office_hours_end"
-                           name="office_hours_end" value="{{ settings.get('office_hours_end', '22') }}">
+                {% endfor %}
+            </div>
+
+            <div class="table-responsive mb-2">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr class="small text-muted">
+                            <th>Өдөр</th><th>Ажилтан ажиллана</th><th>Эхлэх</th><th>Дуусах</th>
+                            <th>Цай эхлэх</th><th>Цай дуусах</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for day in schedule.days %}
+                        <tr data-day="{{ loop.index0 }}">
+                            <td class="fw-semibold">{{ day_names[loop.index0] }}</td>
+                            <td>
+                                <div class="form-check form-switch mb-0">
+                                    <input class="form-check-input sched-staff" type="checkbox"
+                                           aria-label="{{ day_names[loop.index0] }}: ажилтан ажиллана"
+                                           {% if day.staff %}checked{% endif %}>
+                                </div>
+                            </td>
+                            <td><input type="time" class="form-control form-control-sm sched-start" value="{{ day.start }}"></td>
+                            <td><input type="time" class="form-control form-control-sm sched-end" value="{{ day.end }}"></td>
+                            <td><input type="time" class="form-control form-control-sm sched-break-start" value="{{ day.break_start }}"></td>
+                            <td><input type="time" class="form-control form-control-sm sched-break-end" value="{{ day.break_end }}"></td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="form-text mb-3">
+                Ажилтан ажиллахгүй өдөр бот бүтэн өдөр хариулна. Цайны цагийг хоосон орхивол завсарлагагүй гэж үзнэ.
+            </div>
+
+            <div class="border rounded p-2 bg-light">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="step_in_enabled"
+                           {% if schedule.step_in.enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="step_in_enabled">
+                        Ажилтан хариулаагүй бол бот хариулна
+                    </label>
+                </div>
+                <div class="input-group input-group-sm mt-2" style="max-width: 260px;">
+                    <input type="number" min="1" max="240" class="form-control" id="step_in_minutes"
+                           value="{{ schedule.step_in.minutes }}" aria-label="Хүлээх минут">
+                    <span class="input-group-text">минутын дараа</span>
+                </div>
+                <div class="form-text">
+                    Ажилтны цагт хэрэглэгч энэ хугацаанд хариу аваагүй бол бот хүлээлгэсэнд уучлал гуйгаад хариулна.
+                    Ажилтан inbox-оос хариулсан эсвэл "Хариуцах" дарсан бол бот оролцохгүй.
                 </div>
             </div>
+        </div>
+    </div>
+
+    {# ── Funnel ────────────────────────────────────────────────── #}
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-fire"></i> Халуун харилцагч</div>
+        <div class="card-body">
             <div>
                 <label class="form-label" for="hot_prospect_stages">Халуун харилцагчийн шат (funnel)</label>
                 <input type="text" class="form-control" id="hot_prospect_stages" name="hot_prospect_stages"
@@ -138,21 +204,49 @@
     form.addEventListener('submit', function (e) {
         e.preventDefault();
         const data = {};
-        ['telegram_chat_ids', 'office_hours_start', 'office_hours_end', 'hot_prospect_stages'].forEach(k => {
+        ['telegram_chat_ids', 'hot_prospect_stages'].forEach(k => {
             const el = document.getElementById(k);
             if (el) data[k] = el.value;
         });
         // Checkbox needs special handling — only "on" or empty.
         data.sound_alerts_enabled = document.getElementById('sound_alerts_enabled').checked ? 'on' : '';
+        // Bot schedule: validated server-side; a bad one saves nothing.
+        const val = (tr, cls) => tr.querySelector(cls).value;
+        data.bot_schedule = {
+            mode: (document.querySelector('input[name="schedule_mode"]:checked') || {}).value,
+            days: [...document.querySelectorAll('#scheduleCard tr[data-day]')].map(tr => ({
+                staff: tr.querySelector('.sched-staff').checked,
+                start: val(tr, '.sched-start'),
+                end: val(tr, '.sched-end'),
+                break_start: val(tr, '.sched-break-start'),
+                break_end: val(tr, '.sched-break-end'),
+            })),
+            step_in: {
+                enabled: document.getElementById('step_in_enabled').checked,
+                minutes: document.getElementById('step_in_minutes').value,
+            },
+        };
 
         fetch(url, {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-CSRFToken': document.querySelector('meta[name=csrf-token]')?.content || ''},
             body: JSON.stringify(data),
         }).then(r => r.json()).then(r => {
-            if (r.success) toast('Хадгалсан: ' + (r.saved || []).join(', '), true);
-            else toast(r.error || 'Алдаа гарлаа', false);
+            if (r.success) {
+                toast('Хадгалсан ✓', true);
+                setTimeout(() => location.reload(), 1200);   // refresh the "Одоо:" status
+            } else {
+                toast(r.error || 'Алдаа гарлаа', false);
+            }
         }).catch(e => toast('Алдаа: ' + e, false));
+    });
+
+    // Dim a day's time inputs when no staff work that day (the bot covers it).
+    document.querySelectorAll('#scheduleCard tr[data-day]').forEach(tr => {
+        const sw = tr.querySelector('.sched-staff');
+        const sync = () => tr.querySelectorAll('input[type=time]').forEach(i => { i.disabled = !sw.checked; });
+        sw.addEventListener('change', sync);
+        sync();
     });
 
     document.getElementById('testTelegramBtn').addEventListener('click', function () {

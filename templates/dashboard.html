@@ -240,6 +240,11 @@
             <div class="card-header"><i class="bi bi-plug"></i> Холболтын төлөв</div>
             <div class="card-body py-2">
                 <div class="health-row">
+                    <span class="dot {{ {'bot': 'ok', 'staff': 'info bg-brand', 'off': 'err'}[health.bot_status.state] }}"></span>
+                    <span class="label">Бот одоо</span>
+                    <span class="detail">{{ health.bot_status.label }}</span>
+                </div>
+                <div class="health-row">
                     <span class="dot {{ 'ok' if health.anthropic_ready else 'err' }}"></span>
                     <span class="label">Claude API түлхүүр (Anthropic)</span>
                     <span class="detail">{{ 'Тогтоосон' if health.anthropic_ready else 'Тогтоогоогүй' }}</span>

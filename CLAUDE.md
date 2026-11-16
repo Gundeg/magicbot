@@ -142,6 +142,29 @@ when a course has none. The clarify-course rule lives in the ★high `Сурга
   customer returns after a gap (`session_state in ('gap','returning')`), injected as
   "ӨМНӨХ ЯРИАНЫ ХУРААНГУЙ" and shown in the admin conversation side panel.
 
+## Bot working schedule + step-in (2026-11-16)
+
+`services/_schedule.py`, one `GeneralSetting` row `bot_schedule` (JSON), edited on Ботын
+удирдлага → Ботын тохиргоо → **Ботын ажлын цаг**. It holds **staff hours** per weekday (start,
+end, one lunch break; UB time, end-exclusive) — the bot replies whenever staff are NOT on duty.
+Gundeg's default: staff Mon–Fri 09–13 + 14–18, so the bot covers 18:00–09:00, 13:00–14:00 and
+the weekend. `mode`: `schedule` | `always_on` (holidays) | `off`.
+- **Gate:** `webhook()` checks `bot_should_reply()` right after the mute gate; in staff hours the
+  inbound is saved, funnel/phone capture runs, the classifier runs, but no reply is enqueued.
+- **Step-in:** `step_in_sweep` (60 s) answers a customer whose FIRST unanswered message is ≥ N
+  minutes old (default 15) and who wrote within N+60 minutes, unless muted or a staff reply came
+  after it. Staff replies are not stored as messages, so `human_takeover_pause` stamps
+  `FacebookUser.last_staff_reply_at` from the untagged echo. The reply goes through
+  `process_inbound_reply(..., waited_minutes=...)`, which adds an apologise-for-the-wait line to
+  the volatile prompt. Claimed with an atomic UPDATE on `bot_step_in_at` (both gunicorn
+  processes sweep).
+- **One source for hours:** `_is_off_hours()`, the off-hours handoff text ("манай ажилтан маргааш
+  09:00 цагаас тантай холбогдоно") and the prompt's "Ажлын цаг" line all read the schedule.
+- **Dashboard:** Холболтын төлөв → "Бот одоо" tells staff (who can't open bot settings) whether
+  it is their shift.
+- **Tests** default to `always_on` (autouse fixture in `conftest.py`) so no test depends on the
+  wall clock; schedule tests save a row and freeze `services._schedule._utcnow`.
+
 ## Bot-driven registration (GreenSoft form)
 
 `services/_registration.py`. The centre's registration form is a GreenSoft (call24) form —
@@ -173,6 +196,7 @@ These look real but were retired. Don't read or write them in new code; don't ad
 | `GeneralSetting.training_content` | **Live again (2026-11-04)** as Бизнесийн удирдлага → Ерөнхий мэдээлэл (locations, branches, history, business lines). Read by `get_training_content` — the DB row wins, an empty row omits the prompt section (no placeholder); `TRAINING_CONTENT` env is the fallback for a never-saved deployment. |
 | `GeneralSetting.training_comment` / `celebration_comment` / `default_comment` / `handoff_message` / `bot_welcome` | Dropped from the Bot Settings form 2026-11-04 — were saved but never read (auto-comments, handoff replies and greetings are model-written). Old rows inert. |
 | `GeneralSetting.handoff_sensitivity` + `HandoffKeyword` table | Keyword handoff retired 2026-11-04 (`should_handoff`, the Handover tab, `/admin/handoff-keywords`, the seeder — all gone). Handoff is the model's `defer_to_staff` decision only. Table kept, unread. |
+| `GeneralSetting.office_hours_start` / `office_hours_end` | Replaced 2026-11-16 by `bot_schedule` (JSON, `services/_schedule.py`). Form inputs gone; nothing reads the old rows. |
 | `GeneralSetting.google_form_url` | Removed 2026-07-07 (getter, env var, admin input, prompt block all deleted). Registration is per-course (`CourseLink`) with `business_website_url` as fallback; the clarify-course rule lives in the `Сургалтад бүртгүүлэх асуултын чиглэл` snippet. Any stale DB row is inert. |
 
 When removing a UI for a setting: drop the form input, but leave the underlying setter/getter as a one-release no-op in case rollback is needed.
@@ -186,7 +210,9 @@ Loops gated by an env var AND `WORKER_ROLE in (worker, all)`:
 - `ENABLE_CHAT_CLUSTERING=true` → `cluster_task` — weekly FAQ-cluster regeneration
 - `ENABLE_TOKEN_CHECK` (**defaults ON**) → `token_health_task` — every `TOKEN_CHECK_INTERVAL_HOURS` (6) pings the Graph API and Telegram-alerts staff if the Page token is expired/invalid (the OAuthException 190/463 that silently kills the bot). Cheap one-call check; no-op without Telegram configured. It is the **backstop**, not the primary pager — `alert_facebook_token_failure` fires from the send path on the first failed message (see below).
 
-Production deploy uses ONE worker dyno with `WORKER_ROLE=worker` and N web dynos with `WORKER_ROLE=web`. Don't run loops on web — they'd N-multiply.
+- **Always on with the loops** → `step_in_task` (`routes/webhook.py`) — every 60 s, `step_in_sweep` answers a customer staff left waiting during staff hours (see "Bot working schedule"). Not env-gated; the admin switch governs it.
+
+**What prod actually runs (checked 2026-11-16 in the Render dashboard):** ONE web service, start command `gunicorn app:app --workers 2 --timeout 60`, with **`WORKER_ROLE=worker`** set in its environment — there is no separate worker service (the SQLite file lives on the web service's disk, which another service can't share). So every enabled loop runs in **both** gunicorn processes. Anything a loop does must be idempotent across two processes: claim with an atomic DB update first (`_claim_step_in`, the alert cooldown rows) — never "check, then act". The Procfile's web/worker split is the intended design, not the deployed one.
 
 ## Webhook is async (ACK fast, reply in the background)
 
@@ -199,7 +225,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 168 tests. They must all pass before any commit.
+Current count: 217 tests. They must all pass before any commit.
 
 **Reply-quality eval (costs money, opt-in):** `python scripts/eval_replies.py --run
 [--persona file.txt]` runs 6 fixed customer scenarios through the real prompt + Claude and

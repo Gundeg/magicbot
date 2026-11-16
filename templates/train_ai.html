@@ -450,11 +450,17 @@
             </tbody>
         </table>
 
-        <h5>Ажлын цаг + funnel</h5>
+        <h5>Ботын ажлын цаг + funnel</h5>
         <table class="table table-bordered">
             <tbody>
-                <tr><td class="field-name">office_hours_start / end</td>
-                    <td>UB-ийн цагаар (0-23). Off-hours-д handoff бол Telegram мэдэгдэл дээр 🌙 [OFF-HOURS] гарна.</td></tr>
+                <tr><td class="field-name">Ботын ажлын цаг</td>
+                    <td>Өдөр бүрийн ажилтны цаг, цайны цаг (UB-ийн цагаар). Ажилтны цагт бот хариулахгүй, бусад
+                        цагт бот хариулна. Горим: <em>Хуваарийн дагуу</em> / <em>Үргэлж ажиллана</em> (баярын өдөр) /
+                        <em>Унтраах</em>. "Ажилтан хариулаагүй бол бот хариулна" асаалттай бол ажилтны цагт
+                        хэрэглэгч заасан минутын дотор хариу аваагүй үед бот хүлээлгэсэнд уучлал гуйгаад хариулна.
+                        Ажилтны цагаас гадуурх handoff Telegram-д 🌙 [OFF-HOURS] тэмдэгтэй ирнэ.<br>
+                        <span class="text-success">✓ Баасан гарагт 17:00-д тардаг бол Баасангийн "Дуусах"-ыг 17:00 болго.</span><br>
+                        <span class="text-danger">✗ Баярын өдөр хуваарийг устгах — оронд нь "Үргэлж ажиллана" горимыг сонго.</span></td></tr>
                 <tr><td class="field-name">hot_prospect_stages</td>
                     <td>"Халуун" харилцагч гэж тооцох funnel шатууд (таслалаар). Анхдагч: <code>pricing,ready</code>.</td></tr>
             </tbody>

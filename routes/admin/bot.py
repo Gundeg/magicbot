@@ -6,6 +6,8 @@ URLs (/admin/training, /admin/handoff-keywords, /admin/faq, /admin/settings)
 remain alive as POST endpoints that the new tabs target; Phase 6 may
 collapse them into the new section URLs.
 """
+import json
+
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
@@ -17,6 +19,8 @@ from models import (ChatQuestionCluster, FAQ, GeneralSetting,
 from services import (BOT_PERSONA, build_system_prompt,
                       cluster_chat_questions, get_setting, lint_training_data,
                       log_admin_action)
+from services._schedule import (DAY_NAMES, SCHEDULE_KEY, bot_status,
+                                get_bot_schedule, validate_schedule)
 
 
 # Settings keys that belong on the Bot Settings tab. The other half of the
@@ -26,9 +30,10 @@ from services import (BOT_PERSONA, build_system_prompt,
 # (auto-comments are model-written), handoff_message / bot_welcome (replies are
 # model-written) and handoff_sensitivity (keyword handoff retired) were saved
 # but never read — dropped from the form. Old rows stay inert in the DB.
+# 2026-11-16: office_hours_start / _end became the bot schedule (JSON,
+# services/_schedule) — one setting for staff hours and the bot's hours.
 BOT_SETTINGS_KEYS = (
-    'office_hours_start',
-    'office_hours_end',
+    SCHEDULE_KEY,
     'telegram_chat_ids',
     'sound_alerts_enabled',
     'hot_prospect_stages',
@@ -164,6 +169,13 @@ def bot_management_settings():
     if request.method == 'POST':
         data = request.get_json() or {}
         allowed = {k: v for k, v in data.items() if k in BOT_SETTINGS_KEYS}
+        # Validate the schedule before writing ANY key, so a bad schedule
+        # never leaves the form half-saved.
+        if SCHEDULE_KEY in allowed:
+            clean, error = validate_schedule(allowed[SCHEDULE_KEY])
+            if error:
+                return jsonify({'success': False, 'error': error}), 400
+            allowed[SCHEDULE_KEY] = json.dumps(clean, ensure_ascii=False)
         for key, value in allowed.items():
             row = GeneralSetting.query.filter_by(key=key).first()
             if row:
@@ -187,6 +199,9 @@ def bot_management_settings():
         'bot/settings.html',
         active_tab='settings',
         settings=settings_dict,
+        schedule=get_bot_schedule(),
+        schedule_status=bot_status(),
+        day_names=DAY_NAMES,
     )
 
 

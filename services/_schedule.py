@@ -248,13 +248,15 @@ def describe_staff_hours(schedule):
 
 
 def bot_status(at=None, schedule=None):
-    """The bot's state right now, for the admin UI: {'replying', 'label'}."""
+    """The bot's state right now, for the admin UI: {'replying', 'state',
+    'label'} — state is 'off' | 'staff' (staff hours) | 'bot'."""
     schedule = schedule or get_bot_schedule()
     at = at or ub_now()
     if schedule['mode'] == 'off':
-        return {'replying': False, 'label': 'Бот унтарсан — хэрэглэгчид хариулахгүй'}
+        return {'replying': False, 'state': 'off',
+                'label': 'Бот унтарсан — хэрэглэгчид хариулахгүй'}
     if schedule['mode'] == 'always_on':
-        return {'replying': True, 'label': 'Бот үргэлж хариулж байна'}
+        return {'replying': True, 'state': 'bot', 'label': 'Бот үргэлж хариулж байна'}
     if staff_on_duty(schedule, at):
         t = at.hour * 60 + at.minute
         until = next(e for s, e in _segments(schedule['days'][at.weekday()]) if s <= t < e)
@@ -262,9 +264,9 @@ def bot_status(at=None, schedule=None):
         step_in = schedule['step_in']
         if step_in['enabled']:
             label += f"; {step_in['minutes']} минутад ажилтан хариулаагүй бол бот хариулна"
-        return {'replying': False, 'label': label}
+        return {'replying': False, 'state': 'staff', 'label': label}
     when = describe_next_staff_time(at, schedule)
     label = 'Бот хариулж байна'
     if when:
         label += f' — ажилтан {when} ажиллана'
-    return {'replying': True, 'label': label}
+    return {'replying': True, 'state': 'bot', 'label': label}

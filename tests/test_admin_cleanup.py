@@ -70,9 +70,12 @@ def test_dead_settings_dropped_and_general_info_editable():
     for dead in ('training_comment', 'celebration_comment', 'default_comment',
                  'handoff_message', 'bot_welcome', 'handoff_sensitivity'):
         assert dead not in BOT_SETTINGS_KEYS
-    for live in ('office_hours_start', 'office_hours_end', 'telegram_chat_ids',
+    for live in ('bot_schedule', 'telegram_chat_ids',
                  'sound_alerts_enabled', 'hot_prospect_stages'):
         assert live in BOT_SETTINGS_KEYS
+    # 2026-11-16: office hours became the bot schedule (services/_schedule).
+    for retired in ('office_hours_start', 'office_hours_end'):
+        assert retired not in BOT_SETTINGS_KEYS
     for key in ('center_name', 'center_description', 'training_content',
                 'main_office_address', 'main_office_phone', 'business_website_url', 'center_email'):
         assert key in BUSINESS_GENERAL_KEYS

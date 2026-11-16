@@ -148,7 +148,11 @@ def dashboard():
                       .first())
     last_message_at = latest_message.created_at if latest_message else None
     telegram_ready = bool(os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()) and bool(get_telegram_chat_ids())
+    from services._schedule import bot_status
     health = {
+        # Staff can't open Ботын тохиргоо, so the dashboard tells them whether
+        # the bot is answering right now or it's their shift.
+        'bot_status': bot_status(),
         'anthropic_ready': bool(os.environ.get('ANTHROPIC_API_KEY', '').strip()),
         'facebook_token_ready': bool(FACEBOOK_ACCESS_TOKEN),
         'facebook_signature_ready': bool(FACEBOOK_APP_SECRET),
