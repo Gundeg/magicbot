@@ -173,6 +173,9 @@ def check_reply_provider(model):
         if isinstance(e, anthropic.NotFoundError) or 'not_found' in low:
             fix = (f"Model {model!r} is gone or not enabled on this key. Set REPLY_MODEL to a "
                    f"current model (claude-opus-5-5 / claude-sonnet-5-5) and redeploy.")
+        elif 'usage limit' in low or 'spend limit' in low:
+            fix = ('Monthly usage limit reached — raise it at console.anthropic.com → '
+                   'Settings → Limits (otherwise access returns only next month).')
         elif 'credit balance' in low:
             fix = 'Prepaid credit exhausted — top up at console.anthropic.com → Plans & Billing.'
         elif isinstance(e, anthropic.AuthenticationError) or '401' in text:

@@ -32,7 +32,21 @@ apply it to before changing product behaviour — especially customer-facing
 behaviour — instead of extending it to the widest plausible reading. Product
 behaviour changes need the user's scope, not my inference.
 
-**Current state to remember:** `LANGUAGE_QUALITY_RULE` still says "always
+**Current state to remember (2026-11-03 entry):** `LANGUAGE_QUALITY_RULE` still says "always
 Mongolian". If foreign-language customers appear, relax it to "Mongolian by
 default; answer in the customer's language when they write in one" — a
 one-line prompt change + the two eval scenarios.
+
+## 2026-11-16 — Drive the Chrome window Gundeg is actually looking at
+
+**What happened:** two Chrome browsers were connected to the extension; I opened
+the Render tab in the default one ("Browser 1") and asked Gundeg to sign in
+there. Gundeg: "you didn't open chrome." — the tab was in a window they
+couldn't see, and the first diagnosis round was wasted.
+
+**Rule:** before the first browser action of a session, call
+`list_connected_browsers`. If more than one is connected, run
+`switch_browser` (Gundeg clicks Connect in the window in front of them)
+BEFORE navigating — never assume the default is the visible one. Tell
+Gundeg to have Chrome in front with the extension panel open, because the
+connect prompt times out after 2 minutes.

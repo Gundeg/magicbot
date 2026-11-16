@@ -1228,14 +1228,29 @@ def _is_account_error(exc):
 
     Anthropic reports an empty prepaid balance as a 400 invalid_request_error
     whose message says "credit balance is too low" — NOT as a 429 — so the
-    billing check lives on BadRequestError. A 429 that mentions credit or a
-    spend limit is treated the same way, defensively."""
+    billing check lives on BadRequestError. The Console's monthly spend limit
+    arrives the same way, worded "You have reached your specified API usage
+    limits" — missing that wording left the 2026-11-12 outage unalerted for
+    four days. A 429 that mentions credit or a limit is treated the same way,
+    defensively."""
     if isinstance(exc, (AuthenticationError, PermissionDeniedError)):
         return True
     if isinstance(exc, (BadRequestError, RateLimitError)):
         msg = str(exc).lower()
-        return 'credit balance' in msg or 'spend limit' in msg
+        return any(p in msg for p in ('credit balance', 'spend limit', 'usage limit'))
     return False
+
+
+def _account_error_hint(exc):
+    """The one cause + the one Console page that fixes it, in Mongolian, so
+    staff go straight to the right place instead of checking everything."""
+    msg = str(exc).lower()
+    if 'usage limit' in msg or 'spend limit' in msg:
+        return ("Сарын зарцуулалтын хязгаарт (usage limit) хүрсэн. "
+                "console.anthropic.com → Settings → Limits хуудсаар хязгаараа нэмнэ үү.")
+    if 'credit balance' in msg:
+        return f"Кредит дууссан. {REPLY_PROVIDER_BILLING_HINT} хуудсаар кредит нэмнэ үү."
+    return "API key хүчингүй. console.anthropic.com → API Keys хуудсаар түлхүүрээ шалгана уу."
 
 
 def alert_model_failure(exc):
@@ -1267,9 +1282,7 @@ def alert_model_failure(exc):
             f"⚠️ {REPLY_PROVIDER_LABEL} данс ажиллахгүй байна — бот хэрэглэгчдэд "
             "бодит хариу өгч чадахгүй, шилжүүлгийн (handoff) мэдэгдэл ч "
             "ажиллахгүй.\n\n"
-            "Шалтгаан: кредит дууссан эсвэл API key хүчингүй. "
-            f"{REPLY_PROVIDER_BILLING_HINT} хуудсаар орж кредит/түлхүүрээ "
-            "шалгана уу. Засмагц бот шууд сэргэнэ.\n\n"
+            f"Шалтгаан: {_account_error_hint(exc)} Засмагц бот шууд сэргэнэ.\n\n"
             f"Дэлгэрэнгүй: {str(exc)[:300]}"
         )
         return True

@@ -45,6 +45,18 @@ def _credit_error():
     )
 
 
+def _usage_limit_error():
+    # The monthly spend limit set in the Console. Verbatim from the production
+    # logs of the 2026-11-12 → 11-16 outage: a 400 whose message names neither
+    # "credit balance" nor "spend limit", so it went unalerted for four days.
+    return _api_error(
+        BadRequestError, 400,
+        'You have reached your specified API usage limits. '
+        'You will regain access on 2026-12-01 at 00:00 UTC.',
+        'invalid_request_error',
+    )
+
+
 def _auth_error():
     return _api_error(AuthenticationError, 401, 'invalid x-api-key', 'authentication_error')
 
@@ -97,6 +109,19 @@ def test_credit_error_returns_fallback_and_alerts_once(app, db_session, monkeypa
     assert reply == FALLBACK            # customer experience unchanged
     assert len(alerts) == 1             # staff got exactly one Telegram ping
     assert 'Claude' in alerts[0]        # names the provider + console to fix
+
+
+def test_usage_limit_error_alerts_and_points_at_limits_page(app, db_session, monkeypatch,
+                                                           alerts, clean_alert_state):
+    """Hitting the Console's monthly usage limit kills every reply until the
+    month rolls over — as account-fatal as an empty balance. Staff must be
+    paged, and told to raise the LIMIT (Settings → Limits), not to buy
+    credit, or they fix the wrong thing."""
+    _raise_on_create(monkeypatch, _usage_limit_error())
+    reply = services.generate_bot_response('Hi', [])
+    assert reply == FALLBACK
+    assert len(alerts) == 1
+    assert 'Limits' in alerts[0]
 
 
 def test_auth_error_alerts(app, db_session, monkeypatch, alerts, clean_alert_state):
