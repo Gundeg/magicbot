@@ -242,6 +242,25 @@
             background: var(--brand-dark);
             border-color: var(--brand-dark);
         }
+        /* The brand action button (Хадгалах, Ангилах, add-unit …). Bootstrap
+           has no .btn-brand, so it needs its own colour — it rendered as plain
+           text from the Phase 4/5 rebuild until 2026-11-16. */
+        .btn-brand {
+            background: var(--brand);
+            border-color: var(--brand);
+            color: #fff;
+        }
+        .btn-brand:hover, .btn-brand:focus, .btn-brand:active {
+            background: var(--brand-dark);
+            border-color: var(--brand-dark);
+            color: #fff;
+        }
+        .btn-brand:disabled {
+            background: var(--brand);
+            border-color: var(--brand);
+            color: #fff;
+            opacity: 0.6;
+        }
         .btn-outline-primary {
             color: var(--brand);
             border-color: var(--brand);
