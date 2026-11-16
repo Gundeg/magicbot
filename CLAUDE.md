@@ -159,7 +159,7 @@ the weekend. `mode`: `schedule` | `always_on` (holidays) | `off`.
   the untagged echo — and only EXTENDS `bot_muted_until`, never shortens a Хариуцах takeover.
   The reply goes through `process_inbound_reply(..., waited_minutes=...)`, which adds an
   apologise-for-the-wait line to the volatile prompt. Claimed with an atomic UPDATE on
-  `bot_step_in_at` (both gunicorn processes sweep); a normal bot-hours reply stamps the same
+  `bot_step_in_at` (safe even if two processes sweep); a normal bot-hours reply stamps the same
   column before it is queued (`_mark_reply_in_flight`), so at a 13:00/18:00 handover the sweep
   can't answer the same wait twice.
 - **One source for hours:** `_is_off_hours()`, the off-hours handoff text ("манай ажилтан маргааш
@@ -220,7 +220,7 @@ Loops gated by an env var AND `WORKER_ROLE in (worker, all)`:
 
 - **Always on with the loops** → `step_in_task` (`routes/webhook.py`) — every 60 s, `step_in_sweep` answers a customer staff left waiting during staff hours (see "Bot working schedule"). Not env-gated; the admin switch governs it.
 
-**What prod actually runs (checked 2026-11-16 in the Render dashboard):** ONE web service, start command `gunicorn app:app --workers 2 --timeout 60`, with **`WORKER_ROLE=worker`** set in its environment — there is no separate worker service (the SQLite file lives on the web service's disk, which another service can't share). So every enabled loop runs in **both** gunicorn processes. Anything a loop does must be idempotent across two processes: claim with an atomic DB update first (`_claim_step_in`, the alert cooldown rows) — never "check, then act". The Procfile's web/worker split is the intended design, not the deployed one.
+**What prod actually runs (checked 2026-11-16 in the Render dashboard):** ONE web service, start command `gunicorn app:app --workers 2 --timeout 60`, with **`WORKER_ROLE=worker`** set in its environment — there is no separate worker service (the SQLite file lives on the web service's disk, which another service can't share). **Observed in the boot log of the 2026-11-16 deploy:** the app (and so every background-loop thread) loads ONCE, in the gunicorn **master** — `Starting gunicorn` and `Step-in sweeper started` both log pid 39, while the request workers are pids 64/65 and log no loop start. So loops currently run once, in the master, not per worker. Why the master imports the app is not established — so still write loop work as if it could run twice: claim with an atomic DB update first (`_claim_step_in`, the alert cooldown rows), never "check, then act". The Procfile's web/worker split is the intended design, not the deployed one.
 
 ## Webhook is async (ACK fast, reply in the background)
 
