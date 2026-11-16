@@ -161,7 +161,9 @@ the weekend. `mode`: `schedule` | `always_on` (holidays) | `off`.
   apologise-for-the-wait line to the volatile prompt. Claimed with an atomic UPDATE on
   `bot_step_in_at` (safe even if two processes sweep); a normal bot-hours reply stamps the same
   column before it is queued (`_mark_reply_in_flight`), so at a 13:00/18:00 handover the sweep
-  can't answer the same wait twice.
+  can't answer the same wait twice. The sweep never steps in when every unanswered customer
+  message is a closing one (`is_closing_message`) — it used to answer a "thank you" with an
+  apology for the wait once the takeover mute lapsed.
 - **One source for hours:** `_is_off_hours()`, the off-hours handoff text ("манай ажилтан маргааш
   09:00 цагаас тантай холбогдоно") and the prompt's "Ажлын цаг" line all read the schedule. The
   prompt's clock and weekday come from `ub_now()` (a UTC weekday was wrong 00:00–08:00 UB).
@@ -183,6 +185,10 @@ the numbers depend on — change them only together with `tests/test_performance
   A wait begun before the window is never counted.
 - **Team** numbers cover waits that start in staff hours (today's schedule) and after the first
   stored `staff` message; buckets staff / step-in / bot / unanswered sum to the waits.
+  Excluded: closing-only waits (`is_closing_message`: "Баярлалаа", "за", "ок", emoji — NOT
+  "тийм", which is often a yes needing follow-up) and unanswered waits younger than the step-in
+  minutes (still in progress). The bot's reply-time median counts only waits begun while the bot
+  was on duty.
 - `Message.kind` marks bot messages that aren't ordinary replies (`'step_in'`, `'nudge'`);
   `FacebookUser.lead_at` is stamped once at the three lead paths (phone capture, bot
   registration, Hot-Prospect promote) — recorded only from 2026-11-16.
@@ -252,7 +258,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 255 tests. They must all pass before any commit.
+Current count: 265 tests. They must all pass before any commit.
 
 **Reply-quality eval (costs money, opt-in):** `python scripts/eval_replies.py --run
 [--persona file.txt]` runs 6 fixed customer scenarios through the real prompt + Claude and

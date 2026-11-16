@@ -24,7 +24,8 @@ from sqlalchemy import func
 from extensions import db
 from models import AdminIssue, AuditEntry, FacebookUser, Message, User
 
-from ._schedule import UB_OFFSET, get_bot_schedule, staff_on_duty
+from ._schedule import (UB_OFFSET, bot_should_reply, get_bot_schedule,
+                        is_closing_message, staff_on_duty)
 
 OTHER_LABEL = 'бусад'
 KNOWLEDGE_GAP_LABEL = 'мэдлэг дутуу'
@@ -43,7 +44,8 @@ def _median_int(values):
 
 
 def _waits(window_msgs, prev_by_user):
-    """[(start_msg, response_msg | None)] for waits starting in the window."""
+    """[(start_msg, response_msg | None, customer_texts)] for waits starting in
+    the window; customer_texts are all the customer's messages in that wait."""
     by_user = defaultdict(list)
     for m in window_msgs:
         by_user[m.facebook_user_id].append(m)
@@ -52,16 +54,18 @@ def _waits(window_msgs, prev_by_user):
         msgs.sort(key=lambda m: (m.created_at, m.id))
         prev = prev_by_user.get(uid)
         pending = prev is not None and prev.sender == 'user'
-        current = None          # index into waits of the counted open wait
+        current = None          # the counted open wait, if any
         for m in msgs:
             if m.sender == 'user':
                 if not pending:
                     pending = True
-                    waits.append([m, None])
-                    current = len(waits) - 1
+                    current = [m, None, []]
+                    waits.append(current)
+                if current is not None:
+                    current[2].append(m.content)
             elif _is_reply(m):
                 if pending and current is not None:
-                    waits[current][1] = m
+                    current[1] = m
                 pending, current = False, None
     return [tuple(w) for w in waits]
 
@@ -76,10 +80,14 @@ def _parse_handoff(content):
     return head.group(1).strip(), (head.group(2) or '').strip(), message
 
 
-def _bot_section(window_msgs, waits, since, now, handoff_rows, label_set):
+def _bot_section(window_msgs, waits, since, now, handoff_rows, label_set, schedule):
     replies = [m for m in window_msgs if m.sender == 'bot' and m.kind != 'nudge']
+    # Only waits that began while the bot was on duty: a 17:50 message the
+    # bot answers after 18:00 is staff hours, not the bot being slow.
     bot_delays = [(r.created_at - s.created_at).total_seconds()
-                  for s, r in waits if r is not None and r.sender == 'bot' and r.kind is None]
+                  for s, r, _ in waits
+                  if r is not None and r.sender == 'bot' and r.kind is None
+                  and bot_should_reply(s.created_at + UB_OFFSET, schedule)]
     handoffs = {label: 0 for label in label_set}
     handoffs[OTHER_LABEL] = 0
     for issue in handoff_rows:
@@ -108,8 +116,15 @@ def _team_section(waits, schedule, now):
     if tracking_since is None:
         return team
     staff_delays = []
-    for start, response in waits:
+    for start, response, texts in waits:
         if start.created_at < tracking_since or not staff_on_duty(schedule, start.created_at + UB_OFFSET):
+            continue
+        # A goodbye ("Баярлалаа", "за") needs no reply, and a wait younger
+        # than the step-in threshold is still in progress — neither is a
+        # customer left unanswered.
+        if all(is_closing_message(t) for t in texts):
+            continue
+        if response is None and now - start.created_at < timedelta(minutes=threshold):
             continue
         team['waits'] += 1
         end = response.created_at if response is not None else now
@@ -232,7 +247,7 @@ def performance_report(days, now=None):
         'days': days,
         'since': since,
         'bot': _bot_section(window_msgs, waits, since, now, handoff_rows,
-                            list(HANDOFF_CATEGORY_LABELS.values())),
+                            list(HANDOFF_CATEGORY_LABELS.values()), schedule),
         'team': _team_section(waits, schedule, now),
         'staff': _staff_section(since, now),
         'questions': _questions(handoff_rows),

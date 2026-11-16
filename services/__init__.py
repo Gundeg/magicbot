@@ -60,8 +60,8 @@ from ._registration import (  # noqa: E402
 # step-in safety net all come from one setting (see _schedule).
 from ._schedule import (  # noqa: E402
     ALWAYS_ON_STAFF_ETA, bot_should_reply, describe_next_staff_time,
-    describe_staff_hours, get_bot_schedule, staff_available, staff_on_duty,
-    ub_now,
+    describe_staff_hours, get_bot_schedule, is_closing_message,
+    staff_available, staff_on_duty, ub_now,
 )
 
 

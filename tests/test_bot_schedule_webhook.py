@@ -285,3 +285,14 @@ def test_staff_echo_keeps_a_longer_takeover(client, db_session):
     db.session.expire_all()
     assert db.session.get(FacebookUser, u.id).bot_muted_until > datetime.utcnow() + timedelta(hours=3)
     _cleanup(u.id)
+
+
+def test_step_in_skips_closing_messages(pipeline):
+    """A customer's 'Баярлалаа' after staff answered needs no reply — the bot
+    must not step in with an apology for the 'wait'."""
+    import routes.webhook as wh
+    _save_schedule(minutes=15)
+    u = _user('psid-stepin-thanks')
+    _msg(u, 'user', 16, 'Баярлалаа 🙏')
+    assert wh.step_in_sweep(now=NOW_UTC) == []
+    _cleanup(u.id)

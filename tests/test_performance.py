@@ -211,8 +211,9 @@ def test_waits_are_per_conversation(fresh):
     _m(a, 'user', t0)
     _m(b, 'user', t0 + timedelta(minutes=1))
     _m(a, 'bot', t0 + timedelta(minutes=2))
-    _m(b, 'bot', t0 + timedelta(minutes=3))
-    assert _report()['bot']['median_reply_seconds'] == 120
+    _m(b, 'bot', t0 + timedelta(minutes=10))
+    # a waited 2 min, b waited 9 min: only per-conversation waits give 330 s.
+    assert _report()['bot']['median_reply_seconds'] == 330
 
 
 def test_reply_to_pre_window_message_is_not_a_wait(fresh):
@@ -455,4 +456,100 @@ def test_training_page_has_prefill_hook(client, app, db_session):
     html = client.get('/bot-management/training').get_data(as_text=True)
     assert "get('snippet_title')" in html
     assert "addEventListener('load'" in html
+    _drop_user(admin)
+
+
+# ------------------------------------------------- final-review fixes
+
+def test_closing_message_detection():
+    from services._schedule import is_closing_message
+    for text in ('Баярлалаа', 'за', 'Ok 👍', '🙏', 'Маш их баярлалаа!', 'за баярлалаа', 'ойлголоо'):
+        assert is_closing_message(text), text
+    for text in ('тийм', 'Үнэ хэд вэ?', 'за, үнэ хэд вэ', '99112233', 'баярлалаа, хэзээ эхлэх вэ'):
+        assert not is_closing_message(text), text
+
+
+def test_closing_message_is_not_a_wait(fresh, no_staff_history):
+    """Review #2: 'Баярлалаа' after a staff answer is not an unanswered wait."""
+    _tracker(fresh)
+    u = fresh('psid-perf-thanks')
+    _m(u, 'user', ub(7, 10), 'Үнэ хэд вэ?')
+    _m(u, 'staff', ub(7, 10, 5), 'Танхим 880,000₮')
+    _m(u, 'user', ub(7, 10, 6), 'Баярлалаа 🙏')
+    team = _report()['team']
+    assert (team['waits'], team['staff'], team['unanswered'], team['long_waits']) == (1, 1, 0, 0)
+    assert team['staff_pct'] == 100
+
+
+def test_in_flight_wait_not_counted(fresh, no_staff_history):
+    """Review #2: a customer who wrote a minute ago is not 'unanswered' yet."""
+    from services._performance import performance_report
+    _tracker(fresh)
+    u = fresh('psid-perf-inflight')
+    _m(u, 'user', ub(7, 10))
+    team = performance_report(7, now=ub(7, 10, 1))['team']
+    assert (team['waits'], team['unanswered']) == (0, 0)
+
+
+def test_bot_median_ignores_staff_hours_waits(fresh):
+    """Review (minor→important): a 17:50 message answered after 18:00 is not
+    the bot being slow — the bot was off duty when the wait began."""
+    from extensions import db
+    from models import GeneralSetting
+    s = json.loads(json.dumps(sch.DEFAULT_SCHEDULE))
+    s['mode'] = 'schedule'
+    db.session.add(GeneralSetting(key=sch.SCHEDULE_KEY, value=json.dumps(s)))
+    db.session.commit()
+    late, evening = fresh('psid-perf-late'), fresh('psid-perf-evening')
+    _m(late, 'user', ub(7, 17, 50))
+    _m(late, 'bot', ub(7, 18, 10))
+    _m(evening, 'user', ub(7, 19))
+    _m(evening, 'bot', ub(7, 19) + timedelta(seconds=20))
+    assert _report()['bot']['median_reply_seconds'] == 20
+
+
+def test_snippet_link_is_truncated(client, fresh):
+    """Review #3: a long question must not make a URL gunicorn rejects."""
+    from urllib.parse import parse_qs, unquote, urlparse
+    import html as html_lib
+    import re
+    admin = _login_as(client, 'pytest-perf-long', 'admin')
+    u = fresh('psid-perf-long')
+    _issue(u, '[бот: мэдлэг дутуу — Урт асуулт] ' + 'Тайлан ' * 300, datetime.utcnow())
+    page = client.get('/admin/performance').get_data(as_text=True)
+    href = html_lib.unescape(re.search(r'href="(/bot-management/training\?[^"]+)"', page).group(1))
+    assert len(href) < 3000
+    body = parse_qs(urlparse(href).query)['snippet_body'][0]
+    assert len(body) <= 330
+    _drop_user(admin)
+
+
+def test_team_card_shows_tracking_since(client, fresh):
+    """Review #4: the team card says from when staff replies are counted."""
+    from services._performance import performance_report
+    admin = _login_as(client, 'pytest-perf-since', 'admin')
+    u = fresh('psid-perf-since')
+    _m(u, 'staff', datetime.utcnow() - timedelta(days=2))
+    since = performance_report(7)['team']['tracking_since']
+    page = client.get('/admin/performance').get_data(as_text=True)
+    assert (since + sch.UB_OFFSET).strftime('%Y-%m-%d') + '-наас' in page
+    _drop_user(admin)
+
+
+def test_prefill_clears_params_after_reading(client, app, db_session):
+    """Review #1: after a save reloads the page the modal must not reopen."""
+    admin = _login_as(client, 'pytest-perf-replace', 'admin')
+    page = client.get('/bot-management/training').get_data(as_text=True)
+    assert 'history.replaceState' in page
+    assert page.index("get('snippet_title')") < page.index('history.replaceState')
+    _drop_user(admin)
+
+
+def test_lint_findings_are_escaped(client, app, db_session):
+    """Review (minor→important, security): lint rows must not inject HTML."""
+    admin = _login_as(client, 'pytest-perf-lint', 'admin')
+    page = client.get('/bot-management/training').get_data(as_text=True)
+    for field in ('label', 'detail', 'kind', 'source_kind'):
+        assert '${f.%s}' % field not in page, field
+        assert 'esc(f.%s)' % field in page, field
     _drop_user(admin)

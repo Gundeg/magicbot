@@ -298,6 +298,11 @@ const snippetUrl = '{{ url_for("training_snippets") }}';
         info:    { badge: 'bg-secondary',       text: 'Мэдээлэл' },
     };
 
+    // Findings quote snippet titles/bodies, which can come from customer text
+    // via "Snippet болгох" — escape everything that goes into innerHTML.
+    const esc = s => String(s ?? '').replace(/[&<>"']/g,
+        c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+
     function render(findings) {
         list.innerHTML = '';
         if (!findings.length) {
@@ -314,11 +319,11 @@ const snippetUrl = '{{ url_for("training_snippets") }}';
                 <div class="d-flex justify-content-between gap-2 align-items-start">
                     <div>
                         <span class="badge ${sev.badge} fs-72">${sev.text}</span>
-                        <strong class="ms-1">${f.source_kind}${f.source_id ? ' #' + f.source_id : ''}</strong>
-                        <span class="text-muted small ms-1">${f.label}</span>
-                        <div class="small mt-1">${f.detail}</div>
+                        <strong class="ms-1">${esc(f.source_kind)}${f.source_id ? ' #' + esc(f.source_id) : ''}</strong>
+                        <span class="text-muted small ms-1">${esc(f.label)}</span>
+                        <div class="small mt-1">${esc(f.detail)}</div>
                     </div>
-                    <code class="text-muted small">${f.kind}</code>
+                    <code class="text-muted small">${esc(f.kind)}</code>
                 </div>`;
             list.appendChild(li);
         }
@@ -365,6 +370,10 @@ window.addEventListener('load', () => {
     const params = new URLSearchParams(window.location.search);
     const title = params.get('snippet_title');
     if (!title) return;
+    // Drop the params at once: every save reloads the page, and a URL that
+    // still carries them would reopen the pre-filled modal — admins re-saved
+    // it, creating duplicate snippets with an empty answer.
+    history.replaceState(null, '', window.location.pathname);
     document.getElementById('snippetForm').reset();
     document.getElementById('snippetId').value = '';
     document.getElementById('snippetTitle').value = title;

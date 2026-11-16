@@ -197,6 +197,26 @@ def next_staff_start(schedule, at):
 
 ALWAYS_ON_STAFF_ETA = 'боломжтой болмогц'
 
+# Words of a pure closing / acknowledgement message ("Баярлалаа", "за", "ок").
+# Such a message needs no reply: the step-in sweep must not answer it, and the
+# Гүйцэтгэл page must not count it as a customer left waiting. "тийм" is
+# deliberately absent — it is often a "yes" to a staff question that needs a
+# follow-up. Digits or a question mark always mean "not just closing".
+_CLOSING_WORDS = {
+    'баярлалаа', 'баярлаа', 'баярлала', 'маш', 'их', 'за', 'зүгээр', 'ок',
+    'ойлголоо', 'ойлгосон', 'ойлгоо', 'ok', 'okay', 'za', 'bayarlalaa',
+    'bayrlalaa', 'bayarlaa', 'thanks', 'thank', 'you',
+}
+_WORD_RE = re.compile(r'[^\W\d_]+')
+
+
+def is_closing_message(text):
+    """True for a short thanks / ok / emoji-only message that needs no reply."""
+    text = (text or '').strip().lower()
+    if len(text) > 60 or '?' in text or any(ch.isdigit() for ch in text):
+        return False
+    return all(word in _CLOSING_WORDS for word in _WORD_RE.findall(text))
+
 
 def staff_available(schedule, at):
     """Are staff actually there to answer? 'always_on' is the holiday /

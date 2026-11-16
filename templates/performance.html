@@ -104,9 +104,17 @@
 {# ── 2. Ажилтны баг ─────────────────────────────────────────────────── #}
 <div class="zone-label"><i class="bi bi-people text-brand"></i><span>Ажилтны баг (Page inbox, ажлын цагт)</span><span class="zone-rule"></span></div>
 <div class="card"><div class="card-body">
+    {% set since_label = (team.tracking_since + ub_offset).strftime('%Y-%m-%d') ~ '-наас' if team.tracking_since else None %}
+    {% if since_label %}
+        <div class="small text-muted mb-2">
+            Ажилтны inbox-ын хариуг {{ since_label }} хойш тоолж байна. "Баярлалаа", "за" гэх мэт хаалтын мессеж
+            болон {{ team.threshold_minutes }} минутаас бага хүлээж буй яриаг тооцохгүй.
+        </div>
+    {% endif %}
     {% if team.tracking_since is none or team.waits == 0 %}
         <div class="text-muted">
-            Ажилтны хариуны мэдээлэл хуримтлагдаж байна — ажилтны inbox-ын хариуг 2026-11-16-наас хадгалж эхэлсэн,
+            Ажилтны хариуны мэдээлэл хуримтлагдаж байна —
+            {% if since_label %}{{ since_label }} хойш{% else %}ажилтны inbox-ын хариу хадгалагдаж эхлээгүй,{% endif %}
             ажлын цагт ирсэн яриа энэ хугацаанд алга.
         </div>
     {% else %}
@@ -195,7 +203,9 @@
                         · <a href="{{ url_for('conversation', user_id=q.user_id) }}">яриа</a></div>
                 </div>
                 <a class="btn btn-sm btn-outline-primary"
-                   href="{{ url_for('bot_management_training', snippet_title=q.reason, snippet_body='Асуулт: ' ~ q.sample ~ '\nХариулт: ') }}">
+                   {# Truncated: a long Cyrillic question percent-encodes to a URL
+                      gunicorn rejects (4094-byte request line). Full text: "яриа". #}
+                   href="{{ url_for('bot_management_training', snippet_title=q.reason[:200], snippet_body='Асуулт: ' ~ q.sample[:300] ~ '\nХариулт: ') }}">
                     <i class="bi bi-plus-circle"></i> Snippet болгох
                 </a>
             </div>

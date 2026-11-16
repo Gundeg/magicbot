@@ -21,7 +21,7 @@ from models import FacebookUser, Message
 from services import (PHONE_RE, HANDOFF_CATEGORY_LABELS,
                       REGISTRATION_DEDUP_HOURS,
                       REGISTRATION_FALLBACK_REPLY,
-                      bot_should_reply, get_bot_schedule,
+                      bot_should_reply, get_bot_schedule, is_closing_message,
                       check_rate_limit, classify_session, classify_user_topics,
                       describe_registration,
                       detect_funnel_stage, enqueue_background,
@@ -367,11 +367,15 @@ def step_in_sweep(now=None):
                                           Message.created_at >= active_since)
         if answered_at:
             unanswered = unanswered.filter(Message.created_at > answered_at)
-        first = unanswered.order_by(Message.created_at.asc()).first()
-        if first is None or first.created_at > now - wait:
+        pending = unanswered.order_by(Message.created_at.asc()).all()
+        if not pending or pending[0].created_at > now - wait:
             continue
-        waiting_since = first.created_at
-        latest_text = unanswered.order_by(Message.created_at.desc()).first().content
+        # "Баярлалаа" / "за" after staff answered needs no reply — never
+        # step in with an apology for a "wait" that is really a goodbye.
+        if all(is_closing_message(m.content) for m in pending):
+            continue
+        waiting_since = pending[0].created_at
+        latest_text = pending[-1].content
         prev = (Message.query
                 .filter(Message.facebook_user_id == uid, Message.created_at < waiting_since)
                 .order_by(Message.created_at.desc()).first())
