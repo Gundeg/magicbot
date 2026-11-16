@@ -54,6 +54,14 @@
         color: white;
         border-bottom-right-radius: 4px;
     }
+    /* Staff replies from the Page inbox: the Page's side, but not the bot. */
+    .msg-row.staff { align-items: flex-end; }
+    .msg-row.staff .msg-bubble {
+        background: #fff4d6;
+        color: #1a1a2e;
+        border: 1px solid #f0d58a;
+        border-bottom-right-radius: 4px;
+    }
     .msg-meta {
         font-size: 0.7rem;
         color: #999;
@@ -109,10 +117,10 @@
                         <div class="day-divider">{{ day }}</div>
                         {% set ns.last_day = day %}
                     {% endif %}
-                    <div class="msg-row {{ 'user' if m.sender == 'user' else 'bot' }}">
+                    <div class="msg-row {{ m.sender if m.sender in ('user', 'staff') else 'bot' }}">
                         <div class="msg-bubble">{{ m.content }}</div>
                         <div class="msg-meta">
-                            {{ 'Хэрэглэгч' if m.sender == 'user' else 'Бот' }} ·
+                            {{ {'user': 'Хэрэглэгч', 'staff': 'Ажилтан'}.get(m.sender, 'Бот') }} ·
                             {{ m.created_at.strftime('%H:%M') }}
                         </div>
                     </div>

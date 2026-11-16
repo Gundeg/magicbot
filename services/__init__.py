@@ -1863,8 +1863,9 @@ def refresh_user_summary(fb_user):
     rows = [m for m in rows if (m.content or '').strip()]
     if len(rows) < USER_SUMMARY_MIN_MESSAGES:
         return None
+    speaker = {'user': 'Хэрэглэгч', 'staff': 'Ажилтан'}
     transcript = '\n'.join(
-        f"{'Хэрэглэгч' if m.sender == 'user' else 'Бот'}: {m.content.strip()}"
+        f"{speaker.get(m.sender, 'Бот')}: {m.content.strip()}"
         for m in reversed(rows)
     )
     prompt = (

@@ -82,12 +82,17 @@ def _clear_setting_cache(app):
     """services.get_setting caches per-request via flask.g. pytest-flask
     auto-pushes a single request context that outlives a single test, so
     without this fixture the cache leaks values between tests."""
+    # Flask-Login caches the logged-in user on the same long-lived `g`
+    # (`_login_user`); a User from an earlier test is detached after its
+    # session is removed, and the next request raises DetachedInstanceError.
     from flask import g, has_request_context
     if has_request_context():
         g.pop('_setting_cache', None)
+        g.pop('_login_user', None)
     yield
     if has_request_context():
         g.pop('_setting_cache', None)
+        g.pop('_login_user', None)
 
 
 @pytest.fixture(autouse=True)

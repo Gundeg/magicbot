@@ -20,6 +20,7 @@
                     <option value="">All Messages</option>
                     <option value="user">User Messages</option>
                     <option value="bot">Bot Responses</option>
+                    <option value="staff">Staff Replies</option>
                 </select>
             </div>
             <div class="col-md-4">
@@ -56,6 +57,8 @@
                         <td>
                             {% if message.sender == 'user' %}
                                 <span class="badge bg-info">User</span>
+                            {% elif message.sender == 'staff' %}
+                                <span class="badge bg-warning text-dark">Staff</span>
                             {% else %}
                                 <span class="badge bg-success">Bot</span>
                             {% endif %}

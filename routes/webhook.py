@@ -66,6 +66,32 @@ def human_takeover_pause(customer_psid):
         logger.exception("human_takeover_pause failed psid=%s: %s", customer_psid, e)
 
 
+STAFF_ATTACHMENT_PLACEHOLDER = '[хавсралт]'
+
+
+def store_staff_reply(customer_psid, text, mid):
+    """Save a reply a staff member typed in the Page inbox as a Message with
+    sender='staff', so the bot's memory, the summary, the admin views and the
+    dashboard all see it (Facebook only tells us via the untagged echo).
+    Attachment-only replies store a placeholder; a re-delivered echo (same
+    `mid`, UNIQUE) is dropped. Best-effort: never breaks the webhook."""
+    try:
+        fb_user = FacebookUser.query.filter_by(facebook_id=customer_psid).first()
+        if not fb_user:
+            return
+        db.session.add(Message(
+            facebook_user_id=fb_user.id, sender='staff', mid=mid,
+            content=(text or '').strip() or STAFF_ATTACHMENT_PLACEHOLDER,
+        ))
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        logger.info("Duplicate staff echo dropped: mid=%s", mid)
+    except Exception as e:
+        db.session.rollback()
+        logger.exception("store_staff_reply failed psid=%s: %s", customer_psid, e)
+
+
 def complete_registration(fb_user, data, bot_reply):
     """Submit a bot-collected registration to the configured form, record the
     customer as a lead with the fields in their notes, and ping Telegram.
@@ -427,8 +453,10 @@ def webhook():
                             recipient_id, is_bot_echo, (msg.get('text') or '')[:40],
                         )
                         if not is_bot_echo:
-                            # Human agent replied in the Page inbox → pause bot.
+                            # Human agent replied in the Page inbox → pause the
+                            # bot and keep the reply in the conversation history.
                             human_takeover_pause(recipient_id)
+                            store_staff_reply(recipient_id, msg.get('text'), msg.get('mid'))
                         continue
 
                     message_text = msg.get('text')
