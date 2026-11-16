@@ -151,15 +151,23 @@ Gundeg's default: staff Mon–Fri 09–13 + 14–18, so the bot covers 18:00–0
 the weekend. `mode`: `schedule` | `always_on` (holidays) | `off`.
 - **Gate:** `webhook()` checks `bot_should_reply()` right after the mute gate; in staff hours the
   inbound is saved, funnel/phone capture runs, the classifier runs, but no reply is enqueued.
-- **Step-in:** `step_in_sweep` (60 s) answers a customer whose FIRST unanswered message is ≥ N
-  minutes old (default 15) and who wrote within N+60 minutes, unless muted or a staff reply came
-  after it. Staff replies are not stored as messages, so `human_takeover_pause` stamps
-  `FacebookUser.last_staff_reply_at` from the untagged echo. The reply goes through
-  `process_inbound_reply(..., waited_minutes=...)`, which adds an apologise-for-the-wait line to
-  the volatile prompt. Claimed with an atomic UPDATE on `bot_step_in_at` (both gunicorn
-  processes sweep).
+- **Step-in:** `step_in_sweep` (60 s) answers a customer whose FIRST unanswered message inside the
+  last N+60 minutes is ≥ N minutes old (default 15), unless muted or a staff reply came after it.
+  The window bound is load-bearing: without it, days-old unanswered history (takeover chats,
+  'off' holidays) made the bot jump in seconds after a new message. Staff replies are not
+  stored as messages, so `human_takeover_pause` stamps `FacebookUser.last_staff_reply_at` from
+  the untagged echo — and only EXTENDS `bot_muted_until`, never shortens a Хариуцах takeover.
+  The reply goes through `process_inbound_reply(..., waited_minutes=...)`, which adds an
+  apologise-for-the-wait line to the volatile prompt. Claimed with an atomic UPDATE on
+  `bot_step_in_at` (both gunicorn processes sweep); a normal bot-hours reply stamps the same
+  column before it is queued (`_mark_reply_in_flight`), so at a 13:00/18:00 handover the sweep
+  can't answer the same wait twice.
 - **One source for hours:** `_is_off_hours()`, the off-hours handoff text ("манай ажилтан маргааш
-  09:00 цагаас тантай холбогдоно") and the prompt's "Ажлын цаг" line all read the schedule.
+  09:00 цагаас тантай холбогдоно") and the prompt's "Ажлын цаг" line all read the schedule. The
+  prompt's clock and weekday come from `ub_now()` (a UTC weekday was wrong 00:00–08:00 UB).
+- **`always_on` = holiday / staff meeting:** staff count as unavailable (`staff_available`), so
+  handoffs are OFF-HOURS and the bot says "манай ажилтан боломжтой болмогц тантай холбогдоно"
+  instead of promising 10–30 minutes; a volatile prompt line tells the model the same.
 - **Dashboard:** Холболтын төлөв → "Бот одоо" tells staff (who can't open bot settings) whether
   it is their shift.
 - **Tests** default to `always_on` (autouse fixture in `conftest.py`) so no test depends on the
@@ -225,7 +233,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 217 tests. They must all pass before any commit.
+Current count: 222 tests. They must all pass before any commit.
 
 **Reply-quality eval (costs money, opt-in):** `python scripts/eval_replies.py --run
 [--persona file.txt]` runs 6 fixed customer scenarios through the real prompt + Claude and

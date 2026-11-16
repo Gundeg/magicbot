@@ -50,7 +50,11 @@ def human_takeover_pause(customer_psid):
         if not fb_user:
             return
         now = datetime.utcnow()
-        fb_user.bot_muted_until = now + timedelta(minutes=HUMAN_TAKEOVER_MUTE_MINUTES)
+        # Extend, never shorten: a Хариуцах takeover may already mute for hours.
+        fb_user.bot_muted_until = max(
+            fb_user.bot_muted_until or now,
+            now + timedelta(minutes=HUMAN_TAKEOVER_MUTE_MINUTES),
+        )
         fb_user.last_staff_reply_at = now
         db.session.commit()
         logger.info(
@@ -285,6 +289,18 @@ def _claim_step_in(fb_user_id, waiting_since, now):
     return result.rowcount == 1
 
 
+def _mark_reply_in_flight(fb_user_id):
+    """Stamp bot_step_in_at = now before a normal (bot-hours) reply is queued,
+    so _claim_step_in fails for this wait while the reply is generating —
+    otherwise, at a 13:00/18:00 handover, the sweep could answer it too."""
+    db.session.execute(
+        update(FacebookUser)
+        .where(FacebookUser.id == fb_user_id)
+        .values(bot_step_in_at=datetime.utcnow(), updated_at=FacebookUser.updated_at)
+    )
+    db.session.commit()
+
+
 def step_in_sweep(now=None):
     """Answer customers staff left waiting; returns the ids stepped in for.
 
@@ -315,7 +331,12 @@ def step_in_sweep(now=None):
                        .filter(Message.facebook_user_id == uid, Message.sender == 'bot')
                        .scalar())
         answered_at = max(filter(None, (last_bot_at, fb_user.last_staff_reply_at)), default=None)
-        unanswered = Message.query.filter(Message.facebook_user_id == uid, Message.sender == 'user')
+        # Bounded to the active window: older unanswered history (a takeover
+        # chat, an 'off' holiday) must not count as waiting time, or the bot
+        # would jump in seconds after a new message with a days-long "wait".
+        unanswered = Message.query.filter(Message.facebook_user_id == uid,
+                                          Message.sender == 'user',
+                                          Message.created_at >= active_since)
         if answered_at:
             unanswered = unanswered.filter(Message.created_at > answered_at)
         first = unanswered.order_by(Message.created_at.asc()).first()
@@ -537,6 +558,11 @@ def webhook():
                     if not bot_should_reply():
                         enqueue_background(classify_user_topics, fb_user.id)
                         continue
+
+                    # The reply is about to be generated: mark this wait as
+                    # answered so a step-in sweep running in the other process
+                    # during generation can't answer it a second time.
+                    _mark_reply_in_flight(fb_user.id)
 
                     # Hand the slow work (Claude reply + send + handoff pings +
                     # topic classify) to a background worker and ACK Facebook

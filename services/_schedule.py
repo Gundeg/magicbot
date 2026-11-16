@@ -195,10 +195,26 @@ def next_staff_start(schedule, at):
     return None
 
 
+ALWAYS_ON_STAFF_ETA = 'боломжтой болмогц'
+
+
+def staff_available(schedule, at):
+    """Are staff actually there to answer? 'always_on' is the holiday /
+    staff-meeting mode (the bot covers everything), so never; otherwise the
+    weekly staff hours decide."""
+    if schedule['mode'] == 'always_on':
+        return False
+    return staff_on_duty(schedule, at)
+
+
 def describe_next_staff_time(at=None, schedule=None):
     """'өнөөдөр 14:00 цагаас' / 'маргааш 09:00 цагаас' / 'Даваа гарагт 09:00
-    цагаас' — for telling an off-hours customer when staff will answer."""
+    цагаас' — for telling an off-hours customer when staff will answer. In
+    'always_on' mode (a holiday or meeting) no time can be promised:
+    'боломжтой болмогц'."""
     schedule = schedule or get_bot_schedule()
+    if schedule['mode'] == 'always_on':
+        return ALWAYS_ON_STAFF_ETA
     at = at or ub_now()
     nxt = next_staff_start(schedule, at)
     if nxt is None:

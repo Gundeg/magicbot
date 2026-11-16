@@ -235,3 +235,53 @@ def test_step_in_claim_is_atomic(app, db_session):
     assert wh._claim_step_in(u.id, since, NOW_UTC) is True
     assert wh._claim_step_in(u.id, since, NOW_UTC) is False   # the other process loses
     _cleanup(u.id)
+
+
+# ----------------------------------------------------- final-review fixes
+
+def test_step_in_ignores_stale_unanswered_history(pipeline):
+    """Review #1: a day-old unanswered message must not make the bot jump in
+    one minute after the customer's new message (and claim a 1440-min wait)."""
+    import routes.webhook as wh
+    _save_schedule(minutes=15)
+    u = _user('psid-stepin-stale')
+    _msg(u, 'user', 24 * 60)
+    _msg(u, 'user', 1)
+    assert wh.step_in_sweep(now=NOW_UTC) == []
+    assert wh.step_in_sweep(now=NOW_UTC + timedelta(minutes=15)) == [u.id]
+    assert 15 <= pipeline['gen'][0]['waited_minutes'] <= 15 + wh.STEP_IN_ACTIVE_WINDOW_MINUTES
+    _cleanup(u.id)
+
+
+def test_bot_hours_reply_in_flight_blocks_step_in(client, pipeline, monkeypatch):
+    """Review #2: at a handover a webhook reply may still be generating when
+    the sweep runs — the sweep must not answer the same wait a second time."""
+    from extensions import db
+    from models import Message
+    import routes.webhook as wh
+    _save_schedule(minutes=15)
+    _freeze(monkeypatch, MON_19_UB)                       # bot hours
+    queued = []
+    monkeypatch.setattr(wh, 'enqueue_background', lambda *a, **k: queued.append(a))
+    u = _user('psid-stepin-inflight')
+    db.session.add(Message(facebook_user_id=u.id, sender='user', content='өмнөх асуулт',
+                           created_at=datetime.utcnow() - timedelta(minutes=16)))
+    db.session.commit()
+    _post(client, _inbound('psid-stepin-inflight', 'шинэ асуулт'))
+    assert queued                                          # webhook reply in flight
+    assert wh.step_in_sweep(now=datetime.utcnow()) == []
+    _cleanup(u.id)
+
+
+def test_staff_echo_keeps_a_longer_takeover(client, db_session):
+    """Review #4: one inbox reply must not cut a Хариуцах takeover to 30 min."""
+    from extensions import db
+    from models import FacebookUser
+    u = _user('psid-takeover-long', bot_muted_until=datetime.utcnow() + timedelta(hours=4))
+    payload = {'object': 'page', 'entry': [{'messaging': [{
+        'sender': {'id': 'PAGE_ID'}, 'recipient': {'id': 'psid-takeover-long'},
+        'message': {'is_echo': True, 'text': 'Би хариуцаж байна'}}]}]}
+    _post(client, payload)
+    db.session.expire_all()
+    assert db.session.get(FacebookUser, u.id).bot_muted_until > datetime.utcnow() + timedelta(hours=3)
+    _cleanup(u.id)

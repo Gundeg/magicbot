@@ -59,8 +59,9 @@ from ._registration import (  # noqa: E402
 # Bot working schedule: staff hours, the bot's on/off decision and the
 # step-in safety net all come from one setting (see _schedule).
 from ._schedule import (  # noqa: E402
-    bot_should_reply, describe_next_staff_time, describe_staff_hours,
-    get_bot_schedule, staff_on_duty, ub_now,
+    ALWAYS_ON_STAFF_ETA, bot_should_reply, describe_next_staff_time,
+    describe_staff_hours, get_bot_schedule, staff_available, staff_on_duty,
+    ub_now,
 )
 
 
@@ -1711,8 +1712,9 @@ def _is_off_hours():
     """True when staff are not on duty right now, per the bot schedule (Ботын
     тохиргоо → Ботын ажлын цаг). Drives the 🌙 [OFF-HOURS] tag and the
     off-hours handoff wording. Replaced the office_hours_start/_end pair
-    (2026-11-16) so the bot's hours and its promises can't disagree."""
-    return not staff_on_duty(get_bot_schedule(), ub_now())
+    (2026-11-16) so the bot's hours and its promises can't disagree. In
+    'always_on' (holiday / meeting) mode staff count as unavailable."""
+    return not staff_available(get_bot_schedule(), ub_now())
 
 
 def send_telegram_notification(text):

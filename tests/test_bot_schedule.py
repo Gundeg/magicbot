@@ -162,6 +162,7 @@ def _freeze_ub(monkeypatch, day, hh, mm=0):
 
 def test_off_hours_follows_schedule(app, db_session, monkeypatch):
     import services
+    _save(schedule())
     _freeze_ub(monkeypatch, MON, 10)
     assert services._is_off_hours() is False
     _freeze_ub(monkeypatch, MON, 13, 30)
@@ -170,6 +171,7 @@ def test_off_hours_follows_schedule(app, db_session, monkeypatch):
 
 def test_off_hours_handoff_reply_names_next_staff_time(app, db_session, monkeypatch):
     import services
+    _save(schedule())
     _freeze_ub(monkeypatch, MON, 19)
     reply = services._static_handoff_reply()
     assert 'маргааш 09:00 цагаас' in reply
@@ -188,3 +190,32 @@ def test_waited_line_only_on_step_in(app, db_session):
     assert '15 минут' in volatile
     _, volatile = services.build_system_blocks()
     assert 'минут хүлээсэн' not in volatile
+
+
+# ----------------------------------------------------- final-review fixes
+
+def _save(s):
+    from extensions import db
+    from models import GeneralSetting
+    GeneralSetting.query.filter_by(key=sch.SCHEDULE_KEY).delete()
+    db.session.add(GeneralSetting(key=sch.SCHEDULE_KEY, value=json.dumps(s)))
+    db.session.commit()
+
+
+def test_prompt_time_block_uses_ub_weekday(app, db_session, monkeypatch):
+    """Review #3: 23:30 UTC Sunday is Monday 07:30 in Ulaanbaatar."""
+    from services import _prompt
+    monkeypatch.setattr(sch, '_utcnow', lambda: datetime(2026, 11, 15, 23, 30))
+    assert 'Даваа гариг, 07:30' in _prompt._format_current_time_block()
+
+
+def test_always_on_means_staff_unavailable(app, db_session, monkeypatch):
+    """Review #5: 'Үргэлж ажиллана' is the holiday mode — never promise staff
+    in 10–30 minutes, say they will answer as soon as they are available."""
+    import services
+    _save(schedule(mode='always_on'))
+    _freeze_ub(monkeypatch, MON, 10)                      # normally a staff hour
+    assert services._is_off_hours() is True
+    assert 'боломжтой болмогц' in services._static_handoff_reply()
+    _, volatile = services.build_system_blocks()
+    assert 'боломжтой болмогц' in volatile

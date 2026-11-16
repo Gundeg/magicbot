@@ -435,11 +435,13 @@ def _format_current_time_block():
     CACHING NOTE: the minute in this block changes every request, so it
     lives in the VOLATILE half of the prompt (see build_system_blocks) —
     never move it back into the cached stable half."""
-    now_utc = datetime.utcnow()
-    ub_hour = (now_utc.hour + 8) % 24
-    ub_minute = now_utc.minute
+    # Weekday from UB time, not UTC: from 00:00 to 08:00 UB the UTC date is
+    # still yesterday, and the staff-hours list in the stable half is per
+    # weekday — a UTC weekday made the model promise the wrong day.
+    now_ub = _svc.ub_now()
+    ub_hour, ub_minute = now_ub.hour, now_ub.minute
     days_mn = ('Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба', 'Ням')
-    weekday_mn = days_mn[now_utc.weekday()]
+    weekday_mn = days_mn[now_ub.weekday()]
     if 6 <= ub_hour < 12:
         bucket = 'өглөө (06:00-12:00)'
     elif 12 <= ub_hour < 17:
@@ -755,6 +757,14 @@ F. ӨМНӨХ ХАРИЛЦАА ГҮН:
         f"Хүлээлгэсэнд нэг өгүүлбэрээр товч уучлал гуйгаад асуултад нь шууд хариул.\n"
         if waited_minutes else ''
     )
+    # 'Үргэлж ажиллана' = holiday / staff meeting: the weekly hours in the
+    # stable half don't apply today, so the model must not promise a time.
+    if _svc.get_bot_schedule()['mode'] == 'always_on':
+        waited_block += (
+            "АЖИЛТНЫ БАЙДАЛ: Одоогоор ажилтнууд ажиллахгүй байна (амралт, баяр эсвэл хурал). "
+            f"Ажилтан хэзээ холбогдохыг асуувал тодорхой цаг бүү амла — 'манай ажилтан "
+            f"{_svc.ALWAYS_ON_STAFF_ETA} тантай холбогдоно' гэж хэл.\n"
+        )
 
     volatile = f"""{current_time_block}
 {waited_block}{name_block}{user_state_block}{funnel_rule}
