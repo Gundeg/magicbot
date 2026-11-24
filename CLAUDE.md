@@ -57,8 +57,13 @@ Built fresh per request in `services/_prompt.py:build_system_blocks`, as TWO hal
   consulting, cloud and the training centre in UB, Darkhan and Erdenet, so the bot must know
   all of it) → training snippets (★high first) → team members → business lines (answer /
   refer / paused, each with its own address/phone/email) → services catalog → FAQs →
+  facts-source rule (`FACTS_SOURCE_RULE`: company facts ONLY from the data above; earlier
+  turns, automation/staff messages and the summary may be stale — data wins) →
   professional-accuracy rule → sales playbook → language-quality rule → registration rule
-  (when configured) → ЧУХАЛ ДҮРМҮҮД 1-10. Identical for every customer
+  (when configured) → ЧУХАЛ ДҮРМҮҮД 1-10. **Never hard-code a commercial fact (price,
+  installment partner, licence term, duration, perk) in rule text** — it belongs in the
+  admin data (Ерөнхий мэдээлэл, course descriptions, FAQ, snippets), where admins can see
+  and fix it; `tests/test_facts_grounding.py` guards this. Identical for every customer
   and minute; an admin edit (persona, snippet, FAQ, catalog) just starts a new cache entry.
 - **Volatile (after the breakpoint):** current time block (minute-granular — NEVER move it
   into the stable half) → name / customer-state (lead, prior summary) → funnel rule →
@@ -258,7 +263,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 274 tests. They must all pass before any commit.
+Current count: 276 tests. They must all pass before any commit.
 
 **Reply-quality eval (costs money, opt-in):** `python scripts/eval_replies.py --run
 [--persona file.txt]` runs 6 fixed customer scenarios through the real prompt + Claude and
@@ -293,6 +298,18 @@ The Facebook webhook is the only POST exempt — `@csrf.exempt` in `routes/webho
 | Систем | `/admin/admins` (admin+) |
 
 ## Bug surfaces seen recently — be careful here
+
+- **"The bot sent wrong/old info" may not be the bot (2026-11-24).** Meta Business Suite →
+  Inbox → Automations can message customers too; magicbot never replies to comments (it
+  only sends to a PSID, never a `comment_id`). A private reply labelled **"Automated
+  response"** under "You are responding to a user comment" is a Meta comment-to-message
+  automation — 29 of them (one per keyword spelling, spring texts promising an April class
+  and old price lists) were replaced by ONE evergreen automation "Мэдээлэл авах — чатаар
+  хариулна (2026-11)" that only invites the customer to ask (keywords are case-insensitive
+  "contains", max 10 per automation); the old ones are switched off, not deleted. Their
+  echoes reach the webhook untagged, so they count as staff replies (30-min mute + stored as
+  `sender='staff'`) for customers already in the DB — the echo log line now prints
+  `app_id` to learn how to tell an automation from a person before changing that.
 
 - `services/__init__.py:trigger_handoff` used to auto-mute the bot via `mute_duration_hours`. That's been removed — DO NOT add it back; the bot keeps advisory-replying after a *handoff* until either staff `take_over_chat` OR the human-takeover auto-mute fires (see below).
 - **Human-takeover auto-mute:** every bot-sent Messenger message carries `metadata=BOT_ECHO_TAG` (`services/__init__.py:send_facebook_message`). The webhook handles `message_echoes`: an echo WITHOUT that tag = a human agent replied in the FB Page inbox → `routes/webhook.py:human_takeover_pause` sets `bot_muted_until = now + HUMAN_TAKEOVER_MUTE_MINUTES` (30, env-tunable). Echoes must `continue` before the inbound pipeline (sender is the Page, recipient the customer). Requires the `message_echoes` webhook field enabled in the Meta dashboard — without it FB never sends echoes and this path is inert. NEVER drop the metadata tag: an untagged bot echo would make the bot mute *itself* on every reply. Since 2026-11-16 the untagged echo is also SAVED as `Message(sender='staff')` (`store_staff_reply`, deduped by `mid`, attachments → `[хавсралт]`): the bot's history sees staff turns as the Page's side (`assistant`), the summary labels them "Ажилтан", the conversation view shows a yellow "Ажилтан" bubble. Which staff member sent it is unknowable (echoes don't say).

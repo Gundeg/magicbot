@@ -1566,6 +1566,30 @@ PROFESSIONAL_ACCURACY_RULE = (
 )
 
 
+# Company facts come ONLY from the admin-entered data rendered above it in the
+# prompt — never from the model's general knowledge, and never from earlier
+# turns: the conversation can carry stale facts the bot cannot vouch for (its
+# own older replies, a Meta Business Suite automation's private reply or a
+# staff message saved from an untagged echo, the cross-session summary). Seen
+# 2026-11-24: a spring automation promised an April class start in November.
+# When history and data disagree, the data wins and the bot corrects politely.
+FACTS_SOURCE_RULE = (
+    "БАРИМТЫН ЭХ СУРВАЛЖ — ЗӨВХӨН ДЭЭРХ МЭДЭЭЛЭЛ:\n"
+    "Компанийн тухай баримтыг — үнэ, хөнгөлөлт, хуваан төлөх нөхцөл, "
+    "урамшуулал, ангийн огноо, хугацаа, цаг, хаяг, утас, линк, сертификат "
+    "ба license-ийн нөхцөл — ЗӨВХӨН энэ зааврын дээрх хэсгүүдээс (ангийн "
+    "жагсаалт, компанийн танилцуулга, ерөнхий мэдээлэл, нэмэлт тайлбар, "
+    "баг, үйлчилгээ, түгээмэл асуулт) ав. Тэнд байхгүй баримтыг ерөнхий "
+    "мэдлэг, таамаг эсвэл өмнөх ярианаас бүү зохио — ажилтан тодруулж "
+    "хэлнэ гэж хэл (knowledge_gap).\n"
+    "Өмнөх ярианд (чиний өмнөх хариулт, хуудаснаас илгээсэн автомат "
+    "мессеж, ажилтны мессеж, өмнөх ярианы хураангуй) бичигдсэн үнэ, огноо, "
+    "нөхцөл хуучирсан байж болно. Тэр нь дээрх мэдээлэлтэй зөрвөл ДЭЭРХ "
+    "МЭДЭЭЛЛИЙГ баримталж, хэрэглэгчид эелдгээр засч хэл (жишээ: "
+    "\"Шинэчлэгдсэн мэдээллээр ...\")."
+)
+
+
 HANDOFF_ADVISORY_RULE = (
     "ХАНДОФФ ХҮЛЭЭЛТИЙН ГОРИМ (advisory):\n"
     "Энэ хэрэглэгч аль хэдийн ажилтанд дамжуулагдсан. Ажилтан удахгүй "

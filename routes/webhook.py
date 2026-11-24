@@ -474,9 +474,15 @@ def webhook():
                     # is the Page, recipient is the customer).
                     if msg.get('is_echo'):
                         is_bot_echo = msg.get('metadata') == BOT_ECHO_TAG
+                        # app_id = the app that sent it. Logged to learn which
+                        # id Meta Business Suite automations (comment-to-
+                        # message, away message) use vs. a person in the Page
+                        # inbox: today every untagged echo counts as staff, so
+                        # an automation reply to a known customer mutes the bot.
                         logger.info(
-                            "Echo: recipient=%s is_bot=%s text=%r",
-                            recipient_id, is_bot_echo, (msg.get('text') or '')[:40],
+                            "Echo: recipient=%s is_bot=%s app_id=%s text=%r",
+                            recipient_id, is_bot_echo, msg.get('app_id'),
+                            (msg.get('text') or '')[:40],
                         )
                         if not is_bot_echo:
                             # Human agent replied in the Page inbox → pause the
