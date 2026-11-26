@@ -149,7 +149,12 @@ def dashboard():
     last_message_at = latest_message.created_at if latest_message else None
     telegram_ready = bool(os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()) and bool(get_telegram_chat_ids())
     from services._schedule import bot_status
+    from services._spend import budget_usd, month_spend_usd
     health = {
+        # Estimated Claude spend this UTC month vs MONTHLY_BUDGET_USD (the
+        # Console limit) — shown to admins so a limit stop is never a surprise.
+        'spend_usd': month_spend_usd(),
+        'budget_usd': budget_usd(),
         # Staff can't open Ботын тохиргоо, so the dashboard tells them whether
         # the bot is answering right now or it's their shift.
         'bot_status': bot_status(),

@@ -249,6 +249,17 @@
                     <span class="label">Claude API түлхүүр (Anthropic)</span>
                     <span class="detail">{{ 'Тогтоосон' if health.anthropic_ready else 'Тогтоогоогүй' }}</span>
                 </div>
+                {% if current_user.role in ('admin', 'super_admin') %}
+                {% set spend_ratio = (health.spend_usd / health.budget_usd) if health.budget_usd else 0 %}
+                <div class="health-row">
+                    <span class="dot {{ 'err' if spend_ratio >= 0.95 else 'warn' if spend_ratio >= 0.8 else 'ok' if health.budget_usd else 'info bg-brand' }}"></span>
+                    <span class="label">Claude API зардал (энэ сар, тооцоо)</span>
+                    <span class="detail">
+                        ${{ '%.2f'|format(health.spend_usd) }}
+                        {% if health.budget_usd %}/ ${{ '%.0f'|format(health.budget_usd) }} төсөв{% else %}· төсөв тогтоогоогүй (MONTHLY_BUDGET_USD){% endif %}
+                    </span>
+                </div>
+                {% endif %}
                 <div class="health-row">
                     <span class="dot {{ 'ok' if health.facebook_token_ready else 'err' }}"></span>
                     <span class="label">Facebook Page access token</span>

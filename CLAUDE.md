@@ -69,9 +69,14 @@ Built fresh per request in `services/_prompt.py:build_system_blocks`, as TWO hal
   into the stable half) → name / customer-state (lead, prior summary) → funnel rule →
   handoff-mode rule → session rule (ЭНЭ ЯРИАНЫ ТӨЛӨВ) → a one-line brevity reminder.
 `build_system_prompt` returns the two joined for tests/scripts. `REPLY_CACHE_TTL` (`5m`
-default / `1h`) picks the cache lifetime; `usage.cache_read_input_tokens` in the `reply
-usage` log line shows hits. Mongolian Cyrillic is ~1 token per character, so the stable
-half alone is ~14K tokens — caching it is the single biggest cost lever.
+default / `1h`) picks the cache lifetime; the `reply usage` log line shows `cache_read`
+(hit) and `cache_write` (miss — the whole stable half re-written at 1.25x input, 2x for
+`1h`). **Measured on prod 2026-11-25: the stable half is ~26.8K tokens** (~38K chars;
+two thirds admin data — snippets 6.1K chars, FAQ 4K, persona 3.4K, business lines 3.4K —
+one third code rules), and with the 5-minute TTL 60% of replies missed the cache; those
+writes were ~80% of the bill. `/admin/training/preview` returns the live prompt — measure
+from it, never quote a size from these docs. Rule of thumb on Sonnet 5.5 + 1h cache:
+every ~1K tokens (~1,400 chars) of stable prompt costs ~$1.3 a month.
 
 Registration is per-course: each course's `CourseLink` (description "Сургалтанд сууя,
 бүртгүүлье") is listed under it, and the website (`business_website_url`) is the fallback
@@ -92,10 +97,14 @@ when a course has none. The clarify-course rule lives in the ★high `Сурга
   credential (OpenAI + Gemini were retired 2026-11-02). The SDK does NOT fail at
   construction without a key — the module logs a loud boot warning instead, and the
   dashboard's "Холболтын төлөв" card shows the key status.
-  - **Customer replies** → `REPLY_MODEL`, default **`claude-opus-5-5`**. Mongolian
-    paraphrase / Latin-script / indirect intent is where the big tier earns its cost
-    (same lesson as the earlier OpenAI/Gemini bake-offs). `REPLY_MODEL=claude-sonnet-5-5`
-    trades some quality for ~half the cost.
+  - **Customer replies** → `REPLY_MODEL`, code default `claude-opus-5-5`. **Prod is set
+    to `REPLY_MODEL=claude-sonnet-5-5` + `REPLY_CACHE_TTL=1h` (Gundeg's decision,
+    2026-11-26):** Opus + 5-minute cache cost ~$0.10 a reply (~$180/month projected vs
+    $30-40 on OpenAI/Gemini) and hit the Console spend limit twice. On the reply eval all
+    three tiers scored 28/29; read side by side, Sonnet was closest to Opus, while Haiku
+    5.5 (~40x cheaper) gave thinner registration replies and mixed English words in.
+    Any model / effort / prompt-size change needs a monthly cost projection against the
+    previous bill BEFORE it ships (lessons.md, 2026-11-25).
   - **Background jobs** (topic classifier, page comments, FAQ clustering) →
     `BACKGROUND_MODEL`, default **`claude-haiku-5-5`** — cheap, high-volume.
   - **THINKING / EFFORT GOTCHA:** current Claude models think *adaptively* and Opus 5.5
@@ -146,6 +155,22 @@ when a course has none. The clarify-course rule lives in the ★high `Сурга
   earlier conversation written by `refresh_user_summary` (BACKGROUND_MODEL) when a
   customer returns after a gap (`session_state in ('gap','returning')`), injected as
   "ӨМНӨХ ЯРИАНЫ ХУРААНГУЙ" and shown in the admin conversation side panel.
+
+## API spend tracking + limit warning (2026-11-26)
+
+`services/_spend.py`. The Console monthly spend limit is a hard stop (every reply fails
+until the 1st, 00:00 UTC) — it took the bot down on 2026-11-12 and 2026-11-25.
+`generate_bot_response` passes each reply's `usage` to `record_spend`, which prices it
+(`PRICES` table; cache writes at 1.25x / 2x input; an unknown model is priced as Opus so
+the estimate never runs low) and adds whole micro-dollars to the GeneralSetting row
+`api_spend_micros_YYYY-MM` (UTC month) with ONE atomic SQL UPDATE, so two workers never
+lose an increment. When the month crosses `SPEND_ALERT_PERCENT` (80) of
+`MONTHLY_BUDGET_USD` — set it to the Console limit; unset = track only — staff get ONE
+Telegram warning a month, claimed by INSERTing `api_spend_alerted_YYYY-MM` (unique key)
+BEFORE sending. Admins see "Claude API зардал" on the dashboard's Холболтын төлөв card.
+It is an ESTIMATE: only replies are counted (Haiku background jobs are <1%), and local
+evals/scripts on the same Anthropic org never pass through it — the Console Usage page
+is the truth. Update `PRICES` when the model list or prices change.
 
 ## Bot working schedule + step-in (2026-11-16)
 
@@ -263,7 +288,7 @@ python -m pytest -q                # full suite
 python -m pytest tests/test_X.py -v --tb=short  # single file, verbose
 ```
 
-Current count: 276 tests. They must all pass before any commit.
+Current count: 290 tests. They must all pass before any commit.
 
 **Reply-quality eval (costs money, opt-in):** `python scripts/eval_replies.py --run
 [--persona file.txt]` runs 6 fixed customer scenarios through the real prompt + Claude and
@@ -358,7 +383,7 @@ or send path is broken". Full description: OPERATIONS.md §0.
 If it is all green, the outage is per-conversation (mute / takeover / handoff),
 not global. Otherwise, the manual checks:
 
-1. **Customers getting the canned apology** ("Уучлаарай, түр зуурын саатал...") → the **Claude API** is failing, NOT Facebook (apology delivered = Send API fine). Render logs query `Error generating response` shows the exception: `You have reached your specified API usage limits` (400) = the Console's monthly spend limit → raise it at console.anthropic.com → Settings → Limits, or the bot stays down until the 1st of next month (the 2026-11-12 → 11-16 outage: 4 days, 110 customers got the apology, and no alert fired because `_is_account_error` didn't know this wording); `credit balance is too low` (400) = account out of prepaid credit → instant recovery on top-up at console.anthropic.com → Plans & Billing (the 2026-06-11 outage was this failure mode on the old provider); `authentication_error` (401) = bad/revoked `ANTHROPIC_API_KEY`. The deduplicated Telegram alert (`alert_model_failure`, cooldown `MODEL_ALERT_COOLDOWN_HOURS`=6) fires on exactly those account-level errors; a `429` rate limit or `529` overloaded degrades to the apology WITHOUT paging (transient, self-heals). Also scan the boot log for `ANTHROPIC_API_KEY is not set`, and query `Empty reply from` — that is thinking exhausting `REPLY_MAX_TOKENS`, fix by raising it.
+1. **Customers getting the canned apology** ("Уучлаарай, түр зуурын саатал...") → the **Claude API** is failing, NOT Facebook (apology delivered = Send API fine). Render logs query `Error generating response` shows the exception: `You have reached your specified API usage limits` (400) = the Console's monthly spend limit → raise it at console.anthropic.com → Settings → Limits, or the bot stays down until the 1st of next month (the 2026-11-12 → 11-16 outage: 4 days, 110 customers got the apology, and no alert fired because `_is_account_error` didn't know this wording; it recurred 2026-11-25 because the Opus bill outgrew the limit — see "API spend tracking", which now warns at 80% first); `credit balance is too low` (400) = account out of prepaid credit → instant recovery on top-up at console.anthropic.com → Plans & Billing (the 2026-06-11 outage was this failure mode on the old provider); `authentication_error` (401) = bad/revoked `ANTHROPIC_API_KEY`. The deduplicated Telegram alert (`alert_model_failure`, cooldown `MODEL_ALERT_COOLDOWN_HOURS`=6) fires on exactly those account-level errors; a `429` rate limit or `529` overloaded degrades to the apology WITHOUT paging (transient, self-heals). Also scan the boot log for `ANTHROPIC_API_KEY is not set`, and query `Empty reply from` — that is thinking exhausting `REPLY_MAX_TOKENS`, fix by raising it.
 2. **Render logs** (`r=1h`, query `Send API`) → `OAuthException code:190` = bad FB token (`subcode:463` = expired; `subcode:460` = FB account password changed / session invalidated). Regen via Graph API Explorer — **and it MUST be a Page token, not the default User token.** The Explorer defaults "User or Page" to **User Token**; copy that and every send fails `GraphMethodException code:100 subcode:33 "Object with ID 'me' does not exist"` (the bot sends via `me/messages`, so `me` must resolve to the Page). Fix: set "User or Page" → **Page Access Tokens → Magic Financial Group**, extend to long-lived, then update `FACEBOOK_ACCESS_TOKEN` on the **magicbot** service. Verify in the Render shell: `python -c "import os,requests;print(requests.get('https://graph.facebook.com/v18.0/me',params={'access_token':os.environ['FACEBOOK_ACCESS_TOKEN']}).text)"` → must return `Magic Financial Group`, not a person's name. Full walk-through: `Facebook Page Access Token хэрхэн авах тухай дэлгэрэнгүй заавар.md` §5.
 3. **Render logs** (`r=1h`, query `database is locked`) → SQLite contention. Confirm `app.py:88` WAL/busy_timeout block is intact.
 4. **Render logs** (`r=1h`, query `FB user profile`) → `status=400 GraphMethodException` = the BAUPA restriction, not a bug.

@@ -37,6 +37,23 @@ Mongolian". If foreign-language customers appear, relax it to "Mongolian by
 default; answer in the customer's language when they write in one" — a
 one-line prompt change + the two eval scenarios.
 
+## 2026-11-25 — A model switch needs a cost projection against the old bill
+
+**What happened:** the 2026-11-02 move to Claude put every reply on Opus 5.5 for
+Mongolian quality, with no monthly cost estimate. The bill went from $30-40 a
+month (OpenAI/Gemini) to ~$100 in under a month, and the Console spend limit
+stopped the bot twice (11-12, 11-25). Gundeg: "арай ч дээ". Measured on
+2026-11-25: the cached prompt had grown to ~26.6K tokens (CLAUDE.md still said
+14K), 60% of replies missed the 5-minute cache, and those cache WRITES were
+~80% of the cost (~$0.10 a reply, ~60 replies a day).
+
+**Rule:** before recommending or shipping a model, provider, effort or prompt-size
+change, project the monthly cost from real prod volume (replies/day x tokens per
+reply, cache writes included at their write price) and show it to Gundeg next to
+the previous monthly bill, BEFORE merging. Re-measure the prompt size and the
+cache hit rate from the `reply usage` log whenever the admin data grows — never
+quote a token count from docs.
+
 ## 2026-11-16 — Drive the Chrome window Gundeg is actually looking at
 
 **What happened:** two Chrome browsers were connected to the extension; I opened

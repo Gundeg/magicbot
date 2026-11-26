@@ -1200,6 +1200,8 @@ def get_sound_alerts_enabled():
 # _prompt.py uses lazy `from services import get_setting` inside its functions,
 # and those names must already exist in services.__init__'s namespace by the
 # time _prompt.py is first loaded.
+from services._spend import record_spend  # noqa: E402
+
 from services._prompt import (  # noqa: E402
     SESSION_RULES,
     FUNNEL_RULES,
@@ -1409,13 +1411,17 @@ def generate_bot_response(user_message, conversation_history,
         usage = getattr(response, 'usage', None)
         if usage is not None:
             # One line per reply so Render logs (query `reply usage`) give a
-            # cheap cost/volume picture without a dashboard.
+            # cheap cost/volume picture. cache_write matters most: a cache
+            # miss re-writes the whole stable half at 1.25-2x the input price,
+            # and those writes were ~80% of the bill on 2026-11-25.
             logger.info(
-                "reply usage model=%s in=%s out=%s cache_read=%s",
+                "reply usage model=%s in=%s out=%s cache_read=%s cache_write=%s",
                 REPLY_MODEL, getattr(usage, 'input_tokens', None),
                 getattr(usage, 'output_tokens', None),
                 getattr(usage, 'cache_read_input_tokens', None),
+                getattr(usage, 'cache_creation_input_tokens', None),
             )
+            record_spend(REPLY_MODEL, usage)
 
         # If the model chose to defer (it lacks the info, the customer asked
         # for a person, or complained), translate that structured tool call
